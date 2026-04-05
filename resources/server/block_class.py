@@ -8,16 +8,16 @@ class Block:
     _texture_path = None          # 图片文件路径
     _texture = None      # 原始 Surface（懒加载）
     _last_scaled = -1
+    solid = True
 
     def __init__(self):
         # 方块应该带有的属性
-        pass
+        self.nbt = {}
 
     @classmethod
     def get_texture(cls, size):
         if cls._texture is None:
             cls._texture = pygame.image.load(cls._texture_path)
-            print(type(cls._texture))
         if size != cls._last_scaled:
             cls._texture = pygame.transform.scale(cls._texture, (size, size))
         return cls._texture
@@ -33,3 +33,9 @@ class Block:
 
     def on_left_click(self):
         pass
+
+    def to_dict(self):
+        return {
+            'id': self.block_id,
+            'nbt': self.nbt
+        }
