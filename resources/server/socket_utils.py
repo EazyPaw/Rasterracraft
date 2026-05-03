@@ -4,6 +4,6 @@ def recv_exact(sock, n):
     while len(data) < n:
         chunk = sock.recv(n - len(data))
         if not chunk:  # 连接关闭
-            raise ConnectionError("Disconnected accidentally")
+            raise ConnectionError("Disconnected")
         data += chunk
     return data

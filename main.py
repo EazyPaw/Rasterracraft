@@ -1,11 +1,26 @@
 import logging
-import msgpack_numpy as m
+import colorlog
 
 from resources.client import client_main
 
 if __name__ == '__main__':
-    m.patch()
-    logging.basicConfig(level=logging.DEBUG)
+    handler = colorlog.StreamHandler()
+    handler.setFormatter(colorlog.ColoredFormatter(
+        '%(log_color)s[%(asctime)s %(levelname)s] - %(message)s',
+        datefmt='%H:%M:%S',
+        log_colors={
+            'DEBUG': 'light_black',
+            'INFO': 'white',
+            'WARNING': 'yellow',
+            'ERROR': 'light_red',
+            'CRITICAL': 'red,bg_white',
+        }
+    ))
+
+    logger = logging.getLogger()
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+
     client = client_main.Client()
     logging.info("Client started")
     client.start()

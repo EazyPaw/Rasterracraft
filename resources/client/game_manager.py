@@ -3,41 +3,71 @@ import pygame
 
 from typing import TYPE_CHECKING
 
+from resources.server.blocks import AIR, STONE
+
 if TYPE_CHECKING:
     from resources.client.client_main import Client
 
 
-def tick(client: 'Client'):
-    handle_keyboard(client)
-    sync_player_camera(client)
-    client.client_player.handle_gravity()
-    client.client_player.motion_update()
+class GameManager:
+    """游戏管理器，负责处理游戏主循环、输入处理和玩家状态同步"""
 
-def handle_keyboard(client: 'Client'):
-    keys = pygame.key.get_pressed()
+    def __init__(self, client: 'Client'):
+        self.client = client
+        self.running = True
 
-    for key, action in client.key_map.items():
-        if keys[key]:
-            action()
+    def tick(self):
+        """执行一次游戏逻辑更新"""
+        self.handle_key_pressed()
+        self.sync_player_camera()
+        self.client.client_player.handle_gravity()
+        self.client.client_player.move_update()
 
-def sync_player_camera(client: 'Client'):
-    client.render.camera.move_to(
-        client.client_player.x,
-        -client.client_player.y
-    )
+    def handle_key_pressed(self):
+        """处理键盘输入"""
+        keys = pygame.key.get_pressed()
+        mouse_button = pygame.mouse.get_pressed()
+        for key, action in self.client.key_map.items():
+            if type(key) == str: continue
+            if keys[key]:
+                action()
+        if mouse_button[0]:
+            x, y = self.client.client_player.choosing_block
+            self.client.key_map["mouse_left"](self.client.client_world.get_block(x, y, 0))
+            self.client.hold_mouse_buttons[0] = True
+        else:
+            self.client.hold_mouse_buttons[0] = False
+        if mouse_button[2]:
+            x, y = self.client.client_player.choosing_block
+            self.client.key_map["mouse_right"](self.client.client_world.get_block(x, y, 0))
+            self.client.hold_mouse_buttons[2] = True
+        else:
+            self.client.hold_mouse_buttons[2] = False
 
-def start_inner_game(client: 'Client'):
 
-    next_time = time.perf_counter()
+    def sync_player_camera(self):
+        """同步玩家位置到相机"""
+        self.client.render.camera.move_to(
+            self.client.client_player.x,
+            self.client.client_player.y
+        )
 
-    while True:
+    def start_game_loop(self):
+        """启动游戏主循环"""
+        next_time = time.perf_counter()
 
-        interval = 1.0 / client.rate
+        while self.running:
+            interval = 1.0 / self.client.rate
 
-        tick(client)
+            self.tick()
 
-        next_time += interval
-        sleep_time = next_time - time.perf_counter()
-        if sleep_time > 0:
-            time.sleep(sleep_time)
+            next_time += interval
+            sleep_time = next_time - time.perf_counter()
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    def stop(self):
+        """停止游戏循环"""
+        self.running = False
+
 
