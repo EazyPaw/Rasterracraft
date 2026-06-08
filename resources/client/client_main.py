@@ -4,17 +4,16 @@ import struct
 import threading
 import traceback
 
-import miniaudio
 import msgpack
 import pygame
 
 from resources.client import render, client_world
 from resources.client.client_packets import decode_packet, encode_packet
-from resources.client.resources_loader import ResourcesManager
-from resources.server.socket_utils import recv_exact
 from resources.client.game_manager import GameManager
-from resources.client.main_player import ClientPlayer
+from resources.client.client_player import ClientPlayer
+from resources.client.resources_loader import ResourcesManager
 from resources.server.server_main import Server
+from resources.server.utils import recv_exact
 
 
 class Client:
@@ -25,9 +24,9 @@ class Client:
         self.render = render.Render(self)
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket_thread_running = True
-        self.socket_thread = threading.Thread(target=self.start_socket)
+        self.socket_thread = threading.Thread(target=self.start_socket, name="SocketThread")
         self.socket_thread.daemon = True
-        self.server_thread = threading.Thread(target=self.start_server)
+        self.server_thread = threading.Thread(target=self.start_server, name="ServerThread")
         self.server_thread.daemon = True
         self.server = None
         self.in_game = True
@@ -37,17 +36,22 @@ class Client:
         self.rate = 20
         self.client_player = ClientPlayer(self)
         self.game_manager = GameManager(self)
-        self.game_thread = threading.Thread(target=self.game_manager.start_game_loop)
+        self.game_thread = threading.Thread(target=self.game_manager.start_game_loop, name="InGameThread")
         self.game_thread.daemon = True
-        self.audio_device = miniaudio.PlaybackDevice()
         self.hold_mouse_buttons = [False, False, False]
-        self.key_map = {
+        self.hold_key_map = {
             "mouse_left": self.client_player.game_mode.left_click_on_block,
             "mouse_right": self.client_player.game_mode.right_click_on_block,
             pygame.K_d: self.client_player.move_right,
             pygame.K_a: self.client_player.move_left,
             pygame.K_w: self.client_player.jump,
-            pygame.K_SPACE: self.client_player.jump
+            pygame.K_SPACE: self.client_player.jump,
+            pygame.K_LSHIFT: self.client_player.handle_shift,
+            pygame.K_s: self.client_player.handle_shift,
+        }
+        self.key_map = {
+            pygame.K_t: self.render.debug_mode,
+            pygame.K_e: self.client_player.game_mode.open_inventory,
         }
         self.game_thread.start()
 
@@ -68,7 +72,7 @@ class Client:
                 # logging.debug(f"Received {msg_len} data from server")
                 obj_dict = msgpack.unpackb(msg_body, raw=False)
                 decode_packet(obj_dict, self)
-            except (ConnectionAbortedError, ConnectionResetError, OSError) as e:
+            except (ConnectionAbortedError, ConnectionResetError, OSError):
                 # socket 被关闭或连接中断，正常退出
                 logging.info(f"Socket connection closed.")
                 break
@@ -80,27 +84,30 @@ class Client:
                 logging.error(traceback.format_exc())
                 break
 
-    def sent_packet(self, obj, obj_type = None, *args):
+    def sent_packet(self, obj, obj_type = None, *args) -> bool:
         """
         发送数据包到服务器
-        
+
         参数：
         - obj: 要编码的对象
         - obj_type: 包类型
         - *args: 额外参数（如 location）
         """
         try:
+            # if obj_type == "BreakBlock":
+            #     location: Location = obj.location
+            #     print(get_light_levels_at(self.client_world.light_map, location.x, location.y))
             packet_dict = encode_packet(obj, obj_type, list(args))
-            
+
             # 检查是否编码成功
             if not packet_dict:
                 logging.warning(f"Failed to encode packet: obj={type(obj)}, type={obj_type}")
                 return False
-            
+
             packet_data = msgpack.packb(packet_dict)
             length = len(packet_data)
             packet = struct.pack('>I', length) + packet_data
-            
+
             # 确保发送所有数据（TCP send 可能只发送部分数据）
             total_sent = 0
             while total_sent < len(packet):
@@ -108,7 +115,7 @@ class Client:
                 if sent == 0:
                     raise ConnectionError("Socket connection broken")
                 total_sent += sent
-            
+
             # logging.debug(f"Sent {obj_type} packet ({length} bytes)")
             return True
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as e:
@@ -124,8 +131,11 @@ class Client:
         self.render.start()
 
     def start_game(self):
-        self.server = Server(False)
-        self.server_thread.start()
+        try:
+            self.server = Server(False, self)
+            self.server_thread.start()
+        except OSError:
+            logging.error("find a local server, trying to join")
         self.socket_thread.start()
 
     def start_server(self):
@@ -137,7 +147,7 @@ class Client:
         self.socket_thread_running = False
 
         self.is_shutting_down = True
-        
+
         # 2. 关闭 socket（这会中断阻塞的 recv() 调用）
         try:
             self.client_sock.shutdown(socket.SHUT_RDWR)
@@ -147,34 +157,34 @@ class Client:
             self.client_sock.close()
         except Exception:
             pass
-        
+
         # 3. 等待 socket 线程结束（现在它会快速退出）
         if self.socket_thread.is_alive():
             self.socket_thread.join(timeout=2.0)
             if self.socket_thread.is_alive():
                 logging.warning("Socket thread did not exit cleanly")
-        
+
         # 4. 停止游戏循环
         self.game_manager.running = False
-        
+
         # 5. 等待游戏线程
         if self.game_thread.is_alive():
             self.game_thread.join(timeout=2.0)
-        
+
         # 6. 关闭服务器
         if self.server:
             try:
                 self.server.close_server()
             except Exception:
                 pass
-        
+
         # 7. 清理音频设备
         if hasattr(self, 'audio_device'):
             try:
                 self.audio_device.stop()
             except Exception:
                 pass
-        
+
         # 8. 退出 pygame
         pygame.quit()
 

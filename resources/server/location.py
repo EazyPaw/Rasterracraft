@@ -16,3 +16,30 @@ def decide_x_or_loc(x_loc: int | Location, y: int = None, z: int = None):
         return x_loc.x, x_loc.y, x_loc.z
     else:
         return x_loc, y, z
+
+class Vector:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __add__(self, other):
+        return Vector(self.x + other.x, self.y + other.y)
+
+    def __sub__(self, other):
+        return Vector(self.x - other.x, self.y - other.y)
+
+    def __mul__(self, other):
+        if isinstance(other, Vector):
+            return self.x * other.x + self.y * other.y
+        else:
+            return Vector(self.x * other, self.y * other)
+
+    def add(self, x, y):
+        self.x += x
+        self.y += y
+
+    def set(self, x=None, y=None):
+        if x:
+            self.x = x
+        if y:
+            self.y = y

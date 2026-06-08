@@ -1,23 +1,24 @@
 import logging
 import socket
 import struct
-import time
 import threading
+import time
 import traceback
 from typing import Any
 
 import msgpack
+import numpy as np
 
+import resources.server.generator as generator
 from resources.server.commands import CommandExecutor
-from resources.server.generator import get_block_origin
-from resources.server.server_packets import encode_packet, decode_packet
 from resources.server.player import Player
-from resources.server.socket_utils import recv_exact
+from resources.server.server_packets import encode_packet, decode_packet
+from resources.server.utils import recv_exact
 from resources.server.world_class import World, WorldAttribute
 
 
 class Server:
-    def __init__(self, integrated = False):
+    def __init__(self, integrated = False, client = None):
         self.running = True
         self.main_world_id = "overworld"
         self.worlds: dict[str, World] = {}
@@ -29,11 +30,12 @@ class Server:
         self.max_players = 20
         self.integrated = integrated
         self.initialized = False
-        self.input_thread = threading.Thread(target=self.check_input)
+        self.input_thread = threading.Thread(target=self.check_input, name="Command thread")
         self.input_thread.daemon = True
         self.commands_error_traceback = True
         self.input_thread.start()
         self.command_executor = CommandExecutor(self)
+        self.client = client
 
     def check_input(self):
         if self.integrated:
@@ -54,14 +56,14 @@ class Server:
     class SocketServer:
         def __init__(self, server):
             self.server = server
+            self.running = True
             self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_sock.bind(("0.0.0.0", 14525))
             self.server_sock.listen(5)
             self.connections: dict[Player, tuple[socket.socket, Any]] = {}
-            self.thread = threading.Thread(target=self.run)
+            self.thread = threading.Thread(target=self.run, name="SocketServerThread")
             self.thread.daemon = True
             self.thread.start()
-            self.running = True
 
         def run(self):
             logging.info("Socket server started.")
@@ -73,7 +75,7 @@ class Server:
                 self.connections[player] = (client_sock, client_addr)
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
-                client_thread = threading.Thread(target=self.handle_client, args=(client_sock, client_addr, player))
+                client_thread = threading.Thread(target=self.handle_client, args=(client_sock, client_addr, player), name="SocketClientThread")
                 client_thread.daemon = True
                 client_thread.start()
 
@@ -154,7 +156,7 @@ class Server:
         logging.info("Initializing server")
         self.worlds["overworld"] = World(self
                                          ,"overworld"
-                                         , get_block_origin
+                                         , generator.bedrock_flat_generator
                                          , WorldAttribute()
                                          , 0)
         self.run()
@@ -163,8 +165,35 @@ class Server:
         self.load_chunks()
 
     def send_client_socket(self, player: Player, obj, obj_type = None, args = None) -> bool:
+        """
+        发送数据包至客户端
+        :param player: 发送的玩家
+        :param obj: 发送的对象
+        :param obj_type: 发送数据包的类型（可不填写）
+        :param args: 参数（可不填写）
+        :return:
+        """
+
         try:
-            packet_data = msgpack.packb(encode_packet(obj, obj_type, args))
+            encoded_obj = encode_packet(obj, obj_type, args)
+            
+            # 辅助函数：将嵌套结构中的 numpy 类型转换为 python 原生类型
+            def convert_numpy_types(o):
+                if isinstance(o, np.integer):
+                    return int(o)
+                elif isinstance(o, np.floating):
+                    return float(o)
+                elif isinstance(o, np.ndarray):
+                    return o.tolist()
+                elif isinstance(o, dict):
+                    return {k: convert_numpy_types(v) for k, v in o.items()}
+                elif isinstance(o, (list, tuple)):
+                    return [convert_numpy_types(i) for i in o]
+                return o
+
+            clean_obj = convert_numpy_types(encoded_obj)
+            packet_data = msgpack.packb(clean_obj)
+            
             length = len(packet_data)
             self.socket_server.connections[player][0].send(
                 struct.pack('>I', length) + packet_data

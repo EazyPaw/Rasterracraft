@@ -1,5 +1,7 @@
 import uuid
 
+from resources.server.location import Vector
+
 
 class Entity:
     def __init__(self, x, y, world):
@@ -7,12 +9,12 @@ class Entity:
         self.x = x
         self.y = y
         self.world = world
-        self.motion_x = 0
-        self.motion_y = 0
+        self.motion = Vector(0, 0)
         self.width = 1
         self.height = 1
         self.speed = 0.1
         self.gravity = 0.08
+        self.drag_vertical = 0.98  # 垂直方向阻力，每帧保留 98% 的速度
         self.jump_height = 1
         self.max_health = 10
         self.health = self.max_health

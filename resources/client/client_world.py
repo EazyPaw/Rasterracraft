@@ -21,10 +21,10 @@ class ClientWorld:
         chunk_array = np.full((16, self.y_max, 2), AIR(), dtype=Block)
         logging.debug(f"Loading chunk {rx}")
         for key, value in chunk.items():
-            x, y, z = key.split(",")
-            x, y, z = int(x), int(y), int(z)
+            x, y, z = map(int, key.split(","))
+            world_x = rx * 16 + x  # 计算世界绝对坐标
             block = get_block_by_id(value["id"])
-            block.location = Location(self, x, y, z)
+            block.location = Location(self, world_x, y, z)  # 使用绝对坐标
             chunk_array[x][y][z] = block
         self._regions[rx] = chunk_array
 
@@ -35,6 +35,20 @@ class ClientWorld:
             x, y = int(x), int(y)
             light_array[x][y] = value
         self.light_map[rx] = light_array
+
+    def update_lights(self, rx: int, light_map: dict[str, int]):
+        """
+        增量更新光照数据（只更新变化的部分）
+        """
+        # 如果该区块的光照数组不存在，先创建
+        if rx not in self.light_map:
+            self.light_map[rx] = np.full((16, self.y_max), 0, dtype=np.uint8)
+        
+        light_array = self.light_map[rx]
+        for key, value in light_map.items():
+            x, y = key.split(",")
+            x, y = int(x), int(y)
+            light_array[x][y] = value
 
     def unload_chunk(self, x: int):
         del self._regions[x]
@@ -60,12 +74,18 @@ class ClientWorld:
         chunk[rela_x, y, z] = block
 
     def break_block(self,x_loc: int | Location, y: int = None, z: int = None):
+        """
+        破坏客户端世界的方块
+        :param x_loc: 可传入 x 或 Location
+        :param y: 传入 Location 则不填写
+        :param z: 传入 Location 则不填写
+        :return:
+        """
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block = self.get_block(x, y, z)
         if type(block) == AIR: return
         block.on_break()
-        # logging.debug(f"Breaking block {block.location}")
-
+        self.play_sound(block.break_sound, block.location)
         self.set_block(AIR(), x, y, z)
 
     def play_sound(self, sound_id: str, x_loc: int | Location = None, y: int = None, z: int = None):

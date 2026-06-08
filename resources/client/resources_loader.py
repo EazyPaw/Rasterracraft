@@ -1,27 +1,177 @@
+import logging
+
 import pygame
-import miniaudio
 import json
 import random
 import os
+import numpy as np
+from collections import OrderedDict
 
 class ResourcesManager:
     def __init__(self):
         self.textures = {}
         self.sounds = {}          # 存储解析后的音效信息
         self.sound_objects = {}   # 缓存已加载的 pygame.mixer.Sound 对象
+        self.stained_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
+        self.MAX_STAINED_CACHE = 512  # 染色缓存上限
+        
 
-    def get_texture_img(self, key: str):
+        missing_surface = pygame.Surface((16, 16), pygame.SRCALPHA)
+        missing_surface.fill((0, 0, 0, 255))
+        for x in range(8, 16):
+            for y in range(0, 8):
+                missing_surface.set_at((x, y), (128, 0, 128, 255))
+        for x in range(0, 8):
+            for y in range(8, 16):
+                missing_surface.set_at((x, y), (128, 0, 128, 255))
+        self.missing_texture = missing_surface.convert()
+
+    def get_texture_img(self, key: str, cft=False):
+        """
+        获取指定纹理的 Surface 对象。自带缓存，可直接调用
+        :param cft: 是否切除材质中完全透明的多余边缘
+        :param key: 纹理的键，格式为 "类别.子路径.文件名"
+                   例如："blocks.stone" -> assets/minecraft/textures/blocks/stone.png
+                        "gui.sprites.hud.hotbar" -> assets/minecraft/textures/gui/sprites/hud/hotbar.png
+        :return: Surface 对象，如果没有找到则返回缺失纹理
+        """
+        # 检查缓存
         if key in self.textures:
             return self.textures[key]
-        path = key.split('.')
-        if path[0] == 'blocks':
-            texture = pygame.image.load(f'assets/minecraft/textures/blocks/{path[1]}.png').convert_alpha()
+
+        # 解析路径
+        parts = key.split('.')
+        if len(parts) < 2:
+            logging.warning(f"Invalid texture key format: '{key}'")
+            return self.missing_texture
+
+        # 第一个部分是类别（blocks, gui, items等）
+        category = parts[0]
+        # 剩余部分组成文件路径
+        file_path = '/'.join(parts[1:])
+
+        # 构建完整路径：assets/minecraft/textures/{category}/{subpath}.png
+        full_path = f'assets/minecraft/textures/{category}/{file_path}.png'
+
+        try:
+            if not os.path.exists(full_path):
+                logging.warning(f"Texture file not found: '{full_path}'")
+                self.textures[key] = self.missing_texture
+                return self.missing_texture
+
+            texture = pygame.image.load(full_path).convert_alpha()
+
+            # 如果需要切除完全透明的边缘
+            if cft:
+                texture = self._crop_transparent_edges(texture)
+
             self.textures[key] = texture
             return texture
-        elif path[0] == 'sounds':
-            # 注意：此分支已不再用于声音加载，声音统一由 load_sounds_json 和 play_sound 处理
-            pass
-        return None
+
+        except (pygame.error, IOError) as e:
+            logging.warning(f"Failed to load texture '{key}' from '{full_path}': {e}")
+            self.textures[key] = self.missing_texture
+            return self.missing_texture
+
+    @staticmethod
+    def _crop_transparent_edges(surface):
+        """
+        切除 Surface 四个方向（上、下、左、右）完全透明的边缘行/列。
+        遍历方向：先从上往下切除全透明行，再从下往上，然后从左往右切除全透明列，最后从右往左。
+        :param surface: 带 alpha 通道的 pygame.Surface
+        :return: 裁剪后的新 Surface
+        """
+        width, height = surface.get_size()
+
+        # 辅助函数：检查某一行是否所有像素完全透明
+        def is_row_fully_transparent(y):
+            for x in range(width):
+                if surface.get_at((x, y)).a != 0:
+                    return False
+            return True
+
+        # 辅助函数：检查某一列是否所有像素完全透明
+        def is_col_fully_transparent(x):
+            for y in range(height):
+                if surface.get_at((x, y)).a != 0:
+                    return False
+            return True
+
+        # 上边缘：从上向下寻找第一个非全透明行
+        top = 0
+        while top < height and is_row_fully_transparent(top):
+            top += 1
+
+        # 下边缘：从下向上寻找第一个非全透明行
+        bottom = height - 1
+        while bottom >= top and is_row_fully_transparent(bottom):
+            bottom -= 1
+
+        # 左边缘：从左向右寻找第一个非全透明列
+        left = 0
+        while left < width and is_col_fully_transparent(left):
+            left += 1
+
+        # 右边缘：从右向左寻找第一个非全透明列
+        right = width - 1
+        while right >= left and is_col_fully_transparent(right):
+            right -= 1
+
+        # 如果所有像素都透明（极端情况），返回 1x1 透明表面，防止 subsurface 出错
+        if top > bottom or left > right:
+            return pygame.Surface((1, 1), pygame.SRCALPHA)
+
+        # 裁剪有效区域
+        crop_width = right - left + 1
+        crop_height = bottom - top + 1
+        cropped = surface.subsurface((left, top, crop_width, crop_height))
+        # subsurface 与原表面共享数据，为避免意外修改，可返回副本
+        return cropped.copy()
+
+    def stain_grayscale(self, grayscale_surface: pygame.Surface, color) -> pygame.Surface:
+        """
+        给灰度图染色，保留透明度和明暗变化。
+        使用向量化逻辑，性能更优。
+        :param grayscale_surface: 灰度 Surface（带 Alpha 通道）
+        :param color: 目标颜色，可以是十六进制字符串（例如 "#91bd59"）或 RGB 元组 (R, G, B)
+        :return: 染色后的 Surface
+        """
+        # 1. 解析目标颜色为 (R, G, B) 整数元组
+        if isinstance(color, str):
+            hex_color = color.lstrip('#')
+            if len(hex_color) != 6:
+                raise ValueError("十六进制颜色格式错误，需要 6 位，如 '#91bd59'")
+            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+        elif isinstance(color, (tuple, list)) and len(color) == 3:
+            r, g, b = color
+        else:
+            raise ValueError("color 必须为 '#RRGGBB' 字符串或 (R, G, B) 元组")
+        target_color = np.array([r, g, b], dtype=np.uint8)
+
+        # 2. 获取灰度图的宽度与高度
+        w, h = grayscale_surface.get_size()
+
+        # 3. 从 Surface 中提取 RGB 与 Alpha 数据
+        #    array3d 返回形状 (width, height, 3)，通道顺序为 RGB
+        rgb_array = pygame.surfarray.array3d(grayscale_surface)  # shape: (w, h, 3)
+        alpha = pygame.surfarray.array_alpha(grayscale_surface)  # shape: (w, h)
+
+        # 4. 提取灰度值（灰度图中 R=G=B，直接使用红色通道即可）
+        gray = rgb_array[:, :, 0]  # shape: (w, h), dtype=uint8
+
+        # 5. 向量化染色：new_channel = gray * target_channel / 255
+        #    使用 uint16 防止乘法溢出，结果转回 uint8
+        gray_expanded = gray[:, :, np.newaxis].astype(np.uint16)  # (w, h, 1)
+        target_color_expanded = target_color.astype(np.uint16)  # (3,)
+        colored = (gray_expanded * target_color_expanded // 255).astype(np.uint8)  # (w, h, 3)
+
+        # 6. 合并 RGB 与 Alpha 通道为 (w, h, 4) 数组
+        rgba = np.dstack((colored, alpha))  # shape: (w, h, 4)
+
+        # 7. 修正旋转问题：交换轴使形状变为 (h, w, 4)，然后创建 Surface
+        rgba_swapped = np.swapaxes(rgba, 0, 1)  # shape: (h, w, 4)
+        result = pygame.image.frombytes(rgba_swapped.tobytes(), (w, h), 'RGBA')
+        return result
 
     def load_sounds_json(self, json_path: str = 'assets/minecraft/sounds.json'):
         """

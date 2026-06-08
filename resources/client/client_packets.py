@@ -1,13 +1,15 @@
 import logging
 from typing import TYPE_CHECKING
 
-from resources.client.main_player import ClientPlayer
+from resources.client.client_player import ClientPlayer
+from resources.client.render import get_light_levels_at
 from resources.server.block_class import Block
 from resources.server.blocks import get_block_by_id
 from resources.server.location import Location
 
 if TYPE_CHECKING:
     from resources.client.client_main import Client
+
 
 def decode_packet(packet: dict, client: 'Client') -> None:
     """
@@ -29,6 +31,8 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         #     "light_array" : {"x,y": int}
         # }
         client.client_world.load_chunk(packet['x'], packet['region_array'])
+        if 'light_array' in packet:
+            client.client_world.load_lights(packet['x'], packet['light_array'])
 
     elif packet['__class__'] == 'Teleport':
         # {
@@ -60,6 +64,13 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         if 0 <= packet['y'] < world.y_max:
             block = get_block_by_id(packet['block_id'])
             block.place_at(Location(world, packet['x'], packet['y'], packet['z']))
+    elif packet['__class__'] == 'LightUpdate':
+        # {
+        #     '__class__': 'LightUpdate',
+        #     'rx': chunk_x,
+        #     'light_array': {"x,y": int}
+        # }
+        client.client_world.update_lights(packet['rx'], packet['light_array'])
     logging.debug(f"Received {packet['__class__']} packet.")
 
 def encode_packet(obj, obj_type = None, args = None) -> dict:

@@ -1,5 +1,6 @@
 import logging
 import traceback
+import sys
 
 from typing import TYPE_CHECKING, Callable, List, Dict
 
@@ -13,11 +14,23 @@ if TYPE_CHECKING:
 class CommandExecutor:
     def __init__(self,server: 'Server'):
         self.server = server
+        self.allow_python_execute = True # 是否允许执行 Python 命令。攻击者可以通过该命令执行任意恶意指令，这十分危险！通常仅应该在开发时被打开！
         self.commands_map: Dict[str, Callable[[List[str], Player | str], str]] = {
         "regions": self.list_region,
         "players": self.list_players,
-        "tp": self.teleport
+        "tp": self.teleport,
+        "exec": self.python_execute
     }
+
+    def python_execute(self, args, executor: Player | str):
+        """
+        执行 Python 命令
+        """
+        if not self.allow_python_execute: return "python execute is not enabled on this server!"
+        code = " ".join(args)
+        exec(code)
+        self.server.client.client_player.inventory[0]
+        return f"Done"
 
     def list_region(self, args, executor: Player | str):
         world_name = args[0]

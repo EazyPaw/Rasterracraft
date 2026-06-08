@@ -1,10 +1,15 @@
 import math
 import uuid
 
+from resources.client.entity_skeleton import PlayerSkeleton
 from resources.server.entity import Entity
 from typing import TYPE_CHECKING
 
 from resources.client.game_mode import CreativeMode
+from resources.server.inventory import Inventory
+from resources.server.item_class import ItemStack
+from resources.server.location import Vector
+from resources.server.materials import DIRT
 
 if TYPE_CHECKING:
     from resources.client.client_main import Client
@@ -14,13 +19,22 @@ class ClientPlayer(Entity):
         super().__init__(0, 15, client.client_world)
         self.uuid = uuid.UUID('{00000000-0000-0000-0000-000000000000}')
         self.client = client
-        self.game_mode = CreativeMode(self)
         self.jump_speed = 0.8
         self.speed = 0.6
         self.damping = 0.91
         self.width = 0.99
         self.height = 0.8
         self.choosing_block = None
+        self.flyable = False
+        self.flying = False
+        self.inventory = Inventory(36)
+        self.skeleton = PlayerSkeleton(client, self)
+        self.skeleton.x = self.client.render.SCREEN_WIDTH / 2
+        self.skeleton.y = self.client.render.SCREEN_HEIGHT / 2
+        for i in range(36):
+            self.inventory.set_item(i, ItemStack(DIRT, 64))
+        self.selected_slot = 0
+        self.game_mode = CreativeMode(self)
 
     def _is_block_solid(self, x: int, y: int, z: int = 0) -> bool:
         try:
@@ -188,16 +202,16 @@ class ClientPlayer(Entity):
         精确连续碰撞检测，不再依赖 steps 参数（保留仅为接口兼容）。
         """
         # 执行水平移动
-        actual_dx, collided_x = self._sweep_x(self.motion_x)
+        actual_dx, collided_x = self._sweep_x(self.motion.x)
         self.x += actual_dx
         if collided_x:
-            self.motion_x = 0
+            self.motion.set(0)
 
         # 执行垂直移动
-        actual_dy, collided_y = self._sweep_y(self.motion_y)
+        actual_dy, collided_y = self._sweep_y(self.motion.y)
         self.y += actual_dy
         if collided_y:
-            self.motion_y = 0
+            self.motion.set(y=0)
 
         # 地面检测 (和原逻辑相同)
         foot_check_y = self.y - 0.05
@@ -206,18 +220,24 @@ class ClientPlayer(Entity):
     # ==================== 外部接口（保持不变） ====================
 
     def move_right(self):
-        self.motion_x += self.speed
+        self.motion.x += self.speed
 
     def move_left(self):
-        self.motion_x -= self.speed
+        self.motion.x -= self.speed
 
     def handle_gravity(self):
         """每帧施加重力：速度向下增加（motion_y 减小）"""
-        self.motion_y -= self.gravity
+        self.motion.y -= self.gravity
 
     def jump(self):
         if self.on_ground:
-            self.motion_y = self.jump_speed
+            self.motion.set(y=self.jump_height)
+        elif self.flying:
+            self.motion += Vector(0, self.jump_speed * 1.5)
+
+    def handle_shift(self):
+        if self.flying:
+            self.motion -= Vector(0, self.jump_speed * 1.5)
 
     def update_damping(self):
         self.damping = 0.91 * self.client.client_world.get_block(self.x, self.y, 0).friction
@@ -229,15 +249,28 @@ class ClientPlayer(Entity):
         2. 水平阻尼（摩擦）
         3. 移动并处理碰撞
         """
-        # 重力影响（持续加速下落）
-        self.handle_gravity()
+        # 1. 重力影响（持续加速下落）
+        if self.flying:
+            self.motion.y *= 0.5
+            if abs(self.motion.y) < 0.1:
+                self.motion.y = 0
+        else:
+            self.handle_gravity()  # motion_y 减小（增加下落速度）
 
+
+        if self.on_ground:
+            self.flying = False
+
+        # 2. 应用垂直阻力（限制下落速度）
+        self.motion.y *= self.drag_vertical
+
+        # 3. 水平阻尼（摩擦）保持不变
         self.update_damping()
-        self.motion_x *= self.damping
-        if abs(self.motion_x) < 0.001:
-            self.motion_x = 0
+        self.motion.x *= self.damping
+        if abs(self.motion.x) < 0.001:
+            self.motion.x = 0
 
-        # 移动（内部会处理碰撞并可能清零速度）
+        # 4. 移动（内部会处理碰撞并可能清零速度）
         self.collision_check(steps=4)
 
         self.client.sent_packet(self, 'PlayerMove')
