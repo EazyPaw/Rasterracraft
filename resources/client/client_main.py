@@ -1,8 +1,13 @@
 import logging
+import os
 import socket
 import struct
+import subprocess
+import sys
 import threading
+import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 
 import msgpack
 import pygame
@@ -26,9 +31,16 @@ class Client:
         self.socket_thread_running = True
         self.socket_thread = threading.Thread(target=self.start_socket, name="SocketThread")
         self.socket_thread.daemon = True
+        # 服务端启动模式: "threading" 或 "subprocess"
+        #   threading  - 在同一进程内以线程方式运行（受 GIL 影响，高负载时客户端可能卡顿）
+        #   subprocess - 以独立子进程运行（绕过 GIL，性能更好，推荐）
+        self.server_mode = "subprocess"
         self.server_thread = threading.Thread(target=self.start_server, name="ServerThread")
         self.server_thread.daemon = True
-        self.server = None
+        self.server: Server | None = None
+        self.server_process: subprocess.Popen | None = None
+        # 线程池：用于异步加载区块和光照，避免频繁创建/销毁线程的开销
+        self.chunk_load_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkLoader")
         self.in_game = True
         self.resources_manager = ResourcesManager()
         self.resources_manager.load_sounds_json('assets/minecraft/sounds.json')
@@ -56,11 +68,19 @@ class Client:
         self.game_thread.start()
 
     def start_socket(self):
-        try:
-            self.client_sock.connect(("127.0.0.1", 14525))
-        except ConnectionRefusedError:
-            logging.error("Could not connect to integrated server")
-            return
+        # 重试连接：子进程模式下服务端需要时间绑定端口并开始监听
+        max_retries = 10
+        retry_delay = 0.3
+        for attempt in range(max_retries):
+            try:
+                self.client_sock.connect(("127.0.0.1", 14525))
+                break
+            except ConnectionRefusedError:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    logging.error("Could not connect to integrated server after retries")
+                    return
 
         logging.info("Connected to integrated server")
         while self.socket_thread_running:
@@ -131,12 +151,34 @@ class Client:
         self.render.start()
 
     def start_game(self):
-        try:
-            self.server = Server(False, self)
-            self.server_thread.start()
-        except OSError:
-            logging.error("find a local server, trying to join")
+        if self.server_mode == "subprocess":
+            self._start_server_subprocess()
+        else:
+            self._start_server_thread()
         self.socket_thread.start()
+
+    def _start_server_subprocess(self):
+        """以子进程方式启动服务端，绕过 GIL，客户端不受服务端运算影响。"""
+        try:
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            server_script = os.path.join(project_root, "start_server.py")
+            self.server_process = subprocess.Popen(
+                [sys.executable, server_script, "--integrated"],
+            )
+            logging.info(f"Server subprocess started (PID: {self.server_process.pid})")
+        except FileNotFoundError:
+            logging.error(f"Server script not found: {server_script}")
+        except Exception as e:
+            logging.error(f"Failed to start server subprocess: {e}")
+            logging.info("Trying to connect to an existing server...")
+
+    def _start_server_thread(self):
+        """以线程方式启动服务端（同一进程，受 GIL 影响）。"""
+        try:
+            self.server = Server(True, self)
+            self.server_thread.start()
+        except OSError:  # 端口已被占用，尝试加入已有服务端
+            logging.info("Port already in use, trying to join existing server")
 
     def start_server(self):
         self.server.init()
@@ -171,22 +213,46 @@ class Client:
         if self.game_thread.is_alive():
             self.game_thread.join(timeout=2.0)
 
-        # 6. 关闭服务器
-        if self.server:
-            try:
-                self.server.close_server()
-            except Exception:
-                pass
+        # 6. 关闭区块加载线程池
+        self.chunk_load_pool.shutdown(wait=True)
 
-        # 7. 清理音频设备
+        # 7. 关闭服务器
+        if self.server_mode == "subprocess":
+            self._shutdown_server_subprocess()
+        else:
+            self._shutdown_server_thread()
+
+        # 8. 清理音频设备
         if hasattr(self, 'audio_device'):
             try:
                 self.audio_device.stop()
             except Exception:
                 pass
 
-        # 8. 退出 pygame
+        # 9. 退出 pygame
         pygame.quit()
+
+    def _shutdown_server_subprocess(self):
+        """终止服务端子进程。"""
+        if not self.server_process:
+            return
+        try:
+            self.server_process.terminate()
+            self.server_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logging.warning("Server subprocess did not terminate in time, force killing")
+            self.server_process.kill()
+            self.server_process.wait()
+        except Exception:
+            pass
+
+    def _shutdown_server_thread(self):
+        """关闭线程模式下的服务端。"""
+        if self.server:
+            try:
+                self.server.close_server()
+            except Exception:
+                pass
 
     def play_sound(self, sound_id: str):
         self.resources_manager.get_resource(sound_id).play()

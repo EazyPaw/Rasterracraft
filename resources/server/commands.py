@@ -29,7 +29,7 @@ class CommandExecutor:
         if not self.allow_python_execute: return "python execute is not enabled on this server!"
         code = " ".join(args)
         exec(code)
-        self.server.client.client_player.inventory[0]
+
         return f"Done"
 
     def list_region(self, args, executor: Player | str):

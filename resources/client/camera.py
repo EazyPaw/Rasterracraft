@@ -12,7 +12,7 @@ class Camera:
         self._start_time = None
         self._duration = 0.05  # 50ms
 
-    def move_to(self, target_x: float, target_y: float, duration: float = 0.05):
+    def move_to(self, target_x: float, target_y: float, duration: float = 0.1):
         """启动线性移动到目标位置"""
         self._target_x = target_x
         self._target_y = target_y

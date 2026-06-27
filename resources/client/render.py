@@ -76,7 +76,7 @@ def color_tint(image, new_color):
     return tinted_image
 
 
-# ===================== 极致优化的渲染器 =====================
+# ===================== 渲染器 =====================
 class Render:
     def __init__(self, client: 'Client'):
         self.sky_base = None
@@ -177,6 +177,7 @@ class Render:
                 self.camera.update()
                 self.draw_block()
                 self.draw_hovered_block_outline()
+                self.client.client_player.skeleton.update()
                 self.draw_player()
                 self.draw_gui()
 
@@ -377,8 +378,10 @@ class Render:
         fbr = br * ao_br
 
         # ---- 4. 屏幕坐标 ----
+        # 方块占据世界坐标 [y, y+1]，此处用 y+1（方块顶部）定位，
+        # 纹理从顶部向下绘制，保证与 trans_world_location 一致。
         sx = (x - cam_x - 0.5) * bs + sw // 2
-        sy = sh - ((y - cam_y + 0.5) * bs + sh // 2)
+        sy = sh - (((y + 1) - cam_y + 0.5) * bs + sh // 2)
 
         # ---- 5. 全黑快速路径 ----
         if ftl == 0.0 and ftr == 0.0 and fbl == 0.0 and fbr == 0.0:
@@ -444,18 +447,18 @@ class Render:
             gui.draw()
 
     def draw_player(self):
-        # pygame.draw.rect(
-        #     self.screen, (50, 50, 50),
-        #     ((self.SCREEN_WIDTH - 64) / 2, (self.SCREEN_HEIGHT - 64) / 2, 64, 64)
-        # )
         self.client.client_player.skeleton.draw()
+        pygame.draw.rect(
+            self.screen, (0, 0, 255),
+            ((self.SCREEN_WIDTH - 2) / 2, (self.SCREEN_HEIGHT - 2) / 2, 2, 2)
+        )
 
     def get_hovered_block_position(self):
         self.mouse_x, self.mouse_y = pygame.mouse.get_pos()
         camera_x = self.camera.x
         camera_y = self.camera.y
         world_x = (self.mouse_x - self.SCREEN_WIDTH // 2) / self.block_size + camera_x + 0.5
-        world_y = -(self.mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + camera_y + 0.5
+        world_y = -(self.mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + camera_y - 0.5
         block_x = math.floor(world_x)
         block_y = math.floor(world_y)
         distance = math.sqrt(
@@ -474,7 +477,8 @@ class Render:
         camera_x = self.camera.x
         camera_y = self.camera.y
         screen_x = (block_x - camera_x - 0.5) * self.block_size + self.SCREEN_WIDTH // 2
-        screen_y = self.SCREEN_HEIGHT - ((block_y - camera_y + 0.5) * self.block_size + self.SCREEN_HEIGHT // 2)
+        # 方块占据世界坐标 [block_y, block_y+1]，用 block_y+1 定位顶部，与 _draw_block_optimized 一致
+        screen_y = self.SCREEN_HEIGHT - (((block_y + 1) - camera_y + 0.5) * self.block_size + self.SCREEN_HEIGHT // 2)
         outline_rect = pygame.Rect(screen_x, screen_y, self.block_size, self.block_size)
         pygame.draw.rect(self.screen, (0, 0, 0), outline_rect, 1)
 

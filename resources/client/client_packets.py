@@ -2,7 +2,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from resources.client.client_player import ClientPlayer
-from resources.client.render import get_light_levels_at
 from resources.server.block_class import Block
 from resources.server.blocks import get_block_by_id
 from resources.server.location import Location
@@ -30,9 +29,11 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         #     }
         #     "light_array" : {"x,y": int}
         # }
-        client.client_world.load_chunk(packet['x'], packet['region_array'])
+        # 通过线程池异步加载，避免频繁创建/销毁线程，同时限制并发数
+        pool = client.chunk_load_pool
+        pool.submit(client.client_world.load_chunk, packet['x'], packet['region_array'])
         if 'light_array' in packet:
-            client.client_world.load_lights(packet['x'], packet['light_array'])
+            pool.submit(client.client_world.load_lights, packet['x'], packet['light_array'])
 
     elif packet['__class__'] == 'Teleport':
         # {

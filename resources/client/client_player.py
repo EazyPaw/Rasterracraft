@@ -211,7 +211,7 @@ class ClientPlayer(Entity):
         actual_dy, collided_y = self._sweep_y(self.motion.y)
         self.y += actual_dy
         if collided_y:
-            self.motion.set(y=0)
+            self.motion.y = 0
 
         # 地面检测 (和原逻辑相同)
         foot_check_y = self.y - 0.05
@@ -232,6 +232,7 @@ class ClientPlayer(Entity):
     def jump(self):
         if self.on_ground:
             self.motion.set(y=self.jump_height)
+            self.skeleton.trigger_jump()
         elif self.flying:
             self.motion += Vector(0, self.jump_speed * 1.5)
 

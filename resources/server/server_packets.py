@@ -17,7 +17,7 @@ def encode_packet(obj, obj_type, args) -> dict:
             'x': obj.x,
             'y': obj.y,
         }
-    elif obj_type == "Forward":
+    elif obj_type == "Forward": # 转发给服务器内其它玩家
         return obj
     elif obj_type == "LightUpdate":
         # obj 应该是 {'rx': int, 'light_array': dict}

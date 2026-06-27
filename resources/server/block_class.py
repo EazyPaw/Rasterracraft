@@ -1,6 +1,11 @@
 from abc import ABC
 
 import os
+import ast
+import logging
+
+from resources.server.utils import is_safe_value
+
 if os.environ.get('PYCRAFT_CLIENT') == '1':
     import pygame
 
@@ -24,12 +29,13 @@ class Block(ABC):
     light_source = 0
     Tags = []
 
-    def __init__(self):
+    def __init__(self, nbt = None):
         # 方块应该带有的属性
-        self.nbt = {}
         self.location = None
         if self.place_sound is None:
             self.place_sound = self.break_sound
+        if nbt:
+            self.write_nbt(nbt)
 
     @classmethod
     def get_texture(cls, size, client):
@@ -44,6 +50,36 @@ class Block(ABC):
         if size != cls._last_scaled:
             cls._texture = pygame.transform.scale(cls._texture, (size, size))
         return cls._texture
+
+    def get_safe_attributes(self):
+        """
+        获取当前实例的所有安全属性，返回一个字典。
+        """
+        safe_data = {}
+        # 使用 vars(self) 获取实例变量（适用于普通类，不处理 __slots__）
+        for key, value in vars(self).items():
+            if is_safe_value(value):
+                safe_data[key] = value
+        return safe_data
+
+    def parse_nbt(self) -> dict:
+        nbt = self.get_safe_attributes()
+        return nbt
+
+    def write_nbt(self, nbt: str | dict):
+        if isinstance(nbt, str):
+            nbt = ast.literal_eval(nbt)
+        for key, value in nbt.items():
+            if hasattr(self, key):
+                current_attr = getattr(self, key)
+                current_type = type(current_attr)
+                if type(value) is current_type:  # 严格类型相等
+                    setattr(self, key, value)
+                else:
+                    logging.warning(
+                        f"There exists a incorrect type nbt, expect {type(current_attr)}, but got {type(value)}.")
+            else:
+                logging.warning(f"Block {self.block_id} has no attribute {key}.")
 
     def place_at(self, location: Location) -> bool:
         """
@@ -80,10 +116,14 @@ class Block(ABC):
         pass
 
     def to_dict(self):
-        return {
+        rst = {
             'id': self.block_id,
-            'nbt': self.nbt
         }
+        if nbt := self.parse_nbt():
+            rst['nbt'] = nbt
+        return rst
+
+
 
 class Plant(Block):
     break_sound = 'dig.grass'

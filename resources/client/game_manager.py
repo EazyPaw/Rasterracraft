@@ -51,6 +51,7 @@ class GameManager:
                     y = loc.y
                     self.client.hold_key_map["mouse_left"](self.client.client_world.get_block(x, y, 0))
                     self.client.hold_mouse_buttons[0] = True
+                    self.client.client_player.skeleton.trigger_swing()
             else:
                 self.client.hold_mouse_buttons[0] = False
             if mouse_button[2]:
@@ -59,15 +60,22 @@ class GameManager:
                     y = loc.y
                     self.client.hold_key_map["mouse_right"](self.client.client_world.get_block(x, y, 0))
                     self.client.hold_mouse_buttons[2] = True
+                    self.client.client_player.skeleton.trigger_swing()
             else:
                 self.client.hold_mouse_buttons[2] = False
 
 
     def sync_player_camera(self):
-        """同步玩家位置到相机"""
+        """同步玩家位置到相机。
+        trans_world_location 内置了方块网格的 -0.5/+0.5 偏移，
+        这里反向补偿，并跟踪视觉模型中点（而非碰撞体中点）。"""
+        player = self.client.client_player
+        # 视觉模型中心 Y = 玩家脚底 + 视觉高度的一半
+        visual_mid_y = player.y + player.skeleton.size * player.skeleton.AUTHORED_HEIGHT_BLOCKS / 2
         self.client.render.camera.move_to(
-            self.client.client_player.x,
-            self.client.client_player.y
+            player.x + player.width / 2 - 0.5,
+            visual_mid_y + 0.5,
+            1 / self.client.rate
         )
 
     def handle_events(self):

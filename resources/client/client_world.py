@@ -24,6 +24,7 @@ class ClientWorld:
             x, y, z = map(int, key.split(","))
             world_x = rx * 16 + x  # 计算世界绝对坐标
             block = get_block_by_id(value["id"])
+            block.write_nbt(value['nbt'])
             block.location = Location(self, world_x, y, z)  # 使用绝对坐标
             chunk_array[x][y][z] = block
         self._regions[rx] = chunk_array
@@ -53,7 +54,7 @@ class ClientWorld:
     def unload_chunk(self, x: int):
         del self._regions[x]
 
-    def get_block(self, x_loc: int | Location, y: int = None, z: int = None) -> Block:
+    def get_block(self, x_loc: int | Location, y: int | None = None, z: int | None = None) -> Block:
         x, y, z = decide_x_or_loc(x_loc, y, z)
         x, y, z = int(x), int(y), int(z)
         if y < 0 or y >= self.y_max:
@@ -65,7 +66,7 @@ class ClientWorld:
         block = cast(Block, chunk[rela_x, y, z]) # 强迫症写法，为了避免烦人的IDE警报
         return block
 
-    def set_block(self, block: Block, x_loc: int | Location, y: int = None, z: int = None):
+    def set_block(self, block: Block, x_loc: int | Location, y: int | None = None, z: int | None = None):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block.location = Location(self, x, y, z)
         chunk = self._regions.get(x // 16)
@@ -73,7 +74,7 @@ class ClientWorld:
         if chunk is None:return
         chunk[rela_x, y, z] = block
 
-    def break_block(self,x_loc: int | Location, y: int = None, z: int = None):
+    def break_block(self,x_loc: int | Location, y: int | None = None, z: int | None = None):
         """
         破坏客户端世界的方块
         :param x_loc: 可传入 x 或 Location
@@ -83,12 +84,12 @@ class ClientWorld:
         """
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block = self.get_block(x, y, z)
-        if type(block) == AIR: return
+        if isinstance(block, AIR): return
         block.on_break()
         self.play_sound(block.break_sound, block.location)
         self.set_block(AIR(), x, y, z)
 
-    def play_sound(self, sound_id: str, x_loc: int | Location = None, y: int = None, z: int = None):
+    def play_sound(self, sound_id: str, x_loc: int | Location, y: int | None = None, z: int | None = None):
         """
         在指定坐标播放音效，根据玩家位置自动调整立体声左右平衡及距离衰减。
         """
