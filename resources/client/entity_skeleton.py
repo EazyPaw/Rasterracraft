@@ -306,9 +306,9 @@ class PlayerSkeleton(EntitySkeleton):
         # 动画时钟：行走、挥手分别计时，使用正弦函数生成自然摆动。
         self.walk_time = 0.0
         self._swing_time = -1.0  # <0 表示不在挥臂，>=0 为动画进行中
-        # 跳跃动画状态（由外部 trigger_jump() 触发）
-        self._jumping = False
-        self._jump_time = 0.0
+        # 头部角度平滑差值：鼠标→头部不是瞬间跳变
+        self._smoothed_head_angle = 0.0
+        self._last_facing = self.facing
         self._last_update_time = time.perf_counter()
         self._last_x = player.x
         self._last_y = player.y
@@ -386,11 +386,6 @@ class PlayerSkeleton(EntitySkeleton):
         """由外部调用，触发一次挥臂动画（每次挥到固定位置，不累加）。"""
         self._swing_time = 0.0
 
-    def trigger_jump(self):
-        """由外部（ClientPlayer.jump）调用，触发跳跃动画。"""
-        self._jumping = True
-        self._jump_time = 0.0
-
     # ---------- 内部动画更新 ----------
 
     def _update_animation_clocks(self):
@@ -405,8 +400,8 @@ class PlayerSkeleton(EntitySkeleton):
         self._last_y = self.entity.y
 
         horizontal_speed = max(abs(getattr(self.entity.motion, "x", 0.0)), abs(dx) / max(dt, 0.001))
-        # 走得越快，摆臂摆腿频率越高；不在地面且没飞行时，行走循环会慢下来。
-        if horizontal_speed > 0.015 and (getattr(self.entity, "on_ground", False) or getattr(self.entity, "flying", False)):
+        # 走得越快，摆臂摆腿频率越高
+        if horizontal_speed > 0.015:
             self.walk_time += dt * (7.0 + min(horizontal_speed, 1.2) * 3.0)
         else:
             self.walk_time += dt * 2.2
@@ -417,19 +412,20 @@ class PlayerSkeleton(EntitySkeleton):
             if self._swing_time > 0.25:
                 self._swing_time = -1.0
 
-        # 跳跃动画计时：时间到或落地时自动结束
-        if self._jumping:
-            self._jump_time += dt
-            if self._jump_time > 0.5 or getattr(self.entity, "on_ground", False):
-                self._jumping = False
-
         return dt, dx, dy, horizontal_speed
 
     def update(self):
         """玩家骨架每帧先计算目标姿态，再交给基类做平滑和绘制准备。"""
         self._update_facing()
         self._update_animation_clocks()
-        self._apply_pose()
+
+        # 检测潜行状态切换，变化时瞬间跳变到目标姿态
+        is_sneaking = getattr(self.entity, "sneaking", False)
+        was_sneaking = getattr(self, "_was_sneaking", False)
+        sneaking_changed = was_sneaking != is_sneaking
+        self._was_sneaking = is_sneaking
+
+        self._apply_pose(instant=sneaking_changed)
         super().update()
 
     def _pose_part(
@@ -448,118 +444,158 @@ class PlayerSkeleton(EntitySkeleton):
         self.body[name].set_pose(Pose(anchor, pivot, angle, visible, flip_x))
 
     def _apply_pose(self, instant: bool = False):
-        """编排各子方法，按优先级叠加：行走 → 飞行/空中 → 攻击混合 → 写入部件。"""
+        """编排各子方法，按优先级叠加：行走 → 飞行 → 攻击混合 → 写入部件。"""
         direction = self._facing_sign()
         self._set_facing_textures()
 
-        # 1. 行走/站立基础姿态（检测玩家属性）
+        # 1. 行走/站立基础姿态
         angles = self._calc_walk_angles(direction)
 
-        # 2. 飞行姿态覆盖（检测玩家属性）
-        if getattr(self.entity, "flying", False):
-            angles = self._calc_fly_angles(direction, angles)
+        # 头部平滑差值：转向时瞬切，静止时渐进跟随
+        facing_changed = self._last_facing != self.facing
+        self._last_facing = self.facing
+        if facing_changed or instant:
+            self._smoothed_head_angle = angles['head_angle']
+        else:
+            self._smoothed_head_angle = _approach_angle(
+                self._smoothed_head_angle, angles['head_angle'], 0.12
+            )
+        angles['head_angle'] = self._smoothed_head_angle
 
-        # 3. 跳跃/空中姿态覆盖（外部触发 + 属性检测兜底）
-        elif self._jumping or not getattr(self.entity, "on_ground", False):
-            angles = self._calc_air_angles(direction, angles)
+        # 2. 潜行姿态覆盖
+        if getattr(self.entity, "sneaking", False):
+            angles = self._calc_sneak_angles(direction, angles)
 
-        # 4. 挥臂动画混合叠加
+        # 3. 挥臂动画混合叠加
         if self._swing_time >= 0:
             self._blend_attack_pose(direction, angles)
 
-        # 5. 计算锚点并写入全部部件
+        # 4. 计算锚点并写入全部部件
         self._write_pose(angles, instant)
 
     # ---------- 姿态计算子方法 ----------
 
     def _calc_walk_angles(self, direction: int) -> dict:
-        """行走/站立/idle 姿态，基于玩家属性检测。"""
+        """行走/站立/idle 姿态"""
         motion_x = getattr(self.entity.motion, "x", 0.0)
-        on_ground = getattr(self.entity, "on_ground", False)
         moving = abs(motion_x) > 0.025
 
         cycle = math.sin(self.walk_time)
         counter_cycle = math.sin(self.walk_time + math.pi)
         walk_power = min(abs(motion_x) / max(getattr(self.entity, "speed", 0.6), 0.01), 1.0)
-        if not moving:
-            walk_power *= 0.25
 
         idle = math.sin(time.perf_counter() * 2.4)
-        bob = 0.012 * abs(cycle) * walk_power if on_ground else 0.0
+
+        # 静止时极小幅度自然摆动，行走时大幅摆动
+        if moving:
+            front_arm = direction * (counter_cycle * 28.0 * walk_power)
+            back_arm = direction * (cycle * 28.0 * walk_power)
+        else:
+            front_arm = direction * idle * 2.5
+            back_arm = direction * (-idle * 2.5)
 
         return {
-            'bob': bob,
+            'bob': 0.0,
             'body_lean': direction * motion_x * -4.0,
-            'head_angle': self._calc_head_mouse_angle(direction) + idle * 0.6,
-            'front_arm_angle': direction * (-4.0 + counter_cycle * 28.0 * walk_power),
-            'back_arm_angle': direction * (-4.0 + cycle * 28.0 * walk_power),
-            'front_leg_angle': direction * (cycle * 24.0 * walk_power),
-            'back_leg_angle': direction * (counter_cycle * 24.0 * walk_power),
+            'head_angle': self._calc_head_angle(direction),
+            'front_arm_angle': front_arm,
+            'back_arm_angle': back_arm,
+            'front_leg_angle': direction * (cycle * 55.0 * walk_power if moving else 0.0),
+            'back_leg_angle': direction * (counter_cycle * 55.0 * walk_power if moving else 0.0),
         }
 
     def _calc_head_mouse_angle(self, direction: int) -> float:
-        """根据鼠标世界坐标计算头部朝向角度。
-        限制在人类颈部活动范围内：抬头 ≤45°，低头 ≤80°。"""
+        """根据鼠标世界坐标计算头部朝向角度（不受运动方向影响）。
+        颈部限幅：抬头 ≤45°，低头 ≤80°。"""
         render = self.client.render
         mouse_x, mouse_y = pygame.mouse.get_pos()
-        # 鼠标世界坐标（连续，非方块网格）
         mouse_wx = (mouse_x - render.SCREEN_WIDTH / 2) / render.block_size + render.camera.x + 0.5
         mouse_wy = (render.SCREEN_HEIGHT / 2 - mouse_y) / render.block_size + render.camera.y - 0.5
 
-        # 玩家头部世界坐标（头顶位置）
         head_wx = self.entity.x + getattr(self.entity, "width", 1.0) * 0.5
         head_wy = self.entity.y + self.VISUAL_HEIGHT_BLOCKS
 
         dx = mouse_wx - head_wx
         dy = mouse_wy - head_wy
-        # 相对玩家朝向的垂直角度
         raw = math.degrees(math.atan2(dy, dx * direction))
-        # 反转：抬头→负角度，低头→正角度
         angle = raw
-        if self.entity.facing == 0: angle = -raw
-        # 颈部限幅
+        if self.entity.facing == 0:
+            angle = -raw
         return max(-45.0, min(80.0, angle))
 
-    def _calc_fly_angles(self, direction: int, base: dict) -> dict:
-        """飞行姿态，覆盖行走姿态的值。"""
-        fly_wave = math.sin(time.perf_counter() * 7.0)
-        base['body_lean'] = direction * -12.0
-        base['head_angle'] = direction * 8.0
-        base['front_arm_angle'] = direction * (-44.0 + fly_wave * 8.0)
-        base['back_arm_angle'] = direction * (-34.0 - fly_wave * 8.0)
-        base['front_leg_angle'] = direction * (14.0 + fly_wave * 5.0)
-        base['back_leg_angle'] = direction * (22.0 - fly_wave * 5.0)
-        base['bob'] = 0.0
-        return base
+    def _calc_head_motion_angle(self, direction: int) -> float:
+        """根据实体运动速度计算头部垂直偏角。
+        使用 tanh 渐进曲线：下落越快越趋于向上看，最大 ±15°。"""
+        motion = getattr(self.entity, "motion", None)
+        vy = motion.y if motion else 0.0
+        MAX_VERTICAL = 15.0
+        SCALE = 5.0
+        vertical = -MAX_VERTICAL * math.tanh(-vy / SCALE)
+        return direction * vertical
 
-    def _calc_air_angles(self, direction: int, base: dict) -> dict:
-        """空中/跳跃姿态：主动跳跃时使用起跳动画，否则使用被动下落姿态。"""
-        motion_y = getattr(self.entity.motion, "y", 0.0)
+    def _calc_head_angle(self, direction: int) -> float:
+        """计算头部朝向角度。
 
-        if self._jumping:
-            # 主动跳跃：手臂上举、腿收拢，随时间从起跳过渡到腾空
-            t = min(self._jump_time / 0.25, 1.0)
-            base['front_arm_angle'] = direction * (-4.0 + t * -20.0)
-            base['back_arm_angle'] = direction * (-4.0 + t * 22.0)
-            base['front_leg_angle'] = direction * (t * -12.0)
-            base['back_leg_angle'] = direction * (t * 18.0)
-            base['body_lean'] = base.get('body_lean', 0.0) + direction * (-4.0 * t)
-        elif motion_y > 0:
-            # 被动上升
-            base['front_arm_angle'] = direction * -24.0
-            base['back_arm_angle'] = direction * 18.0
-            base['front_leg_angle'] = direction * -12.0
-            base['back_leg_angle'] = direction * 18.0
-            base['body_lean'] = base.get('body_lean', 0.0) + direction * -4.0
+        静止时：完全跟随鼠标。
+        移动时：鼠标在玩家前方时主要跟随鼠标，鼠标在后方时主要跟随运动方向。
+                两者通过 sigmoid 平滑混合，过渡自然无跳变。
+        """
+        motion = getattr(self.entity, "motion", None)
+        motion_x = getattr(motion, "x", 0.0) if motion else 0.0
+        moving = abs(motion_x) > 0.025
+
+        mouse_angle = self._calc_head_mouse_angle(direction)
+
+        if not moving:
+            return mouse_angle
+
+        # ── 移动时：鼠标与运动方向混合 ──
+        motion_angle = self._calc_head_motion_angle(direction)
+
+        # 鼠标相对于玩家朝向的水平偏移（正 = 前方，负 = 后方）
+        render = self.client.render
+        mouse_x, _ = pygame.mouse.get_pos()
+        mouse_wx = (mouse_x - render.SCREEN_WIDTH / 2) / render.block_size + render.camera.x + 0.5
+        head_wx = self.entity.x + getattr(self.entity, "width", 1.0) * 0.5
+        dx_ahead = (mouse_wx - head_wx) * direction
+
+        # sigmoid 混合因子：
+        #   dx_ahead ≫ 0（鼠标在前方）→ alignment → 1.0 → 鼠标主导
+        #   dx_ahead ≪ 0（鼠标在后方）→ alignment → 0.0 → 运动主导
+        #   1.5 控制过渡区宽度（格），值越小过渡越陡
+        alignment = 1.0 / (1.0 + math.exp(-dx_ahead / 1.5))
+
+        return mouse_angle * alignment + motion_angle * (1.0 - alignment)
+
+    def _calc_sneak_angles(self, direction: int, base: dict) -> dict:
+        """潜行姿态覆盖：身体压低、前倾，手脚在潜行基础角度上叠加减弱版行走摆动。"""
+        # 身体前倾
+        base['body_lean'] = direction * -30.0
+        # 头部微微抬起看向前方
+        base['head_angle'] = direction * -10.0
+
+        motion_x = getattr(self.entity.motion, "x", 0.0)
+        moving = abs(motion_x) > 0.025
+        cycle = math.sin(self.walk_time)
+        counter_cycle = math.sin(self.walk_time + math.pi)
+        walk_power = min(abs(motion_x) / max(getattr(self.entity, "speed", 0.6), 0.01), 1.0)
+
+        # 潜行基础角度
+        sneak_arm_base = 10.0
+        sneak_leg_base = 0
+        swing_scale = 3.30
+
+        if moving:
+            arm_swing = swing_scale * 28.0 * walk_power
+            leg_swing = swing_scale * 24.0 * walk_power
         else:
-            # 下落
-            base['front_arm_angle'] = direction * 18.0
-            base['back_arm_angle'] = direction * 10.0
-            base['front_leg_angle'] = direction * 12.0
-            base['back_leg_angle'] = direction * -8.0
-            base['body_lean'] = base.get('body_lean', 0.0) + direction * 5.0
+            arm_swing = 0.0
+            leg_swing = 0.0
 
-        base['bob'] = 0.0
+        base['front_arm_angle'] = direction * (sneak_arm_base + counter_cycle * arm_swing)
+        base['back_arm_angle'] = direction * (-sneak_arm_base + cycle * arm_swing)
+        base['front_leg_angle'] = direction * (sneak_leg_base + cycle * leg_swing)
+        base['back_leg_angle'] = direction * (sneak_leg_base + counter_cycle * leg_swing)
         return base
 
     def _blend_attack_pose(self, direction: int, angles: dict):
@@ -589,6 +625,13 @@ class PlayerSkeleton(EntitySkeleton):
         back_x = center_x - direction * shoulder_spread
         front_leg_x = center_x + direction * hip_spread
         back_leg_x = center_x - direction * hip_spread
+
+        # 潜行时双腿整体向后偏移，营造蹲伏感
+        if getattr(self.entity, "sneaking", False):
+            leg_back = 0.25 * visual_scale
+            front_leg_x -= direction * leg_back
+            back_leg_x -= direction * leg_back
+
 
         self._pose_part("back_arm", (back_x, shoulder_y), (2, 0), angles['back_arm_angle'], flip_x=False)
         self._pose_part("back_leg", (back_leg_x, hip_y), (2, 0), angles['back_leg_angle'], flip_x=False)

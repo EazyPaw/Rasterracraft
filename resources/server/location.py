@@ -1,3 +1,6 @@
+import math
+
+
 class Location:
     def __init__(self, world, x, y, z):
         self.world = world
@@ -11,7 +14,7 @@ class Location:
     def __str__(self):
         return f"world={self.world.id_name}, x={self.x}, y={self.y}, z={self.z}"
 
-def decide_x_or_loc(x_loc: int | Location, y: int = None, z: int = None):
+def decide_x_or_loc(x_loc: int | Location, y: int | None = None, z: int | None  = None):
     if isinstance(x_loc, Location):
         return x_loc.x, x_loc.y, x_loc.z
     else:
@@ -43,3 +46,15 @@ class Vector:
             self.x = x
         if y:
             self.y = y
+
+    def angle_with_x_axis(self):
+        """
+        计算向量 (x, y) 与 x 轴正半轴的夹角（角度）。
+        返回float: 角度，范围 [0, 360) 度
+        """
+        rad = math.atan2(self.y, self.x)
+        deg = math.degrees(rad)
+        # 将负角转换为 [0, 360) 范围
+        if deg < 0:
+            deg += 360.0
+        return deg

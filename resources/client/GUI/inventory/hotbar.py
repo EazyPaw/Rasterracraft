@@ -25,7 +25,9 @@ class HotBar(GUI):
 
         for i in range(9):
             item = self.render.client.client_player.inventory[i]
-            texture_ = item.get_texture(self.render.gui_scale * 0.7, self.render.client, True)
+            if item.is_empty():
+                continue
+            texture_ = item.get_texture(self.render.gui_scale * 0.7, shadow=True)
 
             if texture_ is None:
                 continue

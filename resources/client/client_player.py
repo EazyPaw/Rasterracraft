@@ -19,20 +19,21 @@ class ClientPlayer(Entity):
         super().__init__(0, 15, client.client_world)
         self.uuid = uuid.UUID('{00000000-0000-0000-0000-000000000000}')
         self.client = client
-        self.jump_speed = 0.8
-        self.speed = 0.6
-        self.damping = 0.91
-        self.width = 0.99
-        self.height = 0.8
+        self.move_speed = 0.3
+        self.damping = 0.95
+        self.width = 0.3
+        self.height = 1.8
+        self.jump_height = 0.8
         self.choosing_block = None
         self.flyable = False
         self.flying = False
+        self.sneaking = False
         self.inventory = Inventory(36)
         self.skeleton = PlayerSkeleton(client, self)
         self.skeleton.x = self.client.render.SCREEN_WIDTH / 2
         self.skeleton.y = self.client.render.SCREEN_HEIGHT / 2
-        for i in range(36):
-            self.inventory.set_item(i, ItemStack(DIRT, 64))
+        for i in range(16):
+            self.inventory.set_item(i, ItemStack(DIRT(), 64))
         self.selected_slot = 0
         self.game_mode = CreativeMode(self)
 
@@ -54,6 +55,35 @@ class ClientPlayer(Entity):
                 if self._is_block_solid(block_x, block_y):
                     return True
         return False
+
+    def _prevent_edge_fall(self, dx: float) -> float:
+        """
+        潜行时防止从方块边缘掉落。
+        检测目标位置下方是否有地面，若无则限制移动停在边缘。
+        """
+        if dx == 0 or not self.on_ground or not self.sneaking:
+            return dx
+
+        foot_y = self.y - 0.05
+
+        if dx > 0:
+            # 向右移动：检查右边缘目标位置下方
+            check_x = self.x + dx + self.width
+            if self._check_collision_at(check_x, foot_y):
+                return dx  # 有地面，安全
+            # 无地面 -> 停在当前方块的右边缘
+            block_edge = math.floor(self.x + self.width) + 1.0
+            safe_dx = block_edge - self.width - self.x - 0.001
+            return max(0.0, safe_dx)
+        else:
+            # 向左移动：检查左边缘目标位置下方
+            check_x = self.x + dx
+            if self._check_collision_at(check_x, foot_y):
+                return dx  # 有地面，安全
+            # 无地面 -> 停在当前方块的左边缘
+            block_edge = math.floor(self.x)
+            safe_dx = block_edge + 1.0 - self.x + 0.001
+            return min(0.0, safe_dx)
 
     # ==================== 核心移动+碰撞系统 ====================
 
@@ -203,6 +233,8 @@ class ClientPlayer(Entity):
         """
         # 执行水平移动
         actual_dx, collided_x = self._sweep_x(self.motion.x)
+        # 潜行时防止从方块边缘掉落
+        actual_dx = self._prevent_edge_fall(actual_dx)
         self.x += actual_dx
         if collided_x:
             self.motion.set(0)
@@ -220,10 +252,14 @@ class ClientPlayer(Entity):
     # ==================== 外部接口（保持不变） ====================
 
     def move_right(self):
-        self.motion.x += self.speed
+        speed_mult = 0.3 if self.sneaking else 1.0
+        if self.flying: speed_mult *= 2
+        self.motion.x += self.move_speed * speed_mult
 
     def move_left(self):
-        self.motion.x -= self.speed
+        speed_mult = 0.3 if self.sneaking else 1.0
+        if self.flying: speed_mult *= 2
+        self.motion.x -= self.move_speed * speed_mult
 
     def handle_gravity(self):
         """每帧施加重力：速度向下增加（motion_y 减小）"""
@@ -232,13 +268,13 @@ class ClientPlayer(Entity):
     def jump(self):
         if self.on_ground:
             self.motion.set(y=self.jump_height)
-            self.skeleton.trigger_jump()
         elif self.flying:
-            self.motion += Vector(0, self.jump_speed * 1.5)
+            self.motion += Vector(0, self.jump_height * 1.5)
 
     def handle_shift(self):
         if self.flying:
-            self.motion -= Vector(0, self.jump_speed * 1.5)
+            self.motion -= Vector(0, self.jump_height * 1.5)
+        # 地面潜行由 move_update() 中的按键轮询统一处理
 
     def update_damping(self):
         self.damping = 0.91 * self.client.client_world.get_block(self.x, self.y, 0).friction
@@ -246,10 +282,16 @@ class ClientPlayer(Entity):
     def move_update(self):
         """
         每帧更新：
-        1. 施加重力
-        2. 水平阻尼（摩擦）
-        3. 移动并处理碰撞
+        1. 检测潜行按键状态
+        2. 施加重力
+        3. 水平阻尼（摩擦）
+        4. 移动并处理碰撞
         """
+        # 0. 根据当前按键状态更新潜行标志
+        import pygame
+        keys = pygame.key.get_pressed()
+        self.sneaking = (keys[pygame.K_LSHIFT] or keys[pygame.K_s]) and not self.flying
+
         # 1. 重力影响（持续加速下落）
         if self.flying:
             self.motion.y *= 0.5

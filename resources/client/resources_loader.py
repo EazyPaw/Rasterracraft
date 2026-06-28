@@ -6,6 +6,8 @@ import random
 import os
 import numpy as np
 from collections import OrderedDict
+from resources.server.location import Location
+from resources.server.biome import get_biome_by_id
 
 class ResourcesManager:
     def __init__(self):
@@ -128,7 +130,8 @@ class ResourcesManager:
         # subsurface 与原表面共享数据，为避免意外修改，可返回副本
         return cropped.copy()
 
-    def stain_grayscale(self, grayscale_surface: pygame.Surface, color) -> pygame.Surface:
+    @staticmethod
+    def stain_grayscale(grayscale_surface: pygame.Surface, color) -> pygame.Surface:
         """
         给灰度图染色，保留透明度和明暗变化。
         使用向量化逻辑，性能更优。
@@ -172,6 +175,26 @@ class ResourcesManager:
         rgba_swapped = np.swapaxes(rgba, 0, 1)  # shape: (h, w, 4)
         result = pygame.image.frombytes(rgba_swapped.tobytes(), (w, h), 'RGBA')
         return result
+
+    @staticmethod
+    def biome_stain(grayscale_surface: pygame.Surface, location: Location, mode = "grass") -> pygame.Surface:
+        """
+        生成该方块所在群系的染色后贴图
+        :param grayscale_surface: 原灰度图
+        :param location: 方块位置
+        :param mode: 染色模式，”grass“为草，”foliage“为树叶
+        :return: 返回染色后 Surface
+        """
+        x = location.x
+        y = location.y
+        biome = get_biome_by_id(location.world.get_biome(x, y))
+        if mode == "grass":
+            r = ResourcesManager.stain_grayscale(grayscale_surface, biome.grass_color)
+        elif mode == "foliage":
+            r = ResourcesManager.stain_grayscale(grayscale_surface, biome.foliage_color)
+        else:
+            r = grayscale_surface.copy()
+        return r
 
     def load_sounds_json(self, json_path: str = 'assets/minecraft/sounds.json'):
         """

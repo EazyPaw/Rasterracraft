@@ -259,7 +259,7 @@ class Render:
         y_blocks = math.ceil(height / block_size)
         x_start = int(cam_x - x_blocks // 2 - 1)
         x_end = int(cam_x + x_blocks // 2 + 2)
-        y_start = int(cam_y - y_blocks // 2)
+        y_start = int(cam_y - y_blocks // 2 - 1)
         y_end = int(cam_y + y_blocks // 2 + 2)
 
         # 扩展一圈用于 AO / 光照邻域
@@ -395,7 +395,7 @@ class Render:
             return
 
         # ---- 6. 获取纹理 ----
-        tex = block.get_texture(bs, self.client)
+        tex = block.get_texture(bs)
         if tex is None:
             return
 

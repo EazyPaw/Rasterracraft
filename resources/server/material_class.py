@@ -1,5 +1,7 @@
 import pygame
 
+from resources.server.utils import client_method
+
 
 class Material:
     name_id = "null"
@@ -8,12 +10,16 @@ class Material:
     _texture_path = None
     _original_texture = None
     _last_scaled = None
-    texture_cache = {}
+
+    def __init__(self):
+        self.texture_cache = {}
     
     @classmethod
+    @client_method
     def get_texture(cls, size: float, client):
         """
         获取缩放后的纹理（支持浮点倍率）
+        (client 参数由 @client_only 自动注入)
         :param size: 缩放倍率（如 2.0 表示放大 2 倍）
         :param client: 客户端实例
         :return: 缩放后的 Surface
@@ -50,6 +56,21 @@ class Material:
         
         return cls._original_texture
 
+    def __eq__(self, other):
+        """
+        比较两个 Material 实例是否相等。
+        基于 name_id 而非对象身份，确保不同实例的同种材料（如两个 DIRT()）可以互相堆叠。
+        """
+        if isinstance(other, Material):
+            return self.name_id == other.name_id
+        return NotImplemented
+
+    def __hash__(self):
+        """
+        基于 name_id 的哈希值，与 __eq__ 保持一致。
+        """
+        return hash(self.name_id)
+
     def __str__(self):
         return self.name_id
 
@@ -58,5 +79,6 @@ class BlockItem(Material):
     target_block = None
 
     @classmethod
+    @client_method
     def get_texture(cls, size: float, client):
-        return cls.target_block.get_texture(16 * size, client)
+        return cls.target_block.get_texture(16 * size)

@@ -4,6 +4,7 @@ import sys
 
 from typing import TYPE_CHECKING, Callable, List, Dict
 
+from resources.server.blocks import get_block_by_id
 from resources.server.entity import Entity
 from resources.server.location import Location
 from resources.server.player import Player
@@ -19,7 +20,8 @@ class CommandExecutor:
         "regions": self.list_region,
         "players": self.list_players,
         "tp": self.teleport,
-        "exec": self.python_execute
+        "exec": self.python_execute,
+        "setblock": self.set_block_c
     }
 
     def python_execute(self, args, executor: Player | str):
@@ -116,6 +118,11 @@ class CommandExecutor:
             entity.teleport_to(target_location[0], target_location[1])
 
         return f"Teleported {len(targets)} entities to {target_location}"
+
+    def set_block_c(self, args, executor: Player | str):
+        block = get_block_by_id(args[0])
+        block.place_at(Location(self.server.worlds[self.server.main_world_id], int(args[1]), int(args[2]), int(args[3])))
+        return f"Block placed at {block.location}"
 
 
     def execute_command(self, executor: Player | str, args: list) -> str:

@@ -4,7 +4,7 @@ import os
 import ast
 import logging
 
-from resources.server.utils import is_safe_value
+from resources.server.utils import is_safe_value, client_method
 
 if os.environ.get('PYCRAFT_CLIENT') == '1':
     import pygame
@@ -38,9 +38,10 @@ class Block(ABC):
             self.write_nbt(nbt)
 
     @classmethod
+    @client_method
     def get_texture(cls, size, client):
         """
-        返回方块的材质
+        返回方块的材质 (client 参数由 @client_only 自动注入)
         :param size:
         :param client:
         :return:
@@ -126,6 +127,7 @@ class Block(ABC):
 
 
 class Plant(Block):
+    # 所有植物基类
     break_sound = 'dig.grass'
     solid = False
     light_attenuation = 1
@@ -133,3 +135,31 @@ class Plant(Block):
     def on_update(self):
         if BlockTag.GRASS_BLOCKS not in self.location.world.get_block(self.location.add(0, -1, 0)).Tags:
             self.location.world.break_block(self.location)
+
+class GrassStain(Plant):
+    # 需要更据生物群系染色的植物（草）
+    _texture_cache = {}  # 缓存不同尺寸的染色纹理
+
+    @client_method
+    def get_texture(self, size, client: 'Client'):
+
+        # 检查缓存
+        if size in self._texture_cache:
+            return self._texture_cache[size]
+
+        # 1. 获取基础材质
+        base_texture = client.resources_manager.get_texture_img(self._texture_path)
+
+        if base_texture is None:
+            return None
+
+        # 2. 缩放至目标尺寸
+        texture_scaled = pygame.transform.scale(base_texture, (size, size))
+
+        # 3. 染色纹理 (使用 RGB 元组 (30, 50, 70))
+        stained_texture = client.resources_manager.biome_stain(texture_scaled, self.location).convert_alpha()
+
+        # 4. 存入缓存
+        self._texture_cache[size] = stained_texture
+
+        return stained_texture

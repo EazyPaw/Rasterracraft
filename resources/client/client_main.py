@@ -18,8 +18,7 @@ from resources.client.game_manager import GameManager
 from resources.client.client_player import ClientPlayer
 from resources.client.resources_loader import ResourcesManager
 from resources.server.server_main import Server
-from resources.server.utils import recv_exact
-
+from resources.server.utils import recv_exact, set_client
 
 class Client:
     def __init__(self):
@@ -28,6 +27,7 @@ class Client:
         self.client_world = client_world.ClientWorld(self)
         self.render = render.Render(self)
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket_connected = threading.Event()
         self.socket_thread_running = True
         self.socket_thread = threading.Thread(target=self.start_socket, name="SocketThread")
         self.socket_thread.daemon = True
@@ -35,11 +35,14 @@ class Client:
         #   threading  - 在同一进程内以线程方式运行（受 GIL 影响，高负载时客户端可能卡顿）
         #   subprocess - 以独立子进程运行（绕过 GIL，性能更好，推荐）
         self.server_mode = "subprocess"
+        # 注册客户端实例到 utils 模块，供 @client_method 装饰的方法使用。
+        # 在 subprocess 模式下服务端运行在独立进程中，不会调用 set_client()，
+        # 因此需要在这里主动注册。
+        set_client(self)
         self.server_thread = threading.Thread(target=self.start_server, name="ServerThread")
         self.server_thread.daemon = True
         self.server: Server | None = None
         self.server_process: subprocess.Popen | None = None
-        # 线程池：用于异步加载区块和光照，避免频繁创建/销毁线程的开销
         self.chunk_load_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkLoader")
         self.in_game = True
         self.resources_manager = ResourcesManager()
@@ -66,6 +69,7 @@ class Client:
             pygame.K_e: self.client_player.game_mode.open_inventory,
         }
         self.game_thread.start()
+        pygame.key.stop_text_input()
 
     def start_socket(self):
         # 重试连接：子进程模式下服务端需要时间绑定端口并开始监听
@@ -83,6 +87,7 @@ class Client:
                     return
 
         logging.info("Connected to integrated server")
+        self.socket_connected.set()
         while self.socket_thread_running:
             try:
                 raw_len = recv_exact(self.client_sock, 4)  # 先读 4 字节长度头
@@ -114,6 +119,11 @@ class Client:
         - *args: 额外参数（如 location）
         """
         try:
+            # 在子进程模式下，服务端需要时间启动并监听端口，
+            # 此时套接字可能尚未连接，直接跳过发送，避免 WinError 10057
+            if not self.socket_connected.is_set():
+                return False
+
             # if obj_type == "BreakBlock":
             #     location: Location = obj.location
             #     print(get_light_levels_at(self.client_world.light_map, location.x, location.y))
@@ -159,11 +169,12 @@ class Client:
 
     def _start_server_subprocess(self):
         """以子进程方式启动服务端，绕过 GIL，客户端不受服务端运算影响。"""
+        logging.info("Server is running on subprocess mode.")
         try:
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             server_script = os.path.join(project_root, "start_server.py")
             self.server_process = subprocess.Popen(
-                [sys.executable, server_script, "--integrated"],
+                [sys.executable, server_script],
             )
             logging.info(f"Server subprocess started (PID: {self.server_process.pid})")
         except FileNotFoundError:
@@ -174,8 +185,9 @@ class Client:
 
     def _start_server_thread(self):
         """以线程方式启动服务端（同一进程，受 GIL 影响）。"""
+        logging.warning("Server is running on threading mode, if you are not debugging your client/server, please use subprocess mode instead to have a better performance.")
         try:
-            self.server = Server(True, self)
+            self.server = Server(False, self)
             self.server_thread.start()
         except OSError:  # 端口已被占用，尝试加入已有服务端
             logging.info("Port already in use, trying to join existing server")

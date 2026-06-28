@@ -4,6 +4,7 @@ import struct
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import msgpack
@@ -13,8 +14,8 @@ import resources.server.generator as generator
 from resources.server.commands import CommandExecutor
 from resources.server.player import Player
 from resources.server.server_packets import encode_packet, decode_packet
-from resources.server.utils import recv_exact
-from resources.server.world_class import World, WorldAttribute
+from resources.server.utils import recv_exact, set_client
+from resources.server.world_class import World, WorldAttribute, Chunk
 
 
 class Server:
@@ -22,6 +23,7 @@ class Server:
         self.running = True
         self.main_world_id = "overworld"
         self.worlds: dict[str, World] = {}
+        self.ready = threading.Event()  # 用于等待初始化完成
         self.socket_server = self.SocketServer(self)
         self.TPS = 0
         self.rate = 20
@@ -36,13 +38,18 @@ class Server:
         self.input_thread.start()
         self.command_executor = CommandExecutor(self)
         self.client = client
+        # 区块生成线程池：generate_chunk 是 CPU 密集型操作（噪声计算），
+        # noise 库（C 扩展）和 numpy 在计算时会释放 GIL，因此多线程有实际收益。
+        self.chunk_gen_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkGen")
+        if client is not None:
+            set_client(client)
 
     def check_input(self):
         if self.integrated:
-            logging.info("Integrated server, input is disabled")
+            logging.info("Integrated server, input is disabled.")
             return
         while True:
-            inp = input(">_ ")
+            inp = input()
             if inp == "":
                 continue
             if inp[0] == "/":
@@ -66,12 +73,15 @@ class Server:
             self.thread.start()
 
         def run(self):
-            logging.info("Socket server started.")
+            logging.info("Socket server started, waiting for server initialization...")
+            # 等待服务器初始化完成（worlds 已创建）
+            self.server.ready.wait()
+            logging.info("Server ready, accepting connections.")
             while self.running:
 
                 client_sock, client_addr = self.server_sock.accept()
 
-                player = Player(0, 100 ,self.server.worlds["overworld"])
+                player = Player(0, 100, self.server.worlds["overworld"])
                 self.connections[player] = (client_sock, client_addr)
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
@@ -129,8 +139,6 @@ class Server:
 
     def run(self):
 
-        self.initialized = True
-
         logging.info(f"Server initialized")
 
         next_time = time.perf_counter()
@@ -156,9 +164,11 @@ class Server:
         logging.info("Initializing server")
         self.worlds["overworld"] = World(self
                                          ,"overworld"
-                                         , generator.bedrock_flat_generator
+                                         , generator.MinecraftLike2D
                                          , WorldAttribute()
                                          , 0)
+        self.initialized = True
+        self.ready.set()  # 通知 socket 线程服务器已就绪
         self.run()
 
     def tick(self):
@@ -183,6 +193,10 @@ class Server:
                     return int(o)
                 elif isinstance(o, np.floating):
                     return float(o)
+                elif isinstance(o, np.bool_):
+                    return bool(o)
+                elif isinstance(o, (np.str_, np.bytes_)):
+                    return str(o)
                 elif isinstance(o, np.ndarray):
                     return o.tolist()
                 elif isinstance(o, dict):
@@ -214,18 +228,50 @@ class Server:
             return False
 
     def load_chunks(self):
+        # 阶段一：收集需要生成的区块，提交到线程池并行生成（噪声计算是主要瓶颈）
+        gen_futures: dict[tuple[int, World], Any] = {}
+        new_chunks: list[tuple[Player, int]] = []  # (player, rx) 待发送的新区块
+
         for player in self.players:
             rx = int(player.x // 16)
             for x in range(rx - self.view_distance, rx + self.view_distance + 1):
                 if x not in player.loading_regions:
                     if x not in player.world.regions:
-                        player.world.generate_chunk(x)
-                    self.send_client_socket(player, player.world.regions[x])
-                    player.loading_regions.append(x)
+                        # 避免对同一区块重复提交生成任务（多个玩家共享同一 World）
+                        key = (x, player.world)
+                        if key not in gen_futures:
+                            gen_futures[key] = self.chunk_gen_pool.submit(
+                                player.world.generate_chunk, x
+                            )
+                    new_chunks.append((player, x))
+
+        # 阶段二：等待所有生成任务完成
+        for (rx, world), future in gen_futures.items():
+            try:
+                future.result(timeout=30)
+            except Exception as e:
+                logging.error(f"Chunk generation failed for region {rx}: {e}")
+
+        # 阶段三：发送新区块给客户端，并标记为已加载
+        for player, x in new_chunks:
+            if x in player.world.regions:
+                self.send_client_socket(player, player.world.regions[x])
+                player.loading_regions.append(x)
+                # 新区块可能影响了相邻已加载区块的光照，发送邻居的光照更新
+                for neighbor_rx in (x - 1, x + 1):
+                    if neighbor_rx in player.loading_regions:
+                        neighbor = player.world.regions.get(neighbor_rx)
+                        if neighbor is not None:
+                            light_update = {
+                                'rx': neighbor_rx,
+                                'light_array': neighbor.get_full_light_dict()
+                            }
+                            self.send_client_socket(player, light_update, "LightUpdate")
 
     def close_server(self):
         self.running = False
         self.socket_server.running = False
+        self.chunk_gen_pool.shutdown(wait=True)
 
     def on_player_disconnect(self, player: Player):
         self.players.remove(player)

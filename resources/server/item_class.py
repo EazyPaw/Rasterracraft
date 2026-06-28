@@ -1,6 +1,9 @@
 import resources.server.materials as materials
 import pygame
 
+from resources.server.utils import client_method
+
+
 class ItemStack:
     def __init__(self, material: 'Material', amount: int = 1, nbt = None):
         if nbt is None:
@@ -57,13 +60,14 @@ class ItemStack:
         else:
             return False
 
+    @client_method
     def get_texture(self, scale: float, client, shadow=False, multiply=False):
         if (shadow, multiply) in self.material.texture_cache:
             return self.material.texture_cache[(shadow, multiply)]
 
         px_scale = client.render.gui_scale
 
-        res = self.material.get_texture(scale, client)
+        res = self.material.get_texture(scale)
         if shadow and res is not None:
 
             # 创建带阴影的最终纹理

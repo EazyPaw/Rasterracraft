@@ -1,6 +1,6 @@
 import logging
 import math
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 import numpy as np
 
@@ -14,6 +14,7 @@ class ClientWorld:
         self.id_name = "null"
         self._regions: dict[int, np.ndarray[Any, np.dtype[Block]]] = {}
         self.light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
+        self.biome_map: dict[int, np.ndarray[Any, np.dtype[np.str_]]] = {}
         self.y_max = 256
         self.client = client
 
@@ -24,7 +25,7 @@ class ClientWorld:
             x, y, z = map(int, key.split(","))
             world_x = rx * 16 + x  # 计算世界绝对坐标
             block = get_block_by_id(value["id"])
-            block.write_nbt(value['nbt'])
+            block.write_nbt(value.get('nbt', {}))
             block.location = Location(self, world_x, y, z)  # 使用绝对坐标
             chunk_array[x][y][z] = block
         self._regions[rx] = chunk_array
@@ -44,15 +45,51 @@ class ClientWorld:
         # 如果该区块的光照数组不存在，先创建
         if rx not in self.light_map:
             self.light_map[rx] = np.full((16, self.y_max), 0, dtype=np.uint8)
-        
+
         light_array = self.light_map[rx]
         for key, value in light_map.items():
             x, y = key.split(",")
             x, y = int(x), int(y)
             light_array[x][y] = value
 
+    def load_biomes(self, rx: int, biome_dict: dict[str, str]):
+        """从服务器数据包加载整个区块的生物群系数据"""
+        biome_array = np.full((16, self.y_max), "void", dtype="<U32")
+        for key, biome_id in biome_dict.items():
+            x_str, y_str = key.split(",")
+            x, y = int(x_str), int(y_str)
+            biome_array[x][y] = biome_id
+        self.biome_map[rx] = biome_array
+
+    def update_biomes(self, rx: int, biome_dict: dict[str, str]):
+        """增量更新生物群系数据（只更新变化的部分）"""
+        if rx not in self.biome_map:
+            self.biome_map[rx] = np.full((16, self.y_max), "void", dtype="<U32")
+
+        biome_array = self.biome_map[rx]
+        for key, biome_id in biome_dict.items():
+            x_str, y_str = key.split(",")
+            x, y = int(x_str), int(y_str)
+            biome_array[x][y] = biome_id
+
+    def get_biome(self, x: int, y: int) -> Optional[str]:
+        """
+        获取世界坐标 (x, y) 处的生物群系 ID。
+        返回 None 表示该位置尚未加载。
+        """
+        if y < 0 or y >= self.y_max:
+            return None
+        chunk = self.biome_map.get(x // 16)
+        if chunk is None:
+            return None
+        local_x = x % 16
+        return str(chunk[local_x, y])
+
     def unload_chunk(self, x: int):
-        del self._regions[x]
+        """卸载区块，同时清理方塊、光照和生物群系数据"""
+        self._regions.pop(x, None)
+        self.light_map.pop(x, None)
+        self.biome_map.pop(x, None)
 
     def get_block(self, x_loc: int | Location, y: int | None = None, z: int | None = None) -> Block:
         x, y, z = decide_x_or_loc(x_loc, y, z)
