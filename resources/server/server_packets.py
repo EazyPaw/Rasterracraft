@@ -91,7 +91,35 @@ def decode_packet(packet: dict, player: Player):
 
             # 发送光照更新（主区块 + 相邻区块）
             _send_light_updates_for_boundary(world, player, packet['x'] // 16)
-    if packet['__class__'] != 'PlayerMove':
+    elif packet['__class__'] == 'ChatMessage':
+        # 客户端发送的聊天消息
+        text = packet.get('text', '')
+        # 截断过长消息（服务端防御）
+        if len(text) > 128:
+            text = text[:128]
+        # 以 "/" 开头的内容交由命令系统处理
+        if text.startswith("/"):
+            cmd_text = text[1:]
+            args = cmd_text.split()
+            if args:
+                server = player.world.server
+                try:
+                    result = server.command_executor.execute_command(player, args)
+                    # 检查是否为错误回显（§c 开头）
+                    if result.startswith("§c"):
+                        color = (255, 85, 85)  # 红色
+                    else:
+                        color = (255, 255, 255)  # 白色
+                except Exception:
+                    result = f"§c命令执行错误: {cmd_text}"
+                    color = (255, 85, 85)
+                # 回显仅发送给执行者
+                server.send_chat_to_player(player, result, color)
+            return
+        # 普通聊天：广播给所有玩家
+        formatted = f"<{player.name}> {text}"
+        player.world.server.broadcast_chat(formatted, (255, 255, 255))
+    if packet['__class__'] not in ('PlayerMove', 'ChatMessage'):
         logging.debug(f"Received {packet['__class__']} packet.")
         logging.debug(packet)
 

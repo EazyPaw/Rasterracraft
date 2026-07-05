@@ -19,6 +19,7 @@ class Block(ABC):
     _texture_path = None          # 图片文件路径
     _texture = None      # 原始 Surface（懒加载）
     _last_scaled = -1
+    _last_tex_id = -1    # 用于检测动画帧变化（id(tex)）
     solid = True
     friction = 0.6
     break_sound = 'dig.stone'
@@ -46,10 +47,16 @@ class Block(ABC):
         :param client:
         :return:
         """
-        if cls._texture is None:
-            cls._texture = client.resources_manager.get_texture_img(cls._texture_path)
-        if size != cls._last_scaled:
-            cls._texture = pygame.transform.scale(cls._texture, (size, size))
+        # 每帧都调用 get_texture_img：静态纹理返回缓存的同一 Surface（id 不变），
+        # 动画纹理每帧返回不同的 frame subsurface（id 不同）
+        tex = client.resources_manager.get_texture_img(cls._texture_path)
+        if tex is None:
+            return cls._texture
+        # 使用 tex 的 id 作为帧标识：静态纹理 id 不变跳过缩放，动画纹理 id 变化则重新缩放
+        if id(tex) != cls._last_tex_id or size != cls._last_scaled:
+            cls._texture = pygame.transform.scale(tex, (size, size))
+            cls._last_scaled = size
+            cls._last_tex_id = id(tex)
         return cls._texture
 
     def get_safe_attributes(self):
@@ -163,3 +170,31 @@ class GrassStain(Plant):
         self._texture_cache[size] = stained_texture
 
         return stained_texture
+
+class Leaves(Block):
+    _texture_cache = {}
+
+    @client_method
+    def get_texture(self, size, client: 'Client'):
+        if size in self._texture_cache:
+            return self._texture_cache[size]
+        base_texture = client.resources_manager.get_texture_img(self._texture_path)
+
+        if base_texture is None:
+            return None
+
+        texture_scaled = pygame.transform.scale(base_texture, (size, size))
+
+        stained_texture = client.resources_manager.biome_stain(texture_scaled, self.location, "foliage").convert_alpha()
+
+        self._texture_cache[size] = stained_texture
+
+        return stained_texture
+
+class BottomSupport(Block):
+    """
+    底部需要支撑的方块
+    """
+    def on_update(self):
+        if not self.location.world.get_block(self.location.add(0, -1, 0)).solid:
+            self.location.world.break_block(self.location)

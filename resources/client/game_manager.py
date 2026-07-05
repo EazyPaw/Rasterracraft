@@ -36,6 +36,9 @@ class GameManager:
 
     def handle_key_pressed(self):
         """处理键盘输入"""
+        # 聊天栏打开时禁止游戏键鼠操作
+        if self.client.chat_gui and self.client.chat_gui.is_open:
+            return
         keys = pygame.key.get_pressed()
         mouse_button = pygame.mouse.get_pressed()
         for key, action in self.client.hold_key_map.items():
@@ -109,6 +112,8 @@ class GameManager:
             if self.client.in_game:
                 self.tick_ig()
             self.client_tick()
+
+            self.client.client_ticks += 1
 
             next_time += interval
             sleep_time = next_time - time.perf_counter()

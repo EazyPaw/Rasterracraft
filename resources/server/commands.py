@@ -21,7 +21,8 @@ class CommandExecutor:
         "players": self.list_players,
         "tp": self.teleport,
         "exec": self.python_execute,
-        "setblock": self.set_block_c
+        "setblock": self.set_block_c,
+        "say": self.say_command,
     }
 
     def python_execute(self, args, executor: Player | str):
@@ -123,6 +124,17 @@ class CommandExecutor:
         block = get_block_by_id(args[0])
         block.place_at(Location(self.server.worlds[self.server.main_world_id], int(args[1]), int(args[2]), int(args[3])))
         return f"Block placed at {block.location}"
+
+    def say_command(self, args, executor: Player | str):
+        """广播消息给所有玩家（/say <message>）"""
+        message = " ".join(args)
+        if not message:
+            raise ValueError("Usage: /say <message>")
+        if len(message) > 128:
+            message = message[:128]
+        formatted = f"[Server] {message}"
+        self.server.broadcast_chat(formatted, (255, 255, 85))
+        return f"Broadcasted: {message}"
 
 
     def execute_command(self, executor: Player | str, args: list) -> str:

@@ -2,6 +2,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from resources.client.GUI.inventory.backpack import Backpack
+from resources.client.GUI.chat import ChatGUI
 from resources.client.GUI.inventory.hotbar import HotBar
 from resources.server.block_class import Block
 from resources.server.blocks import AIR
@@ -60,7 +61,13 @@ class CreativeMode(GameMode):
         self.inv = Backpack(self.player.client.render)
 
     def update_gui(self):
-        self.player.client.render.drawing_GUIs = [HotBar(self.player.client.render)]
+        # 确保 ChatGUI 单例存在（首次创建）
+        if self.player.client.chat_gui is None:
+            self.player.client.chat_gui = ChatGUI(self.player.client.render)
+        self.player.client.render.drawing_GUIs = [
+            HotBar(self.player.client.render),
+            self.player.client.chat_gui,
+        ]
 
     def left_click_on_block(self, block: Block):
         if self.player.client.hold_mouse_buttons[0]:

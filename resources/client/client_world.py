@@ -1,6 +1,7 @@
 import logging
 import math
 from typing import Any, Optional, cast
+import time
 
 import numpy as np
 
@@ -28,6 +29,7 @@ class ClientWorld:
             block.write_nbt(value.get('nbt', {}))
             block.location = Location(self, world_x, y, z)  # 使用绝对坐标
             chunk_array[x][y][z] = block
+            time.sleep(0)  # 释放GIL，让出CPU，不然会导致渲染卡顿
         self._regions[rx] = chunk_array
 
     def load_lights(self, rx: int, light_map: dict[str, int]):
@@ -36,6 +38,7 @@ class ClientWorld:
             x, y = key.split(",")
             x, y = int(x), int(y)
             light_array[x][y] = value
+            time.sleep(0) # 同理
         self.light_map[rx] = light_array
 
     def update_lights(self, rx: int, light_map: dict[str, int]):

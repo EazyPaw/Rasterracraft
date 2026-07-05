@@ -10,7 +10,8 @@ from resources.server.location import Location
 from resources.server.biome import get_biome_by_id
 
 class ResourcesManager:
-    def __init__(self):
+    def __init__(self, client):
+        self.client = client
         self.textures = {}
         self.sounds = {}          # 存储解析后的音效信息
         self.sound_objects = {}   # 缓存已加载的 pygame.mixer.Sound 对象
@@ -39,7 +40,14 @@ class ResourcesManager:
         """
         # 检查缓存
         if key in self.textures:
-            return self.textures[key]
+            r = self.textures[key]
+            if isinstance(r, pygame.Surface):
+                return self.textures[key]
+            if isinstance(r, dict):
+                t = self.client.client_ticks
+                c = len(self.textures[key]["textures"])
+                n = int(t / self.textures[key]["frame_time"]) % c
+                return self.textures[key]["textures"][n]
 
         # 解析路径
         parts = key.split('.')
@@ -54,14 +62,37 @@ class ResourcesManager:
 
         # 构建完整路径：assets/minecraft/textures/{category}/{subpath}.png
         full_path = f'assets/minecraft/textures/{category}/{file_path}.png'
+        meta_path = f'assets/minecraft/textures/{category}/{file_path}.png.mcmeta'
 
         try:
             if not os.path.exists(full_path):
                 logging.warning(f"Texture file not found: '{full_path}'")
                 self.textures[key] = self.missing_texture
                 return self.missing_texture
+            if os.path.exists(meta_path):
+                with open(meta_path, 'r', encoding='utf-8') as f:
+                    meta: dict = json.load(f)
+            else:
+                meta = {}
 
             texture = pygame.image.load(full_path).convert_alpha()
+
+            # 部分带有动画的方块
+            if "animation" in meta:
+                frame_time = meta["animation"].get("frame_time", 1)
+                width = texture.get_size()[0]
+                height = texture.get_size()[1]
+                if height % width != 0:
+                    logging.warning(f"Texture height is not a multiple of width: {width}")
+                    self.textures[key] = self.missing_texture
+                    return self.missing_texture
+                self.textures[key] = {"textures":self.split_horizontal_strips(texture),
+                                      "frame_time": frame_time}
+                # 首次加载也计算当前帧（与缓存命中分支逻辑一致）
+                strips = self.textures[key]["textures"]
+                n = int(self.client.client_ticks / frame_time) % len(strips)
+                return strips[n]
+
 
             # 如果需要切除完全透明的边缘
             if cft:
@@ -278,3 +309,21 @@ class ResourcesManager:
                     sound_obj.play()
         except pygame.error as e:
             print(f"Error playing sound '{full_path}': {e}")
+
+    @staticmethod
+    def split_horizontal_strips(surface):
+        """
+        将 Surface 沿高度方向切割为多个等高的水平条带
+        """
+        width = surface.get_width()
+        height = surface.get_height()
+        num_parts = height // width
+        part_height = height // num_parts
+
+        strips = []
+        for i in range(num_parts):
+            # 截取区域: (x, y, width, height)
+            rect = (0, i * part_height, width, part_height)
+            strips.append(surface.subsurface(rect))
+
+        return strips

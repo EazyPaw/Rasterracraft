@@ -8,6 +8,7 @@ class Player(Entity):
         super().__init__(x, y, world)
         self.world: World = world
         self.loading_regions = []
+        self.name = "Player_" + self.uuid.hex[:8]
 
     def on_moving(self):
         rx = int(self.x // 16)

@@ -2,7 +2,7 @@ import os
 if os.environ.get('PYCRAFT_CLIENT') == '1':
     import pygame
 
-from resources.server.block_class import Block, Plant, GrassStain
+from resources.server.block_class import *
 from resources.server.tags import BlockTag
 from resources.server.utils import client_method
 
@@ -169,36 +169,17 @@ class DANDELION(Plant):
     name = 'dandelion'
     _texture_path = 'blocks.flower_dandelion'
 
-class OAK_LEAVES(Block):
+class OAK_LEAVES(Leaves):
     block_id = 'oak_leaves'
     name = 'oak_leaves'
-    _texture_path = 'blocks.oak_leaves'
-
-    _texture_cache = {}
-
-    @client_method
-    def get_texture(self, size, client: 'Client'):
-        if size in self._texture_cache:
-            return self._texture_cache[size]
-        base_texture = client.resources_manager.get_texture_img("blocks.leaves_oak")
-
-        if base_texture is None:
-            return None
-
-        texture_scaled = pygame.transform.scale(base_texture, (size, size))
-
-        stained_texture = client.resources_manager.biome_stain(texture_scaled, self.location, "foliage").convert_alpha()
-
-        self._texture_cache[size] = stained_texture
-
-        return stained_texture
+    _texture_path = 'blocks.leaves_oak'
 
 class OAK_LOG(Block):
     block_id = 'oak_log'
     name = 'oak_log'
     _texture_path = 'blocks.log_oak'
 
-class BIRCH_LEAVES(Block):
+class BIRCH_LEAVES(Leaves):
     block_id = 'birch_leaves'
     name = 'birch leaves'
     _texture_path = 'blocks.leaves_birch'
@@ -208,7 +189,7 @@ class BIRCH_LOG(Block):
     name = 'birch log'
     _texture_path = 'blocks.log_birch'
 
-class SPRUCE_LEAVES(Block):
+class SPRUCE_LEAVES(Leaves):
     block_id = 'spruce_leaves'
     name = 'spruce leaves'
     _texture_path = 'blocks.leaves_spruce'
@@ -218,7 +199,7 @@ class SPRUCE_LOG(Block):
     name = 'spruce log'
     _texture_path = 'blocks.log_spruce'
 
-class JUNGLE_LEAVES(Block):
+class JUNGLE_LEAVES(Leaves):
     block_id = 'jungle_leaves'
     name = 'jungle leaves'
     _texture_path = 'blocks.leaves_jungle'
@@ -228,7 +209,7 @@ class JUNGLE_LOG(Block):
     name = 'jungle log'
     _texture_path = 'blocks.log_jungle'
 
-class ACACIA_LEAVES(Block):
+class ACACIA_LEAVES(Leaves):
     block_id = 'acacia_leaves'
     name = 'acacia leaves'
     _texture_path = 'blocks.leaves_acacia'
@@ -238,7 +219,7 @@ class ACACIA_LOG(Block):
     name = 'acacia log'
     _texture_path = 'blocks.log_acacia'
 
-class DARK_OAK_LEAVES(Block):
+class DARK_OAK_LEAVES(Leaves):
     block_id = 'dark_oak_leaves'
     name = 'dark oak leaves'
     _texture_path = 'blocks.leaves_big_oak'
@@ -285,11 +266,46 @@ class HARDENED_CLAY(Block):
     name = 'hardened clay'
     _texture_path = 'blocks.hardened_clay'
 
-class SNOW(Block):
+class SNOW(BottomSupport):
     block_id = 'snow'
     name = 'snow'
     _texture_path = 'blocks.snow'
     break_sound = 'dig.gravel'
+    solid = False
+    light_attenuation = 0
+
+    _texture_cache = {}
+
+    def __init__(self, layer = 1):
+        super().__init__()
+        if layer > 8:
+            raise Exception('layer > 8')
+        self.layer = layer
+
+    @client_method
+    def get_texture(self, size, client):
+        if (size, self.layer) in self._texture_cache:
+            return self._texture_cache[(size, self.layer)]
+        base_texture = client.resources_manager.get_texture_img(self._texture_path)
+
+        width, height = base_texture.size
+        layer_height = int(height * self.layer / 8)
+        rect = pygame.Rect((0, height - layer_height, width, layer_height))
+
+        tex = base_texture.subsurface(rect).copy()
+
+        # 将裁剪后的纹理缩放到目标尺寸
+        tex_h = int(size * 0.125 * self.layer)
+        scaled_tex = pygame.transform.scale(tex, (size, tex_h))
+
+        # 创建完整尺寸的透明 Surface，将雪纹理贴在底部
+        # 这样渲染器无需改动，且光照渐变能正确对应底部位置
+        final_texture = pygame.Surface((size, size), pygame.SRCALPHA)
+        final_texture.blit(scaled_tex, (0, size - tex_h))
+
+        self._texture_cache[(size, self.layer)] = final_texture.convert_alpha()
+
+        return final_texture
 
 class ICE(Block):
     block_id = 'ice'

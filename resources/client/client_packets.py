@@ -83,6 +83,15 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         # }
         if 'rx' in packet and 'biome_array' in packet:
             client.client_world.update_biomes(packet['rx'], packet['biome_array'])
+    elif packet['__class__'] == 'ChatMessage':
+        # {
+        #     '__class__': 'ChatMessage',
+        #     'text': 'formatted message text',
+        #     'color': [r, g, b],  # 可选颜色
+        # }
+        color_raw = packet.get('color', [255, 255, 255])
+        color = tuple(color_raw) if isinstance(color_raw, list) else color_raw
+        client.add_chat_message(packet.get('text', ''), color)
     logging.debug(f"Received {packet['__class__']} packet.")
 
 def encode_packet(obj, obj_type = None, args = None) -> dict:
@@ -115,6 +124,9 @@ def encode_packet(obj, obj_type = None, args = None) -> dict:
             'z': location.z,
             'block_id': obj.block_id,
         }
+    elif isinstance(obj, dict) and '__class__' in obj:
+        # 直传已构建好的数据包（如 ChatMessage）
+        return obj
     logging.warning("Unknown packet to encode")
     logging.debug(f"Encoding{type(obj)},{obj_type} packet.")
     return {}

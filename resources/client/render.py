@@ -400,8 +400,9 @@ class Render:
             return
 
         # ---- 7. 光照纹理缓存 ----
-        # 键使用 block_id 与离散化亮度（0-255）
-        key = (block.block_id, int(ftl * 255), int(ftr * 255), int(fbl * 255), int(fbr * 255))
+        # 键使用 block_id + 纹理帧标识(id(tex)) + 离散化亮度
+        # id(tex) 在静态纹理时不变（缓存生效），动画纹理每帧不同（分别缓存各帧）
+        key = (block.block_id, id(tex), int(ftl * 255), int(ftr * 255), int(fbl * 255), int(fbr * 255))
         cache = self.lit_tex_cache
         if key in cache:
             lit_tex = cache[key]
@@ -448,10 +449,11 @@ class Render:
 
     def draw_player(self):
         self.client.client_player.skeleton.draw()
-        pygame.draw.rect(
-            self.screen, (0, 0, 255),
-            ((self.SCREEN_WIDTH - 2) / 2, (self.SCREEN_HEIGHT - 2) / 2, 2, 2)
-        )
+        # pygame.draw.rect(
+        #     self.screen, (0, 0, 255),
+        #     ((self.SCREEN_WIDTH - 2) / 2, (self.SCREEN_HEIGHT - 2) / 2, 2, 2)
+        # )
+
 
     def get_hovered_block_position(self):
         self.mouse_x, self.mouse_y = pygame.mouse.get_pos()

@@ -22,6 +22,11 @@ from resources.server.utils import recv_exact, set_client
 
 class Client:
     def __init__(self):
+        # 初始化剪贴板（Ctrl+V 粘贴用）
+        try:
+            pygame.scrap.init()
+        except Exception:
+            pass
         self.is_shutting_down = False
         self.version = "0.0.1 SNAPSHOT"
         self.client_world = client_world.ClientWorld(self)
@@ -45,10 +50,15 @@ class Client:
         self.server_process: subprocess.Popen | None = None
         self.chunk_load_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkLoader")
         self.in_game = True
-        self.resources_manager = ResourcesManager()
+        self.resources_manager = ResourcesManager(self)
         self.resources_manager.load_sounds_json('assets/minecraft/sounds.json')
         self.start_game()
         self.rate = 20
+        self.client_ticks = 0
+        # 聊天消息历史
+        self.chat_messages: list[dict] = []  # [{'text': str, 'color': tuple, 'time': float}]
+        self.max_chat_messages = 100
+        self.chat_gui = None  # ChatGUI 在步骤 6 初始化
         self.client_player = ClientPlayer(self)
         self.game_manager = GameManager(self)
         self.game_thread = threading.Thread(target=self.game_manager.start_game_loop, name="InGameThread")
@@ -65,7 +75,7 @@ class Client:
             pygame.K_s: self.client_player.handle_shift,
         }
         self.key_map = {
-            pygame.K_t: self.render.debug_mode,
+            pygame.K_F3: self.render.debug_mode,
             pygame.K_e: self.client_player.game_mode.open_inventory,
         }
         self.game_thread.start()
@@ -194,6 +204,16 @@ class Client:
 
     def start_server(self):
         self.server.init()
+
+    def add_chat_message(self, text: str, color=(255, 255, 255)):
+        """添加聊天消息到历史记录"""
+        self.chat_messages.append({
+            'text': text,
+            'color': color,
+            'time': time.time()
+        })
+        if len(self.chat_messages) > self.max_chat_messages:
+            self.chat_messages = self.chat_messages[-self.max_chat_messages:]
 
     def shutdown(self):
         """优雅地关闭客户端"""

@@ -1,4 +1,5 @@
 import logging
+import random
 import socket
 import struct
 import threading
@@ -13,6 +14,7 @@ import numpy as np
 import resources.server.generator as generator
 from resources.server.commands import CommandExecutor
 from resources.server.player import Player
+from resources.server.text import Text
 from resources.server.server_packets import encode_packet, decode_packet
 from resources.server.utils import recv_exact, set_client
 from resources.server.world_class import World, WorldAttribute, Chunk
@@ -40,7 +42,7 @@ class Server:
         self.client = client
         # 区块生成线程池：generate_chunk 是 CPU 密集型操作（噪声计算），
         # noise 库（C 扩展）和 numpy 在计算时会释放 GIL，因此多线程有实际收益。
-        self.chunk_gen_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkGen")
+        self.chunk_gen_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ChunkGen")
         if client is not None:
             set_client(client)
 
@@ -85,6 +87,7 @@ class Server:
                 self.connections[player] = (client_sock, client_addr)
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
+                self.server.broadcast_chat(f"{player.name} joined the game", (255, 255, 85))
                 client_thread = threading.Thread(target=self.handle_client, args=(client_sock, client_addr, player), name="SocketClientThread")
                 client_thread.daemon = True
                 client_thread.start()
@@ -173,6 +176,57 @@ class Server:
 
     def tick(self):
         self.load_chunks()
+
+    def _resolve_chat_msg(self, msg, color=None):
+        """解析聊天消息参数，统一处理 str 和 Text 对象。
+
+        Returns (text: str, color: tuple).
+        """
+        if isinstance(msg, Text):
+            text = msg.to_plain_string()
+            if color is None and msg.text:
+                color = msg.text[0]['color'].value
+        else:
+            text = str(msg)
+        if color is None:
+            color = (255, 255, 255)
+        if isinstance(color, list):
+            color = tuple(color)
+        return text, color
+
+    def send_chat_to_player(self, player: Player, msg, color=None):
+        """向单个玩家发送聊天消息。
+
+        Parameters
+        ----------
+        player : Player
+            目标玩家。
+        msg : str | Text
+            消息文本或 Text 对象。Text 对象会提取第一段的颜色。
+        color : tuple | None
+            RGB 颜色元组。若为 None 且 msg 为 Text，使用 Text 的颜色。
+        """
+        text, color = self._resolve_chat_msg(msg, color)
+        packet = {'__class__': 'ChatMessage', 'text': text, 'color': list(color)}
+        self.send_client_socket(player, packet, "Forward")
+
+    def broadcast_chat(self, msg, color=None, exclude=None):
+        """向所有玩家广播聊天消息。
+
+        Parameters
+        ----------
+        msg : str | Text
+            消息文本或 Text 对象。
+        color : tuple | None
+            RGB 颜色元组。若为 None 且 msg 为 Text，使用 Text 的颜色。
+        exclude : Player | None
+            要排除的玩家。
+        """
+        text, color = self._resolve_chat_msg(msg, color)
+        packet = {'__class__': 'ChatMessage', 'text': text, 'color': list(color)}
+        for p in self.players:
+            if p != exclude:
+                self.send_client_socket(p, packet, "Forward")
 
     def send_client_socket(self, player: Player, obj, obj_type = None, args = None) -> bool:
         """
@@ -274,5 +328,7 @@ class Server:
         self.chunk_gen_pool.shutdown(wait=True)
 
     def on_player_disconnect(self, player: Player):
+        # 广播离开消息（黄色，排除已离开的玩家）
+        self.broadcast_chat(f"{player.name} left the game", (255, 255, 85), exclude=player)
         self.players.remove(player)
         self.socket_server.connections.pop(player)
