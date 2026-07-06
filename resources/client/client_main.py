@@ -16,6 +16,7 @@ from resources.client import render, client_world
 from resources.client.client_packets import decode_packet, encode_packet
 from resources.client.game_manager import GameManager
 from resources.client.client_player import ClientPlayer
+from resources.client.GUI.main_menu import MainMenu
 from resources.client.resources_loader import ResourcesManager
 from resources.server.server_main import Server
 from resources.server.utils import recv_exact, set_client
@@ -49,35 +50,25 @@ class Client:
         self.server: Server | None = None
         self.server_process: subprocess.Popen | None = None
         self.chunk_load_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkLoader")
-        self.in_game = True
+        self.in_game = False
+        self.game_started = False
         self.resources_manager = ResourcesManager(self)
         self.resources_manager.load_sounds_json('assets/minecraft/sounds.json')
-        self.start_game()
         self.rate = 20
         self.client_ticks = 0
         # 聊天消息历史
         self.chat_messages: list[dict] = []  # [{'text': str, 'color': tuple, 'time': float}]
         self.max_chat_messages = 100
         self.chat_gui = None  # ChatGUI 在步骤 6 初始化
-        self.client_player = ClientPlayer(self)
+        self.client_player: ClientPlayer | None = None
         self.game_manager = GameManager(self)
         self.game_thread = threading.Thread(target=self.game_manager.start_game_loop, name="InGameThread")
         self.game_thread.daemon = True
         self.hold_mouse_buttons = [False, False, False]
-        self.hold_key_map = {
-            "mouse_left": self.client_player.game_mode.left_click_on_block,
-            "mouse_right": self.client_player.game_mode.right_click_on_block,
-            pygame.K_d: self.client_player.move_right,
-            pygame.K_a: self.client_player.move_left,
-            pygame.K_w: self.client_player.jump,
-            pygame.K_SPACE: self.client_player.jump,
-            pygame.K_LSHIFT: self.client_player.handle_shift,
-            pygame.K_s: self.client_player.handle_shift,
-        }
-        self.key_map = {
-            pygame.K_F3: self.render.debug_mode,
-            pygame.K_e: self.client_player.game_mode.open_inventory,
-        }
+        self.hold_key_map = {}
+        self.key_map = {}
+        self.main_menu = MainMenu(self.render)
+        self.render.show_gui(self.main_menu)
         self.game_thread.start()
         pygame.key.stop_text_input()
 
@@ -94,6 +85,14 @@ class Client:
                     time.sleep(retry_delay)
                 else:
                     logging.error("Could not connect to integrated server after retries")
+                    return
+            except OSError as e:
+                if not self.socket_thread_running or self.is_shutting_down:
+                    return
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    logging.error(f"Could not connect to integrated server: {e}")
                     return
 
         logging.info("Connected to integrated server")
@@ -171,11 +170,40 @@ class Client:
         self.render.start()
 
     def start_game(self):
+        if self.game_started:
+            return
+
+        self.game_started = True
+        if hasattr(self, "main_menu") and self.main_menu in self.render.drawing_GUIs:
+            self.render.close_gui(self.main_menu)
+
+        self.client_player = ClientPlayer(self)
+        self._install_game_controls()
+
         if self.server_mode == "subprocess":
             self._start_server_subprocess()
         else:
             self._start_server_thread()
         self.socket_thread.start()
+        self.in_game = True
+
+    def _install_game_controls(self):
+        if self.client_player is not None:
+            self.hold_mouse_buttons = [False, False, False]
+            self.hold_key_map = {
+                "mouse_left": self.client_player.game_mode.left_click_on_block,
+                "mouse_right": self.client_player.game_mode.right_click_on_block,
+                pygame.K_d: self.client_player.move_right,
+                pygame.K_a: self.client_player.move_left,
+                pygame.K_w: self.client_player.jump,
+                pygame.K_SPACE: self.client_player.jump,
+                pygame.K_LSHIFT: self.client_player.handle_shift,
+                pygame.K_s: self.client_player.handle_shift,
+            }
+            self.key_map = {
+                pygame.K_F3: self.render.debug_mode,
+                pygame.K_e: self.client_player.game_mode.open_inventory,
+            }
 
     def _start_server_subprocess(self):
         """以子进程方式启动服务端，绕过 GIL，客户端不受服务端运算影响。"""

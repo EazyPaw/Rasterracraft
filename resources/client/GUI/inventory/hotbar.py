@@ -13,6 +13,11 @@ class HotBar(GUI):
         self.selection_texture = self.get_texture(self.render.gui_scale, self.render.client, "gui.sprites.hud.hotbar_selection")
 
     def draw(self):
+        # 竞态条件保护：start_game() 在另一个线程中将 HotBar 添加到
+        # drawing_GUIs，但 client_player 的赋值可能尚未完成。
+        if self.render.client.client_player is None:
+            return
+
         texture = self.get_texture(self.render.gui_scale, self.render.client)
 
         x = (self.render.SCREEN_WIDTH - texture.get_width()) // 2

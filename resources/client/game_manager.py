@@ -86,10 +86,12 @@ class GameManager:
         events = self.event_queue
         self.event_queue = []
 
-        for gui in self.client.render.drawing_GUIs:
+        for gui in self.client.render.drawing_GUIs[:]:
             gui.handle_events(events)  # GUI 处理事件, 被GUI处理的事件会从事件队列中删除
 
         for event in events:
+            if not self.client.in_game or self.client.client_player is None:
+                continue
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     now = time.perf_counter()
@@ -111,6 +113,8 @@ class GameManager:
 
             if self.client.in_game:
                 self.tick_ig()
+            else:
+                self.handle_events()
             self.client_tick()
 
             self.client.client_ticks += 1
