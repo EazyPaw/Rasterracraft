@@ -179,7 +179,7 @@ class GrassStain(Plant):
         return stained_texture
 
 class Leaves(Block):
-    solid = False
+    solid = True
     _texture_cache = {}   # key: (size, biome_id)
     _effect_cache = {}    # key: (size, biome_id, z, front_same, behind_leaf)
     break_sound = 'dig.grass'

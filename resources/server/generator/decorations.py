@@ -316,6 +316,16 @@ class DecorationMixin(NoiseMixin):
             h += self._stable_hash(trunk_x, 820) % (config.height_rand_a + 1)
         if config.height_rand_b > 0:
             h += self._stable_hash(trunk_x, 821) % (config.height_rand_b + 1)
+        # 保证最低树叶到地面的距离 >= 2 格
+        shape = config.shape
+        if shape == "spruce":
+            h = max(h, 7)
+        elif shape == "jungle":
+            h = max(h, 5)
+        elif shape in {"acacia", "flat"}:
+            h = max(h, 3)
+        else:
+            h = max(h, 4)
         return h
 
     def tree_block_at(self, tree_name: str, trunk_x: int, ground_y: int,

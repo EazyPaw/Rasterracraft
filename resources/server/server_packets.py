@@ -84,8 +84,6 @@ def decode_packet(packet: dict, player: Player):
             world.break_block(packet['x'], packet['y'], packet['z'])
             forward_packet_to_others(packet, player)
 
-            # 发送光照更新（主区块 + 相邻区块）
-            _send_light_updates_for_boundary(world, player, packet['x'] // 16)
     elif packet['__class__'] == 'PlaceBlock':
         # {
         #     '__class__': 'PlaceBlock',
@@ -100,8 +98,6 @@ def decode_packet(packet: dict, player: Player):
             block.place_at(Location(world, packet['x'], packet['y'], packet['z']))
             forward_packet_to_others(packet, player)
 
-            # 发送光照更新（主区块 + 相邻区块）
-            _send_light_updates_for_boundary(world, player, packet['x'] // 16)
     elif packet['__class__'] == 'ChatMessage':
         # 客户端发送的聊天消息
         text = packet.get('text', '')
@@ -130,9 +126,9 @@ def decode_packet(packet: dict, player: Player):
         # 普通聊天：广播给所有玩家
         formatted = f"<{player.name}> {text}"
         player.world.server.broadcast_chat(formatted, (255, 255, 255))
-    if packet['__class__'] not in ('PlayerMove', 'ChatMessage'):
-        logging.debug(f"Received {packet['__class__']} packet.")
-        logging.debug(packet)
+    # if packet['__class__'] not in ('PlayerMove', 'ChatMessage'):
+    #     logging.debug(f"Received {packet['__class__']} packet.")
+    #     logging.debug(packet)
 
 def _send_light_updates_for_boundary(world, player, rx: int):
     """发送主区块及其相邻区块的光照更新数据包"""

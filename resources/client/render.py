@@ -14,6 +14,9 @@ DAY_LENGTH_SECONDS = 20 * 60
 SKY_CACHE_TICK_STEP = 60
 MIN_SKY_LIGHT_WEIGHT = 0.22
 BLOCK_LIGHT_TINT = (255, 200, 120)
+BLOCK_TINT_COLOR_STEP = 8
+BLOCK_LIGHT_LEVELS = 63
+BLOCK_RATIO_LEVELS = 15
 
 
 def clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
@@ -31,6 +34,15 @@ def lerp_color(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tu
         int(lerp(a[1], b[1], t)),
         int(lerp(a[2], b[2], t)),
     )
+
+
+def quantize_unit(value: float, levels: int) -> tuple[int, float]:
+    q = int(round(clamp(value) * levels))
+    return q, q / levels
+
+
+def quantize_color(color: tuple[int, int, int], step: int) -> tuple[int, int, int]:
+    return tuple(min(255, max(0, int(round(channel / step) * step))) for channel in color)
 
 
 def smoothstep(edge0: float, edge1: float, value: float) -> float:
@@ -146,8 +158,13 @@ class Render:
         (22000, (53, 58, 96)),
         (23000, (143, 170, 229)),
     ]
-    SUNRISE_COLOR = (255, 194, 91)
+    SUNRISE_COLOR = (255, 210, 102)
     SUNSET_COLOR = (216, 65, 42)
+    DAWN_COLOR_START = 22000
+    DAWN_COLOR_END = 2600
+    DAWN_YELLOW_CURVE = 2.25
+    SUNSET_COLOR_START = 10500
+    SUNSET_COLOR_RED = 13800
 
     def __init__(self, client: 'Client'):
         self.sky_base = None
@@ -182,6 +199,7 @@ class Render:
         self._last_daytime_update = pygame.time.get_ticks()
         self.sky_layer = None
         self.sky_cache_key = None
+        self.current_sky_state = None
         self.stars = self.generate_stars()
         self.sun_texture = self.load_environment_texture("assets\\minecraft\\textures\\environment\\sun.png")
         self.moon_phase_textures = self.load_moon_phase_textures()
@@ -190,9 +208,11 @@ class Render:
 
         # 光照与阴影相关缓存
         self.gradient_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
-        self.MAX_GRADIENT_CACHE = 128  # 渐变纹理缓存上限
+        self.MAX_GRADIENT_CACHE = 256  # 渐变纹理缓存上限
         self.lit_tex_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
-        self.MAX_LIT_CACHE = 256  # 最终光照纹理缓存上限
+        self.MAX_LIT_CACHE = 768  # 最终光照纹理缓存上限
+        self.corner_color_cache: OrderedDict[tuple, tuple[int, int, int]] = OrderedDict()
+        self.MAX_CORNER_COLOR_CACHE = 4096
         self.celestial_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_CELESTIAL_CACHE = 128
         self.ao_multiple = 0.05
@@ -274,6 +294,7 @@ class Render:
         """Draw the animated day-night sky."""
         self.update_day_time()
         sky_state = self.get_sky_state()
+        self.current_sky_state = sky_state
         cache_key = (
             self.SCREEN_WIDTH,
             self.SCREEN_HEIGHT,
@@ -343,7 +364,24 @@ class Render:
         sunrise = max(dawn_before_midnight, dawn_after_midnight)
         sunset = smoothstep(10500, 12200, time_value) * (1.0 - smoothstep(13800, 15500, time_value))
         twilight = clamp(max(sunrise, sunset))
-        twilight_color = lerp_color(self.SUNRISE_COLOR, self.SUNSET_COLOR, smoothstep(6000, 12000, time_value))
+        if time_value >= self.DAWN_COLOR_START:
+            dawn_progress = (time_value - self.DAWN_COLOR_START) / (
+                DAY_TICKS - self.DAWN_COLOR_START + self.DAWN_COLOR_END
+            )
+        elif time_value <= self.DAWN_COLOR_END:
+            dawn_progress = (time_value + DAY_TICKS - self.DAWN_COLOR_START) / (
+                DAY_TICKS - self.DAWN_COLOR_START + self.DAWN_COLOR_END
+            )
+        else:
+            dawn_progress = 1.0
+        dawn_progress = 1.0 - (1.0 - clamp(dawn_progress)) ** self.DAWN_YELLOW_CURVE
+        sunrise_color = lerp_color(self.SUNSET_COLOR, self.SUNRISE_COLOR, smoothstep(0.0, 1.0, dawn_progress))
+        sunset_color = lerp_color(
+            self.SUNRISE_COLOR,
+            self.SUNSET_COLOR,
+            smoothstep(self.SUNSET_COLOR_START, self.SUNSET_COLOR_RED, time_value),
+        )
+        twilight_color = lerp_color(sunrise_color, sunset_color, smoothstep(0.0, 1.0, sunset))
 
         daylight = smoothstep(0.0, 0.55, sun_lift)
         night = smoothstep(0.02, 0.42, self.get_body_lift(time_value, self.MOON_RISE_TICK))
@@ -488,8 +526,8 @@ class Render:
     def to_linear_dodge_surface(self, surface: pygame.Surface, visibility: float) -> pygame.Surface:
         rgb = pygame.surfarray.array3d(surface).astype(np.float32)
         alpha = pygame.surfarray.array_alpha(surface).astype(np.float32) / 255.0
-        dodge_strength = np.power(alpha, 0.55) * clamp(visibility)
-        rgb *= dodge_strength[..., None]
+        dodge_strength = np.power(alpha, 0.42) * clamp(visibility)
+        rgb *= (dodge_strength * 1.45)[..., None]
         return pygame.surfarray.make_surface(np.clip(rgb, 0, 255).astype(np.uint8)).convert()
 
     def get_sky_light_weight(self) -> float:
@@ -536,13 +574,24 @@ class Render:
         """根据亮度和光源比例计算角落光照颜色。
         brightness=0 → (0,0,0), brightness=1 → (255,255,255)
         中间亮度时混入天空/方块光源的色调。"""
-        b = clamp(brightness)
+        b_key, b = quantize_unit(brightness, BLOCK_LIGHT_LEVELS)
+        r_key, sky_ratio = quantize_unit(sky_ratio, BLOCK_RATIO_LEVELS)
+        key = (b_key, r_key, sky_color)
+        cache = self.corner_color_cache
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+
         base = int(b * 255)
         # 色调强度：亮度 0 和 1 时为 0，亮度 0.5 时最大
         tint_amount = b * (1.0 - b) * 4.0
         if tint_amount < 0.005:
-            return (base, base, base)
-        tint = lerp_color(BLOCK_LIGHT_TINT, sky_color, clamp(sky_ratio))
+            result = (base, base, base)
+            cache[key] = result
+            if len(cache) > self.MAX_CORNER_COLOR_CACHE:
+                cache.popitem(last=False)
+            return result
+        tint = lerp_color(BLOCK_LIGHT_TINT, sky_color, sky_ratio)
         # 保持亮度不变，只改变色相
         tint_lum = tint[0] * 0.299 + tint[1] * 0.587 + tint[2] * 0.114
         if tint_lum > 0:
@@ -552,7 +601,11 @@ class Render:
                       min(255, int(tint[2] * scale)))
         else:
             scaled = (base, base, base)
-        return lerp_color((base, base, base), scaled, tint_amount)
+        result = lerp_color((base, base, base), scaled, tint_amount)
+        cache[key] = result
+        if len(cache) > self.MAX_CORNER_COLOR_CACHE:
+            cache.popitem(last=False)
+        return result
 
     def draw_block(self):
         """绘制所有可见方块，应用光照+AO，使用批量预取与缓存策略"""
@@ -565,15 +618,16 @@ class Render:
         light_map = cw.light_map
         sky_light_map = getattr(cw, "sky_light_map", {})
         block_light_map = getattr(cw, "block_light_map", {})
-        sky_light_weight = self.get_sky_light_weight()
         NIGHT_TINT = (36, 48, 128)
-        sky_state = self.get_sky_state()
+        sky_state = self.current_sky_state or self.get_sky_state()
+        sky_light_weight = sky_state["sky_light_weight"]
         sky_color = lerp_color(
             cyclic_lerp_color(self.SKY_LOWER_KEYFRAMES, self.day_time),
             sky_state["twilight_color"],
             sky_state["twilight"],
         )
         sky_color = lerp_color(sky_color, NIGHT_TINT, sky_state["night"] * 0.85)
+        sky_color = quantize_color(sky_color, BLOCK_TINT_COLOR_STEP)
         get_block = cw.get_block
         width = self.SCREEN_WIDTH
         height = self.SCREEN_HEIGHT
@@ -677,7 +731,7 @@ class Render:
                 b0 = blocks0[i][j]
                 b1 = blocks1[i][j]
 
-                if b1 is not None and b1.block_id != 'air' and not (b0 and b0.solid):
+                if b1 is not None and b1.block_id != 'air' and not (b0 and b0.has_transparent_pixels):
                     self._draw_block_optimized(
                         screen, block_size, cam_x, cam_y, width, height,
                         x, y, 1, b1,
@@ -758,11 +812,20 @@ class Render:
         fbl = bl * ao_bl
         fbr = br * ao_br
 
+        q_ftl, ftl_q = quantize_unit(ftl, BLOCK_LIGHT_LEVELS)
+        q_ftr, ftr_q = quantize_unit(ftr, BLOCK_LIGHT_LEVELS)
+        q_fbl, fbl_q = quantize_unit(fbl, BLOCK_LIGHT_LEVELS)
+        q_fbr, fbr_q = quantize_unit(fbr, BLOCK_LIGHT_LEVELS)
+        q_sr_tl, sr_tl_q = quantize_unit(sr_tl, BLOCK_RATIO_LEVELS)
+        q_sr_tr, sr_tr_q = quantize_unit(sr_tr, BLOCK_RATIO_LEVELS)
+        q_sr_bl, sr_bl_q = quantize_unit(sr_bl, BLOCK_RATIO_LEVELS)
+        q_sr_br, sr_br_q = quantize_unit(sr_br, BLOCK_RATIO_LEVELS)
+
         # ---- 3b. 计算着色后的角落RGB ----
-        color_tl = self._compute_corner_color(ftl, sr_tl, sky_color)
-        color_tr = self._compute_corner_color(ftr, sr_tr, sky_color)
-        color_bl = self._compute_corner_color(fbl, sr_bl, sky_color)
-        color_br = self._compute_corner_color(fbr, sr_br, sky_color)
+        color_tl = self._compute_corner_color(ftl_q, sr_tl_q, sky_color)
+        color_tr = self._compute_corner_color(ftr_q, sr_tr_q, sky_color)
+        color_bl = self._compute_corner_color(fbl_q, sr_bl_q, sky_color)
+        color_br = self._compute_corner_color(fbr_q, sr_br_q, sky_color)
 
         # ---- 4. 屏幕坐标 ----
         # 方块占据世界坐标 [y, y+1]，此处用 y+1（方块顶部）定位，
@@ -789,11 +852,12 @@ class Render:
         tex_h = tex.get_height()
 
         # ---- 7. 光照纹理缓存 ----
-        # 键使用 block_id + 纹理帧标识(id(tex)) + 离散化亮度 + 天空光照占比
-        _disc = lambda v: round(v, 1)
-        key = (block.block_id, id(tex), int(ftl * 255), int(ftr * 255),
-               int(fbl * 255), int(fbr * 255),
-               _disc(sr_tl), _disc(sr_tr), _disc(sr_bl), _disc(sr_br))
+        # 键使用 block_id + 纹理帧标识(id(tex)) + 离散化亮度/色调。
+        sky_key = (sky_color[0] // BLOCK_TINT_COLOR_STEP,
+                   sky_color[1] // BLOCK_TINT_COLOR_STEP,
+                   sky_color[2] // BLOCK_TINT_COLOR_STEP)
+        key = (block.block_id, id(tex), q_ftl, q_ftr, q_fbl, q_fbr,
+               q_sr_tl, q_sr_tr, q_sr_bl, q_sr_br, sky_key)
         cache = self.lit_tex_cache
         if key in cache:
             lit_tex = cache[key]
@@ -813,13 +877,14 @@ class Render:
 
             lit_tex = tex.copy()
             lit_tex.blit(grad, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
-            # 非满高方块不缓存 lit_tex（数量少，每帧生成开销可忽略）
+            cache[key] = lit_tex
+            if len(cache) > self.MAX_LIT_CACHE:
+                cache.popitem(last=False)
         else:
             # ---- 完整高度方块（走缓存） ----
             # 7a. 获取/生成渐变纹理（带天空色缓存键以兼容日夜变化）
-            _q = lambda c: (c[0] >> 2, c[1] >> 2, c[2] >> 2)
-            sky_key = (sky_color[0] >> 4, sky_color[1] >> 4, sky_color[2] >> 4)
-            grad_key = (_q(color_tl), _q(color_tr), _q(color_bl), _q(color_br), sky_key)
+            _q = lambda c: (c[0] >> 3, c[1] >> 3, c[2] >> 3)
+            grad_key = (_q(color_tl), _q(color_tr), _q(color_bl), _q(color_br))
             grad_cache = self.gradient_cache
             if grad_key in grad_cache:
                 grad = grad_cache[grad_key]

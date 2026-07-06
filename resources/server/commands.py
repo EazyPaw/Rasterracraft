@@ -342,14 +342,15 @@ class CommandExecutor:
                     affected_chunks.add(rx)
 
         # ---- 9. 受影响区块重算光照并同步客户端 ----
+        changed_light_chunks = world.recalculate_light_for_chunks(affected_chunks)
         for rx in affected_chunks:
             chunk = world.regions.get(rx)
             if chunk is None:
                 continue
-            chunk.recalculate_all_light(world=world)
             for player in world.server.players:
                 if rx in player.loading_regions:
                     world.server.send_client_socket(player, chunk, "Chunk")
+        world.send_light_updates(changed_light_chunks - affected_chunks)
 
         return f"Filled {filled} block(s) with {block_id}"
 

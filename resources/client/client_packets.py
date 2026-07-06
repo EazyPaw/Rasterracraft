@@ -121,7 +121,7 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         color_raw = packet.get('color', [255, 255, 255])
         color = tuple(color_raw) if isinstance(color_raw, list) else color_raw
         client.add_chat_message(packet.get('text', ''), color)
-    logging.debug(f"Received {packet['__class__']} packet.")
+    # logging.debug(f"Received {packet['__class__']} packet.")
 
 def encode_packet(obj, obj_type = None, args = None) -> dict:
     """

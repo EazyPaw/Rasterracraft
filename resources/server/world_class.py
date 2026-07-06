@@ -152,6 +152,8 @@ class Chunk:
             self._recalculate_internal()
             return {self.x}
 
+        return world.recalculate_light_for_chunks({self.x})
+
         from resources.server.light_manager import flood_fill_light_2d
 
         # 清零
@@ -287,6 +289,105 @@ class World:
         self._regions_lock = threading.Lock()  # 保护 regions 字典的并发写入
         self.world_time = 0
 
+    def recalculate_light_for_chunks(self, chunk_rxs: set[int], padding: int = 1) -> set[int]:
+        if not chunk_rxs:
+            return set()
+
+        min_rx = min(chunk_rxs) - padding
+        max_rx = max(chunk_rxs) + padding
+        loaded_rxs = sorted(rx for rx in range(min_rx, max_rx + 1) if rx in self.regions)
+        if not loaded_rxs:
+            return set()
+
+        spans: list[list[int]] = []
+        for rx in loaded_rxs:
+            if not spans or rx != spans[-1][-1] + 1:
+                spans.append([rx])
+            else:
+                spans[-1].append(rx)
+
+        changed_chunks: set[int] = set()
+        for span in spans:
+            changed_chunks.update(self._recalculate_light_span(span))
+        return changed_chunks
+
+    def _recalculate_light_span(self, chunk_rxs: list[int]) -> set[int]:
+        from resources.server.light_manager import flood_fill_light_2d
+
+        if not chunk_rxs:
+            return set()
+
+        chunks = [self.regions[rx] for rx in chunk_rxs]
+        chunk_width = chunks[0].region_array.shape[0]
+        height = chunks[0].region_array.shape[1]
+        ext_width = chunk_width * len(chunks)
+        ext_region = np.empty((ext_width, height, 2), dtype=Block)
+
+        for index, chunk in enumerate(chunks):
+            start_x = index * chunk_width
+            ext_region[start_x:start_x + chunk_width, :, :] = chunk.region_array
+
+        ext_sky = np.zeros((ext_width, height), dtype=np.uint8)
+        ext_block = np.zeros((ext_width, height), dtype=np.uint8)
+
+        sky_sources: list[tuple[int, int, int]] = []
+        for x in range(ext_width):
+            for y in range(height - 1, -1, -1):
+                blk = cast(Block, ext_region[x, y, 0])
+                if not blk.solid:
+                    sky_sources.append((x, y, 15))
+                else:
+                    break
+
+        if sky_sources:
+            flood_fill_light_2d(ext_sky, ext_region, 0, sky_sources)
+
+        block_sources: list[tuple[int, int, int]] = []
+        for x in range(ext_width):
+            for y in range(height):
+                blk0 = cast(Block, ext_region[x, y, 0])
+                blk1 = cast(Block, ext_region[x, y, 1])
+                light = blk0.light_source + blk1.light_source
+                if light > 0:
+                    block_sources.append((x, y, min(15, light)))
+
+        if block_sources:
+            flood_fill_light_2d(ext_block, ext_region, 0, block_sources)
+
+        changed_chunks: set[int] = set()
+        for index, chunk in enumerate(chunks):
+            start_x = index * chunk_width
+            new_sky = ext_sky[start_x:start_x + chunk_width, :].copy()
+            new_block = ext_block[start_x:start_x + chunk_width, :].copy()
+
+            if (
+                not np.array_equal(chunk.sky_light_array, new_sky)
+                or not np.array_equal(chunk.block_light_array, new_block)
+            ):
+                changed_chunks.add(chunk.x)
+
+            chunk.sky_light_array = new_sky
+            chunk.block_light_array = new_block
+
+        return changed_chunks
+
+    def send_light_updates(self, chunk_rxs: set[int], players=None):
+        if players is None:
+            players = self.server.players
+
+        for player in players:
+            for rx in sorted(chunk_rxs):
+                chunk = self.regions.get(rx)
+                if chunk is None or rx not in player.loading_regions:
+                    continue
+                light_update = {
+                    'rx': rx,
+                    'light_array': chunk.get_full_light_dict(),
+                    'sky_light_array': chunk.get_full_sky_light_dict(),
+                    'block_light_array': chunk.get_full_block_light_dict(),
+                }
+                self.server.send_client_socket(player, light_update, "LightUpdate")
+
     def get_block(self, x_loc: int | Location, y: int = None, z: int = None) -> Block:
         """
         获取在某位置的方块
@@ -359,22 +460,12 @@ class World:
         rela_x = x % 16
         chunk.region_array[rela_x][y][z] = block
         # 重算整个区块光照（含跨区块传播）
-        chunk.recalculate_all_light(world=self)
+        changed_light_chunks = self.recalculate_light_for_chunks({chunk.x})
         if send_packet:
             for player in self.server.players:
                 if player.is_loading_position(x, y, z):
                     self.server.send_client_socket(player, chunk, "Chunk")
-                    # 同时为相邻区块发送光照更新
-                    for neighbor_rx in (x // 16 - 1, x // 16 + 1):
-                        if neighbor_rx != chunk.x and neighbor_rx in self.regions:
-                            neighbor = self.regions[neighbor_rx]
-                            light_update = {
-                                'rx': neighbor_rx,
-                                'light_array': neighbor.get_full_light_dict(),
-                                'sky_light_array': neighbor.get_full_sky_light_dict(),
-                                'block_light_array': neighbor.get_full_block_light_dict(),
-                            }
-                            player.world.server.send_client_socket(player, light_update, "LightUpdate")
+            self.send_light_updates(changed_light_chunks - {chunk.x})
         if block_update:
             # 收集需要触发 on_update 的邻居坐标
             neighbors = [
@@ -400,6 +491,8 @@ class World:
                         if player.is_loading_position(nx, ny, nz):
                             self.server.send_client_socket(player, block, "BlockUpdate")
 
+        return changed_light_chunks
+
     def generate_chunk(self, rx: int):
         logging.debug(f"Generating {self.id_name} chunk {rx}")
         y_max = self.attribute.MAX_BUILD_HEIGHT
@@ -422,13 +515,7 @@ class World:
         with self._regions_lock:
             self.regions[rx] = new_chunk
             # 使用世界上下文重新计算光照以支持跨区块传播
-            new_chunk.recalculate_all_light(world=self)
-            # 新区块生成后，相邻的已加载区块也需要重新计算光照
-            # （因为新区块可能在边界引入了新的光源或改变了天空光遮挡）
-            for neighbor_rx in (rx - 1, rx + 1):
-                neighbor = self.regions.get(neighbor_rx)
-                if neighbor is not None:
-                    neighbor.recalculate_all_light(world=self)
+            return self.recalculate_light_for_chunks({rx})
 
     def break_block(self, x_loc: int | Location, y: int = None, z: int = None):
         x, y, z = decide_x_or_loc(x_loc, y, z)
@@ -436,7 +523,8 @@ class World:
         for player in self.server.players:
             if player.is_loading_position(x, y, z):
                 self.server.send_client_socket(player, Location(self, x, y, z), "BreakBlock")
-        self.set_block(AIR(), x, y, z, False)
+        changed_light_chunks = self.set_block(AIR(), x, y, z, False)
+        self.send_light_updates(changed_light_chunks)
 
     def is_chunk_loaded(self, x):
         return x in self.regions
