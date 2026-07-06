@@ -93,6 +93,8 @@ class ChatGUI(GUI):
         self.cursor_blink_timer = time.time()
         self.cursor_visible = True
         self.render.client.game_manager.ing_mouse_lock += 1
+        # 启用按键重复：长按 Backspace/方向键等可持续响应
+        pygame.key.set_repeat(400, 30)
         if not self._text_input_started:
             pygame.key.start_text_input()
             self._text_input_started = True
@@ -104,6 +106,8 @@ class ChatGUI(GUI):
         self._input_scroll = 0
         self._scroll_offset = 0
         self.render.client.game_manager.ing_mouse_lock -= 1
+        # 关闭按键重复，恢复正常游戏输入
+        pygame.key.set_repeat(0, 0)
         if self._text_input_started:
             pygame.key.stop_text_input()
             self._text_input_started = False
@@ -236,9 +240,22 @@ class ChatGUI(GUI):
                         if self._scroll_offset < 0:
                             self._scroll_offset = 0
                         events.remove(event)
+                    elif event.key == pygame.K_a and (
+                        pygame.key.get_mods() & pygame.KMOD_CTRL
+                    ):
+                        # Ctrl+A: 移动光标到开头
+                        self.cursor_pos = 0
+                        events.remove(event)
+                    elif event.key == pygame.K_c and (
+                        pygame.key.get_mods() & pygame.KMOD_CTRL
+                    ):
+                        # Ctrl+C: 复制全部输入文字到剪贴板
+                        self._copy_to_clipboard()
+                        events.remove(event)
                     elif event.key == pygame.K_v and (
                         pygame.key.get_mods() & pygame.KMOD_CTRL
                     ):
+                        # Ctrl+V: 粘贴
                         self._paste_from_clipboard()
                         events.remove(event)
                     else:
@@ -261,23 +278,122 @@ class ChatGUI(GUI):
             elif event.type == pygame.TEXTEDITING and self.is_open:
                 events.remove(event)
 
-    def _paste_from_clipboard(self):
+    @staticmethod
+    def _get_clipboard_text() -> str | None:
+        """从系统剪贴板获取文本，多级回退方案。"""
+        # 方案 1: pygame.scrap（跨平台但需 SDL 初始化支持）
         try:
+            if not pygame.scrap.get_init():
+                pygame.scrap.init()
             clip = pygame.scrap.get(pygame.SCRAP_TEXT)
             if clip:
-                pasted = clip.decode('utf-8').replace('\r', '').replace('\n', '')
-                remaining = MAX_INPUT_LENGTH - len(self.input_text)
-                if remaining <= 0:
-                    return
-                pasted = pasted[:remaining]
-                self.input_text = (
-                    self.input_text[:self.cursor_pos] +
-                    pasted +
-                    self.input_text[self.cursor_pos:]
-                )
-                self.cursor_pos += len(pasted)
+                return clip.decode('utf-8')
         except Exception:
             pass
+
+        # 方案 2: Windows 剪贴板 API（ctypes 直调 Win32）
+        try:
+            import ctypes
+            CF_UNICODETEXT = 13
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            if user32.OpenClipboard(0):
+                if user32.IsClipboardFormatAvailable(CF_UNICODETEXT):
+                    h_mem = user32.GetClipboardData(CF_UNICODETEXT)
+                    if h_mem:
+                        p_str = kernel32.GlobalLock(h_mem)
+                        if p_str:
+                            text = ctypes.wstring_at(p_str)
+                            kernel32.GlobalUnlock(h_mem)
+                            user32.CloseClipboard()
+                            return text
+                user32.CloseClipboard()
+        except Exception:
+            pass
+
+        # 方案 3: tkinter（最后手段，跨平台但会短暂创建窗口）
+        try:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+            text = root.clipboard_get()
+            root.destroy()
+            return text
+        except Exception:
+            pass
+
+        return None
+
+    @staticmethod
+    def _set_clipboard_text(text: str):
+        """将文本写入系统剪贴板，多级回退方案。"""
+        # 方案 1: pygame.scrap
+        try:
+            if not pygame.scrap.get_init():
+                pygame.scrap.init()
+            pygame.scrap.put(pygame.SCRAP_TEXT, text.encode('utf-8'))
+            return
+        except Exception:
+            pass
+
+        # 方案 2: Windows 剪贴板 API
+        try:
+            import ctypes
+            CF_UNICODETEXT = 13
+            GMEM_MOVEABLE = 0x0002
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            wide_text = text + '\x00'
+            buf_size = len(wide_text) * 2
+            h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, buf_size)
+            if h_mem:
+                p_str = kernel32.GlobalLock(h_mem)
+                if p_str:
+                    ctypes.cdll.msvcrt.wcscpy(ctypes.c_wchar_p(p_str), wide_text)
+                    kernel32.GlobalUnlock(h_mem)
+                if user32.OpenClipboard(0):
+                    user32.EmptyClipboard()
+                    user32.SetClipboardData(CF_UNICODETEXT, h_mem)
+                    user32.CloseClipboard()
+                    return
+                kernel32.GlobalFree(h_mem)
+        except Exception:
+            pass
+
+        # 方案 3: tkinter
+        try:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()
+            root.clipboard_clear()
+            root.clipboard_append(text)
+            root.update()
+            root.destroy()
+        except Exception:
+            pass
+
+    def _paste_from_clipboard(self):
+        """将剪贴板文本粘贴到输入框中。"""
+        clip = self._get_clipboard_text()
+        if not clip:
+            return
+        # 去除换行，仅保留单行纯文本
+        pasted = clip.replace('\r', '').replace('\n', '')
+        remaining = MAX_INPUT_LENGTH - len(self.input_text)
+        if remaining <= 0:
+            return
+        pasted = pasted[:remaining]
+        self.input_text = (
+            self.input_text[:self.cursor_pos] +
+            pasted +
+            self.input_text[self.cursor_pos:]
+        )
+        self.cursor_pos += len(pasted)
+
+    def _copy_to_clipboard(self):
+        """将当前输入文本复制到剪贴板。"""
+        if self.input_text:
+            self._set_clipboard_text(self.input_text)
 
     # ------------------------------------------------------------------
     # 渲染入口

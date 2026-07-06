@@ -24,7 +24,9 @@ def encode_packet(obj, obj_type, args) -> dict:
         return {
             '__class__': 'LightUpdate',
             'rx': obj['rx'],
-            'light_array': obj['light_array']
+            'light_array': obj['light_array'],
+            'sky_light_array': obj.get('sky_light_array'),
+            'block_light_array': obj.get('block_light_array'),
         }
     elif obj_type == "BiomeUpdate":
         # obj 应该是 {'rx': int, 'biome_array': dict}
@@ -39,6 +41,15 @@ def encode_packet(obj, obj_type, args) -> dict:
             'x': obj.x,
             'y': obj.y,
             'z': obj.z,
+        }
+    elif obj_type == "BlockUpdate":
+        # obj 是 Block 实例，发送单个方块的更新数据
+        return {
+            '__class__': 'BlockUpdate',
+            'x': obj.location.x,
+            'y': obj.location.y,
+            'z': obj.location.z,
+            'block_data': obj.to_dict(),
         }
     logging.warning("Unknown packet type to encode")
     return {}
@@ -130,7 +141,9 @@ def _send_light_updates_for_boundary(world, player, rx: int):
         if chunk is not None:
             light_update = {
                 'rx': chunk_rx,
-                'light_array': chunk.get_full_light_dict()
+                'light_array': chunk.get_full_light_dict(),
+                'sky_light_array': chunk.get_full_sky_light_dict(),
+                'block_light_array': chunk.get_full_block_light_dict(),
             }
             player.world.server.send_client_socket(player, light_update, "LightUpdate")
 

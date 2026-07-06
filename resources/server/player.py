@@ -34,3 +34,6 @@ class Player(Entity):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         rx = int(x // 16)
         return rx in self.loading_regions
+
+    def __str__(self):
+        return self.name

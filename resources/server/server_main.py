@@ -29,6 +29,7 @@ class Server:
         self.socket_server = self.SocketServer(self)
         self.TPS = 0
         self.rate = 20
+        self.server_ticks = 0
         self.view_distance = 4
         self.players: list[Player] = []
         self.max_players = 20
@@ -169,12 +170,22 @@ class Server:
                                          ,"overworld"
                                          , generator.MinecraftLike2D
                                          , WorldAttribute()
-                                         , 0)
+                                         , random.randint(-23767, 23767))
         self.initialized = True
         self.ready.set()  # 通知 socket 线程服务器已就绪
         self.run()
 
     def tick(self):
+        self.server_ticks += 1
+        for world in self.worlds.values():
+            world.world_time = (world.world_time + 1) % 24000
+        if self.server_ticks % 5 == 0:
+            for player in self.players:
+                self.send_client_socket(
+                    player,
+                    {'__class__': 'TimeUpdate', 'time': int(player.world.world_time)},
+                    "Forward"
+                )
         self.load_chunks()
 
     def _resolve_chat_msg(self, msg, color=None):
@@ -318,7 +329,9 @@ class Server:
                         if neighbor is not None:
                             light_update = {
                                 'rx': neighbor_rx,
-                                'light_array': neighbor.get_full_light_dict()
+                                'light_array': neighbor.get_full_light_dict(),
+                                'sky_light_array': neighbor.get_full_sky_light_dict(),
+                                'block_light_array': neighbor.get_full_block_light_dict(),
                             }
                             self.send_client_socket(player, light_update, "LightUpdate")
 

@@ -17,7 +17,7 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
     使用多层 Perlin 噪声实现确定性的地形、生物群系、
     洞穴、矿石和地表装饰物生成。核心流程：
 
-    1. 通过 5 维噪声参数判定生物群系
+    1. 通过五维噪声参数判定生物群系
     2. 依生物群系配置计算地表高度
     3. 按深度放置地表 / 亚层 / 填充层方块
     4. 在岩石层中分布矿石
@@ -32,7 +32,13 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
     # ---- 世界常量 ----
     sea_level = 68       # 海平面高度（Y 坐标）
     stone_level = 52     # 石材起始深度（当前未直接使用，保留）
-    max_tree_lookup = 9  # 树木查找范围（横向 ±9 格）
+    max_tree_lookup = 14  # 树木查找范围（横向 ±14 格，原 9）
+
+    # ---- 寒冷海洋群系（用于冰面生成） ----
+    ICE_OCEAN_BIOMES = frozenset({
+        "frozen_ocean", "deep_frozen_ocean",
+        "cold_ocean", "deep_cold_ocean",
+    })
 
     # ------------------------------------------------------------------
     # 初始化
@@ -40,6 +46,10 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
 
     def __init__(self, seed):
         super().__init__(seed)
+        self._biome_cache = {}
+        self._surface_height_cache = {}
+        self._tree_presence_cache = {}
+        self._tree_column_cache = {}
         # 加载树木配置（合并 JSON 自定义和默认值）
         self.tree_configs = self._load_tree_configs()
         # 构建 block_id → Block 子类的工厂映射表
@@ -57,7 +67,7 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
         x : int
             全局 X 坐标。
         y : int
-            高度坐标（当前仅用于兼容接口，实际按列判定）。
+            高度坐标。
 
         Returns
         -------
@@ -72,10 +82,11 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
         生成逻辑依次为：
 
         1. y ≤ 0 → 基岩
-        2. y ≥ 255 → 空气
-        3. y > 地表高度 → 水（低于海平面且 z==0）或空气
-        4. 洞穴空气判定 → 空气（z==0）或地下方块（z==1）
-        5. 否则 → 地下方块（依深度放置表层 / 亚层 / 填充层 / 矿石）
+        2. y ≥ 250 → 空气
+        3. 结构方块判定（树木、装饰物、积雪层）
+        4. y > 地表高度 → 水（低于海平面且 z==0）或空气
+        5. 洞穴空气判定 → 空气（z==0）或地下方块（z==1）
+        6. 否则 → 地下方块（依深度放置表层 / 亚层 / 填充层 / 矿石）
 
         Parameters
         ----------
@@ -94,7 +105,7 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
         # 边界条件：基岩层以下 & 建筑高度以上
         if y <= 0:
             return BEDROCK()
-        if y >= 255:
+        if y >= 250:
             return AIR()
 
         # 获取该列的生物群系和地表高度
@@ -102,7 +113,7 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
         profile = self.get_profile(column_biome)
         surface_y = self.get_surface_height(x)
 
-        # 优先检查结构方块（树木等）
+        # 优先检查结构方块（树木、积雪、花草等）
         structure_block = self.get_structure_block(x, y, z, surface_y, profile)
         if structure_block is not None:
             return structure_block
@@ -110,15 +121,15 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
         # 地表以上：水或空气
         if y > surface_y:
             if y <= self.sea_level and z == 0:
-                # 冰冻海洋表面生成冰
-                if column_biome in {"frozen_ocean", "deep_frozen_ocean"} and y == self.sea_level:
+                # 寒冷海洋表面生成冰
+                if column_biome in self.ICE_OCEAN_BIOMES and y == self.sea_level:
                     return ICE()
                 return WATER()
             return AIR()
 
         # 洞穴空气：前景层挖空，背景层保留岩壁
         if self.is_cave_air(x, y, z, surface_y):
-            return AIR() if z == 0 else self.get_underground_block(x, y, surface_y, profile)
+            return AIR() if z == 0 else self.get_underground_block(x, y, surface_y, profile, z)
 
         # 地表以下：按深度放置方块
-        return self.get_underground_block(x, y, surface_y, profile)
+        return self.get_underground_block(x, y, surface_y, profile, z)

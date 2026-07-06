@@ -49,6 +49,8 @@ class Chunk:
             "x": self.x,
             "region_array": result_dict,
             "light_array": light_dict,
+            "sky_light_array": self.get_full_sky_light_dict(),
+            "block_light_array": self.get_full_block_light_dict(),
             "biome_array": biome_dict
         }
 
@@ -60,6 +62,20 @@ class Chunk:
                 sky = int(self.sky_light_array[x, y])
                 block = int(self.block_light_array[x, y])
                 light_dict[f"{x},{y}"] = max(sky, block)
+        return light_dict
+
+    def get_full_sky_light_dict(self) -> dict:
+        light_dict = {}
+        for x in range(self.region_array.shape[0]):
+            for y in range(self.region_array.shape[1]):
+                light_dict[f"{x},{y}"] = int(self.sky_light_array[x, y])
+        return light_dict
+
+    def get_full_block_light_dict(self) -> dict:
+        light_dict = {}
+        for x in range(self.region_array.shape[0]):
+            for y in range(self.region_array.shape[1]):
+                light_dict[f"{x},{y}"] = int(self.block_light_array[x, y])
         return light_dict
 
     def get_full_biome_dict(self) -> dict:
@@ -354,18 +370,35 @@ class World:
                             neighbor = self.regions[neighbor_rx]
                             light_update = {
                                 'rx': neighbor_rx,
-                                'light_array': neighbor.get_full_light_dict()
+                                'light_array': neighbor.get_full_light_dict(),
+                                'sky_light_array': neighbor.get_full_sky_light_dict(),
+                                'block_light_array': neighbor.get_full_block_light_dict(),
                             }
                             player.world.server.send_client_socket(player, light_update, "LightUpdate")
         if block_update:
-            self.get_block(x, y + 1, z).on_update()
-            self.get_block(x, y - 1, z).on_update()
-            self.get_block(x + 1, y, z).on_update()
-            self.get_block(x - 1, y, z).on_update()
+            # 收集需要触发 on_update 的邻居坐标
+            neighbors = [
+                (x, y + 1, z),
+                (x, y - 1, z),
+                (x + 1, y, z),
+                (x - 1, y, z),
+            ]
             if z == 0:
-                self.get_block(x, y, 1).on_update()
+                neighbors.append((x, y, 1))
             elif z == 1:
-                self.get_block(x, y, 0).on_update()
+                neighbors.append((x, y, 0))
+
+            for nx, ny, nz in neighbors:
+                block = self.get_block(nx, ny, nz)
+                old_nbt = block.parse_nbt()  # 更新前快照
+                block.on_update()
+                new_nbt = block.parse_nbt()  # 更新后快照
+
+                # 若方块属性确实发生了变化，向加载了该位置的客户端发送单方块更新
+                if old_nbt != new_nbt:
+                    for player in self.server.players:
+                        if player.is_loading_position(nx, ny, nz):
+                            self.server.send_client_socket(player, block, "BlockUpdate")
 
     def generate_chunk(self, rx: int):
         logging.debug(f"Generating {self.id_name} chunk {rx}")

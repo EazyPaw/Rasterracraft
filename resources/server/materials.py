@@ -11,3 +11,8 @@ class AIR(BlockItem):
     name_id = "air"
     name = "air"
     target_block = blocks.AIR
+
+class GLOWSTONE(BlockItem):
+    name_id = "glowstone"
+    name = "glowstone"
+    target_block = blocks.GLOWSTONE

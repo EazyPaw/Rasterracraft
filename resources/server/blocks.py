@@ -1,4 +1,5 @@
 import os
+
 if os.environ.get('PYCRAFT_CLIENT') == '1':
     import pygame
 
@@ -76,15 +77,26 @@ class GRASS_BLOCK(Block):
     _side_texture_cache = {}  # 缓存不同尺寸的侧面纹理
     Tags = [BlockTag.GRASS_BLOCKS]
 
+    def __init__(self, snowed = False):
+        super().__init__()
+        self.snowed = snowed
+
     @client_method
     def get_texture(self, size, client: 'Client'):
         """
         获取草方块侧面纹理：将染色后的 grass_side_overlay 组合到 grass_side 上。
         (client 由 @client_only 自动注入)
         """
+
         # 检查缓存
-        if size in self._side_texture_cache:
-            return self._side_texture_cache[size]
+        if (size, self.snowed) in self._side_texture_cache:
+            return self._side_texture_cache[(size, self.snowed)]
+
+        if self.snowed:
+            tex = client.resources_manager.get_texture_img("blocks.grass_side_snowed")
+            final_texture = pygame.transform.scale(tex, (size, size))
+            self._side_texture_cache[(size, self.snowed)] = final_texture.convert_alpha()
+            return self._side_texture_cache[(size, self.snowed)]
 
         # 1. 获取基础材质
         base_side = client.resources_manager.get_texture_img("blocks.grass_side")
@@ -108,9 +120,13 @@ class GRASS_BLOCK(Block):
         final_texture.blit(stained_overlay, (0, 0))
 
         # 5. 存入缓存
-        self._side_texture_cache[size] = final_texture.convert_alpha()
+        self._side_texture_cache[(size, self.snowed)] = final_texture.convert_alpha()
 
         return final_texture
+
+    def on_update(self):
+        self.snowed = isinstance(self.location.world.get_block(self.location.add(0, 1, 0)), SNOW)
+
 
 class SHORT_GRASS(Plant):
     block_id = 'short_grass'
@@ -174,7 +190,7 @@ class OAK_LEAVES(Leaves):
     name = 'oak_leaves'
     _texture_path = 'blocks.leaves_oak'
 
-class OAK_LOG(Block):
+class OAK_LOG(Log):
     block_id = 'oak_log'
     name = 'oak_log'
     _texture_path = 'blocks.log_oak'
@@ -184,7 +200,7 @@ class BIRCH_LEAVES(Leaves):
     name = 'birch leaves'
     _texture_path = 'blocks.leaves_birch'
 
-class BIRCH_LOG(Block):
+class BIRCH_LOG(Log):
     block_id = 'birch_log'
     name = 'birch log'
     _texture_path = 'blocks.log_birch'
@@ -194,7 +210,7 @@ class SPRUCE_LEAVES(Leaves):
     name = 'spruce leaves'
     _texture_path = 'blocks.leaves_spruce'
 
-class SPRUCE_LOG(Block):
+class SPRUCE_LOG(Log):
     block_id = 'spruce_log'
     name = 'spruce log'
     _texture_path = 'blocks.log_spruce'
@@ -204,7 +220,7 @@ class JUNGLE_LEAVES(Leaves):
     name = 'jungle leaves'
     _texture_path = 'blocks.leaves_jungle'
 
-class JUNGLE_LOG(Block):
+class JUNGLE_LOG(Log):
     block_id = 'jungle_log'
     name = 'jungle log'
     _texture_path = 'blocks.log_jungle'
@@ -214,7 +230,7 @@ class ACACIA_LEAVES(Leaves):
     name = 'acacia leaves'
     _texture_path = 'blocks.leaves_acacia'
 
-class ACACIA_LOG(Block):
+class ACACIA_LOG(Log):
     block_id = 'acacia_log'
     name = 'acacia log'
     _texture_path = 'blocks.log_acacia'
@@ -224,7 +240,7 @@ class DARK_OAK_LEAVES(Leaves):
     name = 'dark oak leaves'
     _texture_path = 'blocks.leaves_big_oak'
 
-class DARK_OAK_LOG(Block):
+class DARK_OAK_LOG(Log):
     block_id = 'dark_oak_log'
     name = 'dark oak log'
     _texture_path = 'blocks.log_big_oak'
@@ -233,11 +249,13 @@ class SAND(Block):
     block_id = 'sand'
     name = 'sand'
     _texture_path = 'blocks.sand'
+    break_sound = "dig.sand"
 
 class RED_SAND(Block):
     block_id = 'red_sand'
     name = 'red sand'
     _texture_path = 'blocks.red_sand'
+    break_sound = "dig.sand"
 
 class SANDSTONE(Block):
     block_id = 'sandstone'
@@ -270,9 +288,9 @@ class SNOW(BottomSupport):
     block_id = 'snow'
     name = 'snow'
     _texture_path = 'blocks.snow'
-    break_sound = 'dig.gravel'
+    break_sound = 'dig.snow'
     solid = False
-    light_attenuation = 0
+    light_attenuation = 1
 
     _texture_cache = {}
 
@@ -294,24 +312,26 @@ class SNOW(BottomSupport):
 
         tex = base_texture.subsurface(rect).copy()
 
-        # 将裁剪后的纹理缩放到目标尺寸
+        # 缩放为实际雪层尺寸（宽=bs，高=根据层数）
         tex_h = int(size * 0.125 * self.layer)
-        scaled_tex = pygame.transform.scale(tex, (size, tex_h))
-
-        # 创建完整尺寸的透明 Surface，将雪纹理贴在底部
-        # 这样渲染器无需改动，且光照渐变能正确对应底部位置
-        final_texture = pygame.Surface((size, size), pygame.SRCALPHA)
-        final_texture.blit(scaled_tex, (0, size - tex_h))
+        final_texture = pygame.transform.scale(tex, (size, tex_h))
 
         self._texture_cache[(size, self.layer)] = final_texture.convert_alpha()
 
         return final_texture
+
+class SNOW_BLOCK(Block):
+    block_id = 'snow_block'
+    name = 'snow block'
+    _texture_path = 'blocks.snow'
+    break_sound = 'dig.snow'
 
 class ICE(Block):
     block_id = 'ice'
     name = 'ice'
     _texture_path = 'blocks.ice'
     break_sound = 'dig.glass'
+    friction = 0.1
 
 class WATER(Block):
     block_id = 'water'
@@ -320,6 +340,7 @@ class WATER(Block):
     solid = False
     replaceable = True
     light_attenuation = 1
+    has_transparent_pixels = True
 
 class SUGAR_CANE(Plant):
     block_id = 'sugar_cane'
@@ -390,6 +411,26 @@ class REDSTONE_ORE(Block):
     block_id = 'redstone_ore'
     name = 'redstone ore'
     _texture_path = 'blocks.redstone_ore'
+
+class BLUE_ORCHID(Plant):
+    block_id = 'blue_orchid'
+    name = 'blue orchid'
+    _texture_path = 'blocks.flower_blue_orchid'
+
+class ALLIUM(Plant):
+    block_id = 'allium'
+    name = 'allium'
+    _texture_path = 'blocks.flower_allium'
+
+class AZURE_BLUET(Plant):
+    block_id = 'azure_bluet'
+    name = 'azure bluet'
+    _texture_path = 'blocks.flower_houstonia'
+
+class OXEYE_DAISY(Plant):
+    block_id = 'oxeye_daisy'
+    name = 'oxeye daisy'
+    _texture_path = 'blocks.flower_oxeye_daisy'
 
 # ---- block_id → Block 子类 缓存 ----
 _BLOCK_REGISTRY: dict[str, type] = None  # None = 尚未构建

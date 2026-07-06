@@ -37,6 +37,7 @@ class ResourcesManager:
                    例如："blocks.stone" -> assets/minecraft/textures/blocks/stone.png
                         "gui.sprites.hud.hotbar" -> assets/minecraft/textures/gui/sprites/hud/hotbar.png
         :return: Surface 对象，如果没有找到则返回缺失纹理
+        此方法本身带有缓存优化。
         """
         # 检查缓存
         if key in self.textures:
@@ -327,3 +328,30 @@ class ResourcesManager:
             strips.append(surface.subsurface(rect))
 
         return strips
+
+    @staticmethod
+    def has_transparent_pixels(surface: pygame.Surface) -> bool:
+        """
+        检查 Pygame Surface 是否包含任何透明或半透明像素（alpha < 255）。
+
+        仅检测 per-pixel alpha（每个像素的 alpha 通道），不考虑颜色键（colorkey）透明。
+        若表面未开启 per-pixel alpha（无 SRCALPHA 标志），直接返回 False。
+
+        Args:
+            surface: pygame.Surface 对象
+
+        Returns:
+            bool: 存在任何 alpha < 255 的像素返回 True，否则返回 False
+        """
+        # 快速判断：如果没有 per-pixel alpha 支持，则所有像素均为不透明
+        if not (surface.get_flags() & pygame.SRCALPHA):
+            return False
+
+        # 获取 alpha 通道视图（表面会被锁定，函数返回后自动解锁）
+        alpha_arr = pygame.surfarray.pixels_alpha(surface)
+        # 检查是否有任何 alpha 值小于 255
+        result = np.any(alpha_arr < 255)
+        # 释放数组引用以解锁表面（可选）
+        del alpha_arr
+        return result
+

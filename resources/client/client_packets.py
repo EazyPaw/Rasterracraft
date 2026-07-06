@@ -34,7 +34,13 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         pool = client.chunk_load_pool
         pool.submit(client.client_world.load_chunk, packet['x'], packet['region_array'])
         if 'light_array' in packet:
-            pool.submit(client.client_world.load_lights, packet['x'], packet['light_array'])
+            pool.submit(
+                client.client_world.load_lights,
+                packet['x'],
+                packet['light_array'],
+                packet.get('sky_light_array'),
+                packet.get('block_light_array'),
+            )
         if 'biome_array' in packet:
             pool.submit(client.client_world.load_biomes, packet['x'], packet['biome_array'])
 
@@ -68,13 +74,34 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         if 0 <= packet['y'] < world.y_max:
             block = get_block_by_id(packet['block_id'])
             block.place_at(Location(world, packet['x'], packet['y'], packet['z']))
+    elif packet['__class__'] == 'BlockUpdate':
+        # {
+        #     '__class__': 'BlockUpdate',
+        #     'x': int,
+        #     'y': int,
+        #     'z': int,
+        #     'block_data': {'id': str, 'nbt': dict (可选)},
+        # }
+        world = client.client_world
+        x, y, z = packet['x'], packet['y'], packet['z']
+        if 0 <= y < world.y_max:
+            block_data = packet['block_data']
+            block = get_block_by_id(block_data['id'])
+            if 'nbt' in block_data:
+                block.write_nbt(block_data['nbt'])
+            world.set_block(block, x, y, z)
     elif packet['__class__'] == 'LightUpdate':
         # {
         #     '__class__': 'LightUpdate',
         #     'rx': chunk_x,
         #     'light_array': {"x,y": int}
         # }
-        client.client_world.update_lights(packet['rx'], packet['light_array'])
+        client.client_world.update_lights(
+            packet['rx'],
+            packet['light_array'],
+            packet.get('sky_light_array'),
+            packet.get('block_light_array'),
+        )
     elif packet['__class__'] == 'BiomeUpdate':
         # {
         #     '__class__': 'BiomeUpdate',
@@ -83,6 +110,8 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         # }
         if 'rx' in packet and 'biome_array' in packet:
             client.client_world.update_biomes(packet['rx'], packet['biome_array'])
+    elif packet['__class__'] == 'TimeUpdate':
+        client.client_world.world_time = packet.get('time', 0) % 24000
     elif packet['__class__'] == 'ChatMessage':
         # {
         #     '__class__': 'ChatMessage',

@@ -15,8 +15,11 @@ class ClientWorld:
         self.id_name = "null"
         self._regions: dict[int, np.ndarray[Any, np.dtype[Block]]] = {}
         self.light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
+        self.sky_light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
+        self.block_light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
         self.biome_map: dict[int, np.ndarray[Any, np.dtype[np.str_]]] = {}
         self.y_max = 256
+        self.world_time = 0
         self.client = client
 
     def load_chunk(self, rx: int, chunk: dict[str, dict]):
@@ -32,7 +35,9 @@ class ClientWorld:
             time.sleep(0)  # 释放GIL，让出CPU，不然会导致渲染卡顿
         self._regions[rx] = chunk_array
 
-    def load_lights(self, rx: int, light_map: dict[str, int]):
+    def load_lights(self, rx: int, light_map: dict[str, int],
+                    sky_light_map: dict[str, int] | None = None,
+                    block_light_map: dict[str, int] | None = None):
         light_array = np.full((16, self.y_max), 0, dtype=np.uint8)
         for key, value in light_map.items():
             x, y = key.split(",")
@@ -40,8 +45,14 @@ class ClientWorld:
             light_array[x][y] = value
             time.sleep(0) # 同理
         self.light_map[rx] = light_array
+        if sky_light_map is not None:
+            self.sky_light_map[rx] = self._dict_to_light_array(sky_light_map)
+        if block_light_map is not None:
+            self.block_light_map[rx] = self._dict_to_light_array(block_light_map)
 
-    def update_lights(self, rx: int, light_map: dict[str, int]):
+    def update_lights(self, rx: int, light_map: dict[str, int],
+                      sky_light_map: dict[str, int] | None = None,
+                      block_light_map: dict[str, int] | None = None):
         """
         增量更新光照数据（只更新变化的部分）
         """
@@ -54,6 +65,17 @@ class ClientWorld:
             x, y = key.split(",")
             x, y = int(x), int(y)
             light_array[x][y] = value
+        if sky_light_map is not None:
+            self.sky_light_map[rx] = self._dict_to_light_array(sky_light_map)
+        if block_light_map is not None:
+            self.block_light_map[rx] = self._dict_to_light_array(block_light_map)
+
+    def _dict_to_light_array(self, light_map: dict[str, int]):
+        light_array = np.full((16, self.y_max), 0, dtype=np.uint8)
+        for key, value in light_map.items():
+            x, y = key.split(",")
+            light_array[int(x)][int(y)] = value
+        return light_array
 
     def load_biomes(self, rx: int, biome_dict: dict[str, str]):
         """从服务器数据包加载整个区块的生物群系数据"""
@@ -92,6 +114,8 @@ class ClientWorld:
         """卸载区块，同时清理方塊、光照和生物群系数据"""
         self._regions.pop(x, None)
         self.light_map.pop(x, None)
+        self.sky_light_map.pop(x, None)
+        self.block_light_map.pop(x, None)
         self.biome_map.pop(x, None)
 
     def get_block(self, x_loc: int | Location, y: int | None = None, z: int | None = None) -> Block:

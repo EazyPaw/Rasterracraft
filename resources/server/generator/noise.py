@@ -24,6 +24,8 @@ class NoiseMixin:
 
         用于只依赖 X 坐标的参数生成（生物群系判定、地表高度、装饰物噪声）。
 
+        base 参数被限制在 [0, 500) 范围内以避免 noise 库在大 base 值时的哈希退化问题。
+
         Parameters
         ----------
         x : int
@@ -46,7 +48,7 @@ class NoiseMixin:
             persistence=0.5,
             lacunarity=2.0,
             repeat=1048576,
-            base=self.seed + salt,
+            base=self._good_base(salt),
         )
 
     def _noise2(self, x: int, y: int, scale: float, octaves: int, salt: int) -> float:
@@ -80,7 +82,7 @@ class NoiseMixin:
             lacunarity=2.0,
             repeatx=1048576,
             repeaty=1048576,
-            base=self.seed + salt,
+            base=self._good_base(salt),
         )
 
     def _rand01(self, x: int, y: int, salt: int) -> float:
@@ -103,6 +105,25 @@ class NoiseMixin:
             [0, 1) 范围内的伪随机数。
         """
         return self._stable_hash(x, y, salt) / 0xFFFFFFFF
+
+    def _good_base(self, salt: int) -> int:
+        """生成 noise 库的安全 base 值。
+
+        noise 库在 base 值较大时（约 > 500）哈希函数会出现退化，
+        导致相邻整数格点的梯度向量相同，噪声不随坐标变化。
+        此方法将 base 限制在 [0, 500) 的已知安全范围内。
+
+        Parameters
+        ----------
+        salt : int
+            哈希盐值，用于区分不同用途的随机序列。
+
+        Returns
+        -------
+        int
+            [0, 500) 范围内的安全 base 值。
+        """
+        return self._stable_hash(self.seed, salt, 99999) % 500
 
     def _stable_hash(self, x: int, y: int = 0, salt: int = 0) -> int:
         """确定性稳定哈希函数。

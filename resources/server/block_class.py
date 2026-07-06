@@ -29,6 +29,7 @@ class Block(ABC):
     light_attenuation = 5
     light_source = 0
     Tags = []
+    has_transparent_pixels = False
 
     def __init__(self, nbt = None):
         # 方块应该带有的属性
@@ -145,14 +146,20 @@ class Plant(Block):
 
 class GrassStain(Plant):
     # 需要更据生物群系染色的植物（草）
-    _texture_cache = {}  # 缓存不同尺寸的染色纹理
+    _texture_cache = {}  # key: (size, biome_id)
 
     @client_method
     def get_texture(self, size, client: 'Client'):
+        # 获取 biome_id 用于缓存键（不同群系染色不同）
+        if self.location is not None and self.location.world is not None:
+            biome_id = self.location.world.get_biome(
+                self.location.x, self.location.y)
+        else:
+            biome_id = "__default__"
 
-        # 检查缓存
-        if size in self._texture_cache:
-            return self._texture_cache[size]
+        cache_key = (size, biome_id)
+        if cache_key in self._texture_cache:
+            return self._texture_cache[cache_key]
 
         # 1. 获取基础材质
         base_texture = client.resources_manager.get_texture_img(self._texture_path)
@@ -167,29 +174,79 @@ class GrassStain(Plant):
         stained_texture = client.resources_manager.biome_stain(texture_scaled, self.location).convert_alpha()
 
         # 4. 存入缓存
-        self._texture_cache[size] = stained_texture
+        self._texture_cache[cache_key] = stained_texture
 
         return stained_texture
 
 class Leaves(Block):
-    _texture_cache = {}
+    solid = False
+    _texture_cache = {}   # key: (size, biome_id)
+    _effect_cache = {}    # key: (size, biome_id, z, front_same, behind_leaf)
+    break_sound = 'dig.grass'
 
     @client_method
     def get_texture(self, size, client: 'Client'):
-        if size in self._texture_cache:
-            return self._texture_cache[size]
-        base_texture = client.resources_manager.get_texture_img(self._texture_path)
+        # 获取 biome_id 用于缓存键（不同群系染色不同）
+        if self.location is not None and self.location.world is not None:
+            biome_id = self.location.world.get_biome(
+                self.location.x, self.location.y)
+        else:
+            biome_id = "__default__"
 
-        if base_texture is None:
-            return None
+        # 检测前后层树叶状态
+        z = self.location.z if self.location is not None else -1
+        front_same = False
+        behind_leaf = False
+        if self.location is not None and self.location.world is not None:
+            if z == 0:
+                front = self.location.world.get_block(
+                    self.location.x, self.location.y, 1)
+                front_same = type(front) is type(self)
+            elif z == 1:
+                behind = self.location.world.get_block(
+                    self.location.x, self.location.y, 0)
+                behind_leaf = isinstance(behind, Leaves)
 
-        texture_scaled = pygame.transform.scale(base_texture, (size, size))
+        # 效果缓存键（含世界状态，状态变化时自动失效）
+        effect_key = (size, biome_id, z, front_same, behind_leaf)
+        if effect_key in self._effect_cache:
+            return self._effect_cache[effect_key]
 
-        stained_texture = client.resources_manager.biome_stain(texture_scaled, self.location, "foliage").convert_alpha()
+        # 获取/生成染色纹理
+        tex_key = (size, biome_id)
+        if tex_key in self._texture_cache:
+            stained = self._texture_cache[tex_key]
+        else:
+            base_texture = client.resources_manager.get_texture_img(self._texture_path)
+            if base_texture is None:
+                return None
+            scaled = pygame.transform.scale(base_texture, (size, size))
+            stained = client.resources_manager.biome_stain(
+                scaled, self.location, "foliage"
+            ).convert_alpha()
+            self._texture_cache[tex_key] = stained
 
-        self._texture_cache[size] = stained_texture
+        result = stained
 
-        return stained_texture
+        # z=0 背景层：前方有同种树叶 → 纹理上下半交换
+        if front_same:
+            half = size // 2
+            top = stained.subsurface((0, 0, size, half)).copy()
+            bottom = stained.subsurface((0, half, size, half)).copy()
+            result = pygame.Surface((size, size), pygame.SRCALPHA)
+            result.blit(bottom, (0, 0))       # 下半 → 上半
+            result.blit(top, (0, half))       # 上半 → 下半
+
+        # z=1 前景层：后方有任意树叶 → RGB 乘法加深（保护 alpha 通道）
+        if behind_leaf:
+            if result is stained:
+                result = stained.copy()
+            mask = pygame.Surface((size, size))
+            mask.fill((50, 50, 50))
+            result.blit(mask, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+
+        self._effect_cache[effect_key] = result
+        return result
 
 class BottomSupport(Block):
     """
@@ -198,3 +255,7 @@ class BottomSupport(Block):
     def on_update(self):
         if not self.location.world.get_block(self.location.add(0, -1, 0)).solid:
             self.location.world.break_block(self.location)
+
+class Log(Block):
+    break_sound = "dig.wood"
+    has_transparent_pixels = True
