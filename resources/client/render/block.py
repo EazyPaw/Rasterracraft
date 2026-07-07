@@ -241,8 +241,7 @@ class BlockRenderMixin:
                 b0 = blocks0[i][j]
                 b1 = blocks1[i][j]
 
-                # 先绘制 z=1 层（前景方块）
-                if b1 is not None and b1.block_id != 'air' and not (b0 and b0.has_transparent_pixels):
+                if b1 is not None and b1.block_id != 'air' and b0.has_transparent_pixels:
                     self._draw_block_optimized(
                         screen, block_size, cam_x, cam_y, width, height,
                         x, y, 1, b1,
@@ -251,7 +250,6 @@ class BlockRenderMixin:
                         x_min, y_min, ao_mul, debug, font,
                     )
 
-                # 再绘制 z=0 层（背景方块）
                 if b0 is not None and b0.block_id != 'air':
                     self._draw_block_optimized(
                         screen, block_size, cam_x, cam_y, width, height,

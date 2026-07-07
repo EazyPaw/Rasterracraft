@@ -2,6 +2,7 @@ import logging
 
 from resources.server.blocks import get_block_by_id
 from resources.server.location import Location
+from resources.server.particles import ParticleEffect
 from resources.server.player import Player
 from resources.server.world_class import Chunk
 
@@ -19,6 +20,8 @@ def encode_packet(obj, obj_type, args) -> dict:
         }
     elif obj_type == "Forward": # 转发给服务器内其它玩家
         return obj
+    elif isinstance(obj, ParticleEffect):
+        return obj.to_packet()
     elif obj_type == "LightUpdate":
         # obj 应该是 {'rx': int, 'light_array': dict}
         return {
@@ -71,6 +74,9 @@ def decode_packet(packet: dict, player: Player):
         player.x = packet['x']
         player.y = packet['y']
         player.sneaking = packet.get('sneaking', False)
+        player.sprinting = packet.get('sprinting', False)
+        player.facing = packet.get('facing', 0)
+        player.on_ground = packet.get('on_ground', False)
         player.on_moving()
     elif packet['__class__'] == 'BreakBlock':
         # {
@@ -82,7 +88,6 @@ def decode_packet(packet: dict, player: Player):
         world = player.world
         if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT:
             world.break_block(packet['x'], packet['y'], packet['z'])
-            forward_packet_to_others(packet, player)
 
     elif packet['__class__'] == 'PlaceBlock':
         # {

@@ -372,13 +372,28 @@ class ChatGUI(GUI):
         except Exception:
             pass
 
+    @staticmethod
+    def _sanitize_input(text: str) -> str:
+        """清理输入文本中的非法字符（null 字符、控制字符等）。
+
+        pygame.font.render() 遇到 \\x00 会直接崩溃，
+        剪贴板粘贴或 IME 输入可能带入此类字符，必须过滤。
+        """
+        # 保留可打印字符（0x20-0x7E）、常见多字节字符（中文等 >0x7F），
+        # 去除 null（\\x00）和其他控制字符（0x01-0x1F，保留 \\n \\r \\t）
+        return ''.join(
+            ch for ch in text
+            if ch == '\n' or ch == '\r' or ch == '\t' or ord(ch) >= 0x20
+        )
+
     def _paste_from_clipboard(self):
         """将剪贴板文本粘贴到输入框中。"""
         clip = self._get_clipboard_text()
         if not clip:
             return
-        # 去除换行，仅保留单行纯文本
-        pasted = clip.replace('\r', '').replace('\n', '')
+        # 去除换行和控制字符，仅保留单行纯文本
+        pasted = self._sanitize_input(clip)
+        pasted = pasted.replace('\r', '').replace('\n', '')
         remaining = MAX_INPUT_LENGTH - len(self.input_text)
         if remaining <= 0:
             return
@@ -536,7 +551,8 @@ class ChatGUI(GUI):
 
         font = self.render.get_font(lay['input_font_size'])
         prompt = "" # 可自定义输入前文字
-        display_text = self.input_text
+        # 渲染前清理非法字符（null 等会导致 font.render 崩溃）
+        display_text = self._sanitize_input(self.input_text)
 
         self._recalc_input_scroll(font)
 

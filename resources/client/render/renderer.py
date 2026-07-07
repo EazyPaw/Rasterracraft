@@ -19,6 +19,8 @@ from resources.client.GUI.gui import GUI
 from resources.client.camera import Camera
 
 from .block import BlockRenderMixin
+from .constants import BLOCK_TINT_COLOR_STEP
+from .math_utils import cyclic_lerp_color, lerp_color, quantize_color
 from .sky import SkyMixin
 
 if TYPE_CHECKING:
@@ -126,6 +128,8 @@ class Render(SkyMixin, BlockRenderMixin):
         # ---- 供外部使用的绘制方法引用 ----
         self.blit = self.screen.blit
         self.debug = False
+        self.tinted_surface_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
+        self.MAX_TINTED_SURFACE_CACHE: int = 768
 
     # ===================== 坐标转换 =====================
 
@@ -207,6 +211,56 @@ class Render(SkyMixin, BlockRenderMixin):
         """blit 操作的便捷包装。"""
         target.blit(source, dest, area, special_flags)
 
+    def get_world_light_tint(self, world_x: float, world_y: float) -> tuple[int, int, int]:
+        block_x = _math.floor(world_x)
+        block_y = _math.floor(world_y)
+        chunk_rx = block_x // 16
+        local_x = block_x % 16
+
+        sky_map = getattr(self.client_world, "sky_light_map", {}).get(chunk_rx)
+        block_map = getattr(self.client_world, "block_light_map", {}).get(chunk_rx)
+        if sky_map is None or block_map is None:
+            return (255, 255, 255)
+        if block_y < 0 or block_y >= self.client_world.y_max:
+            return (255, 255, 255)
+
+        sky_state = self.current_sky_state or self.get_sky_state()
+        sky_level = float(sky_map[local_x, block_y]) / 15.0 * sky_state["sky_light_weight"]
+        block_level = float(block_map[local_x, block_y]) / 15.0
+        brightness = min(1.0, sky_level + block_level)
+        if brightness <= 0.0:
+            return (0, 0, 0)
+
+        night_tint = (36, 48, 128)
+        sky_color = lerp_color(
+            cyclic_lerp_color(self.SKY_LOWER_KEYFRAMES, self.day_time),
+            sky_state["twilight_color"],
+            sky_state["twilight"],
+        )
+        sky_color = lerp_color(sky_color, night_tint, sky_state["night"] * 0.85)
+        sky_color = quantize_color(sky_color, BLOCK_TINT_COLOR_STEP)
+        total = sky_level + block_level
+        sky_ratio = sky_level / total if total > 0.001 else 0.5
+        return self._compute_corner_color(brightness, sky_ratio, sky_color)
+
+    def get_tinted_surface(self, surface: pygame.Surface, tint: tuple[int, int, int]) -> pygame.Surface:
+        if tint == (255, 255, 255):
+            return surface
+        key = (surface, tint)
+        cache = self.tinted_surface_cache
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+
+        tinted = surface.copy()
+        mask = pygame.Surface(tinted.get_size())
+        mask.fill(tint)
+        tinted.blit(mask, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+        cache[key] = tinted
+        if len(cache) > self.MAX_TINTED_SURFACE_CACHE:
+            cache.popitem(last=False)
+        return tinted
+
     def draw_rect(
         self,
         color: tuple[int, ...],
@@ -274,6 +328,7 @@ class Render(SkyMixin, BlockRenderMixin):
                     self.sky_cache_key = None
                     self.stars = self.generate_stars()
                     self.celestial_cache.clear()
+                    self.tinted_surface_cache.clear()
                     self.ig_gui_layer = pygame.Surface(
                         (self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA
                     )
@@ -292,6 +347,7 @@ class Render(SkyMixin, BlockRenderMixin):
                     self.draw_sky()                          # 天空背景（来自 SkyMixin）
                     self.camera.update()
                     self.draw_block()                        # 方块绘制（来自 BlockRenderMixin）
+                    self.client.particle_manager.draw(self)
                     self.draw_hovered_block_outline()
                     self.client.client_player.skeleton.update()
                     self.draw_player()

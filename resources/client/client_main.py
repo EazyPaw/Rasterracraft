@@ -17,6 +17,7 @@ from resources.client.client_packets import decode_packet, encode_packet
 from resources.client.game_manager import GameManager
 from resources.client.client_player import ClientPlayer
 from resources.client.GUI.main_menu import MainMenu
+from resources.client.particles import ParticleManager
 from resources.client.resources_loader import ResourcesManager
 from resources.server.server_main import Server
 from resources.server.utils import recv_exact, set_client
@@ -62,6 +63,7 @@ class Client:
         self.chat_gui = None  # ChatGUI 在步骤 6 初始化
         self.client_player: ClientPlayer | None = None
         self.game_manager = GameManager(self)
+        self.particle_manager = ParticleManager(self)
         self.game_thread = threading.Thread(target=self.game_manager.start_game_loop, name="InGameThread")
         self.game_thread.daemon = True
         self.hold_mouse_buttons = [False, False, False]
@@ -203,6 +205,7 @@ class Client:
             self.key_map = {
                 pygame.K_F3: self.render.debug_mode,
                 pygame.K_e: self.client_player.game_mode.open_inventory,
+                pygame.K_LCTRL: self.client_player.switch_sprint,
             }
 
     def _start_server_subprocess(self):

@@ -41,7 +41,7 @@ class Block(ABC):
 
     @classmethod
     @client_method
-    def get_texture(cls, size, client):
+    def get_texture(cls, size, client = None):
         """
         返回方块的材质 (client 参数由 @client_only 自动注入)
         :param size:
@@ -139,6 +139,7 @@ class Plant(Block):
     break_sound = 'dig.grass'
     solid = False
     light_attenuation = 1
+    has_transparent_pixels = True
 
     def on_update(self):
         if BlockTag.GRASS_BLOCKS not in self.location.world.get_block(self.location.add(0, -1, 0)).Tags:
@@ -147,6 +148,7 @@ class Plant(Block):
 class GrassStain(Plant):
     # 需要更据生物群系染色的植物（草）
     _texture_cache = {}  # key: (size, biome_id)
+    has_transparent_pixels = True
 
     @client_method
     def get_texture(self, size, client: 'Client'):
@@ -183,6 +185,7 @@ class Leaves(Block):
     _texture_cache = {}   # key: (size, biome_id)
     _effect_cache = {}    # key: (size, biome_id, z, front_same, behind_leaf)
     break_sound = 'dig.grass'
+    has_transparent_pixels = True
 
     @client_method
     def get_texture(self, size, client: 'Client'):

@@ -1,5 +1,9 @@
+import math as _math
+import random as _random
+
 from resources.server.entity import Entity
 from resources.server.location import Location, decide_x_or_loc
+from resources.server.particles import SPRINT_STEP
 from resources.server.world_class import World
 
 
@@ -9,12 +13,77 @@ class Player(Entity):
         self.world: World = world
         self.loading_regions = []
         self.name = "Player_" + self.uuid.hex[:8]
+        self.width = 0.3
+        self.height = 1.8
+        # 疾跑粒子节流：避免每帧都生成粒子造成刷屏
+        self._sprint_particle_timer: int = 0
+        self._last_sprint_particle_x: float | None = None
 
     def on_moving(self):
         rx = int(self.x // 16)
         for x in range(rx - self.world.server.view_distance, rx + self.world.server.view_distance + 1):
             if x not in self.loading_regions and x in self.world.regions:
                 self.world.server.send_client_socket(self, self.world.regions[x])
+        if self.sprinting:
+            self._spawn_sprint_particles()
+        else:
+            self._last_sprint_particle_x = self.x
+            self._sprint_particle_timer = 0
+
+    def _spawn_sprint_particles(self) -> None:
+        """疾跑时在脚底生成脚下方块的碎片粒子。
+
+        每 3 帧生成一次（避免粒子过密），方向感知：
+        粒子主要向玩家身后散射，模拟跑步扬尘的物理效果。
+        玩家原地不动时不生成粒子。
+        """
+        # 玩家没有水平移动时不生成粒子
+        last_x = self._last_sprint_particle_x
+        self._last_sprint_particle_x = self.x
+        if last_x is None:
+            return
+        if abs(self.x - last_x) < 0.001:
+            return
+
+        self._sprint_particle_timer += 1
+        if self._sprint_particle_timer % 3 != 0:
+            return
+
+        # 获取脚下方块，空气方块不生成粒子
+        foot_block_x = _math.floor(self.x + self.width / 2)
+        foot_block_y = _math.floor(self.y - 0.05)
+        try:
+            block_below = self.world.get_block(foot_block_x, foot_block_y, 0)
+        except (IndexError, AttributeError, TypeError):
+            return
+        if block_below is None or getattr(block_below, "block_id", None) == "air":
+            return
+
+        # 粒子生成位置：脚底，略微偏向身体中心
+        base_x = self.x + self.width / 2
+        foot_y = self.y
+
+        # 根据朝向确定身后方向（粒子踢向身后）
+        # facing: 0=左(RIGHT), 1=右(LEFT)
+        behind_dir = -1.0 if self.facing == 0 else 1.0
+
+        for _ in range(2):
+            # 随机偏移：粒子散布在脚底附近
+            offset_x = _random.uniform(-0.15, 0.15)
+            offset_y = _random.uniform(0.0, 0.1)
+
+            # 水平速度：向身后 + 随机扰动
+            vel_x = behind_dir * _random.uniform(0.02, 0.08) + _random.uniform(-0.03, 0.03)
+            vel_y = _random.uniform(0.01, 0.06)  # 轻微上扬
+
+            self.world.spawn_particle(SPRINT_STEP(
+                base_x + offset_x,
+                foot_y + offset_y,
+                0,
+                count=1,
+                motion=(vel_x, vel_y),
+                data={"block_id": block_below.block_id},
+            ))
 
     def teleport_to(self, x, y, world = None):
         self.x = x

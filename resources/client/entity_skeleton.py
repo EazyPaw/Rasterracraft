@@ -125,7 +125,7 @@ class BodyPart:
         )
         self._last_transform_key = key
 
-    def draw(self, render, entity_pos: tuple[float, float], scale: float):
+    def draw(self, render, entity_pos: tuple[float, float], scale: float, tint=(255, 255, 255)):
         """把身体部件画到屏幕上，并保证 pivot 精确贴到 anchor。"""
         if not self.show:
             return
@@ -145,7 +145,8 @@ class BodyPart:
         rotated_center = pygame.Vector2(self.texture.get_rect().center)
         top_left = anchor_screen - rotated_center - rotated_pivot_from_center
 
-        render.blit(self.texture, (round(top_left.x), round(top_left.y)))
+        texture = render.get_tinted_surface(self.texture, tint)
+        render.blit(texture, (round(top_left.x), round(top_left.y)))
 
 
 class EntitySkeleton(ABC):
@@ -247,7 +248,7 @@ class EntitySkeleton(ABC):
 
     # ---------- 绘制 ----------
 
-    def _draw_part_at_screen(self, part: BodyPart, anchor_screen: tuple[float, float]):
+    def _draw_part_at_screen(self, part: BodyPart, anchor_screen: tuple[float, float], tint=(255, 255, 255)):
         """绕过世界坐标变换，直接在屏幕坐标绘制部件（用于固定屏幕中心的实体）。"""
         if not part.show:
             return
@@ -258,12 +259,16 @@ class EntitySkeleton(ABC):
         rotated_pivot_from_center = pivot_from_center.rotate(-part.angle)
         rotated_center = pygame.Vector2(part.texture.get_rect().center)
         top_left = anchor - rotated_center - rotated_pivot_from_center
-        self.client.render.blit(part.texture, (round(top_left.x), round(top_left.y)))
+        texture = self.client.render.get_tinted_surface(part.texture, tint)
+        self.client.render.blit(texture, (round(top_left.x), round(top_left.y)))
 
     def draw(self):
         """按层级绘制实体所有可见部件。_pinned 实体固定于屏幕中心。"""
         scale = self.client.render.trans_scale * self.size
         render = self.client.render
+        tint_x = self.entity.x + getattr(self.entity, "width", 1.0) * 0.5
+        tint_y = self.entity.y + self._visual_center[1]
+        tint = render.get_world_light_tint(tint_x, tint_y)
 
         if self._pinned:
             # 屏幕固定模式：视觉中心精确对准屏幕中央，完全绕过相机
@@ -275,11 +280,11 @@ class EntitySkeleton(ABC):
                 part.rebuild_texture(scale)
                 ax = screen_cx + (part.anchor[0] - vc_x) * bs
                 ay = screen_cy - (part.anchor[1] - vc_y) * bs
-                self._draw_part_at_screen(part, (ax, ay))
+                self._draw_part_at_screen(part, (ax, ay), tint)
         else:
             entity_pos = (self._render_x, self._render_y)
             for part in self._parts_in_draw_order():
-                part.draw(render, entity_pos, scale)
+                part.draw(render, entity_pos, scale, tint)
 
 
 class PlayerSkeleton(EntitySkeleton):

@@ -1,5 +1,7 @@
 import os
 
+from resources.server.biome import get_biome_by_id
+
 if os.environ.get('PYCRAFT_CLIENT') == '1':
     import pygame
 
@@ -16,6 +18,7 @@ class AIR(Block):
     replaceable = True
     breakable = False
     light_attenuation = 1
+    has_transparent_pixels = True
 
     @classmethod
     @client_method
@@ -87,16 +90,19 @@ class GRASS_BLOCK(Block):
         获取草方块侧面纹理：将染色后的 grass_side_overlay 组合到 grass_side 上。
         (client 由 @client_only 自动注入)
         """
+        x = self.location.x
+        y = self.location.y
+        biome = get_biome_by_id(self.location.world.get_biome(x, y))
 
         # 检查缓存
-        if (size, self.snowed) in self._side_texture_cache:
-            return self._side_texture_cache[(size, self.snowed)]
+        if (size, self.snowed, biome) in self._side_texture_cache:
+            return self._side_texture_cache[(size, self.snowed, biome)]
 
         if self.snowed:
             tex = client.resources_manager.get_texture_img("blocks.grass_side_snowed")
             final_texture = pygame.transform.scale(tex, (size, size))
-            self._side_texture_cache[(size, self.snowed)] = final_texture.convert_alpha()
-            return self._side_texture_cache[(size, self.snowed)]
+            self._side_texture_cache[(size, self.snowed, biome)] = final_texture.convert_alpha()
+            return self._side_texture_cache[(size, self.snowed, biome)]
 
         # 1. 获取基础材质
         base_side = client.resources_manager.get_texture_img("blocks.grass_side")
@@ -120,7 +126,7 @@ class GRASS_BLOCK(Block):
         final_texture.blit(stained_overlay, (0, 0))
 
         # 5. 存入缓存
-        self._side_texture_cache[(size, self.snowed)] = final_texture.convert_alpha()
+        self._side_texture_cache[(size, self.snowed, biome)] = final_texture.convert_alpha()
 
         return final_texture
 
@@ -128,38 +134,10 @@ class GRASS_BLOCK(Block):
         self.snowed = isinstance(self.location.world.get_block(self.location.add(0, 1, 0)), SNOW)
 
 
-class SHORT_GRASS(Plant):
+class SHORT_GRASS(GrassStain):
     block_id = 'short_grass'
     name = 'short grass'
     _texture_path = 'blocks.tallgrass'
-    _texture_cache = {}  # 缓存不同尺寸的染色纹理
-
-    @client_method
-    def get_texture(self, size, client: 'Client'):
-        """
-        获取短草纹理：将染色后的纹理。
-        (client 由 @client_only 自动注入)
-        """
-        # 检查缓存
-        if size in self._texture_cache:
-            return self._texture_cache[size]
-
-        # 1. 获取基础材质
-        base_texture = client.resources_manager.get_texture_img("blocks.tallgrass")
-
-        if base_texture is None:
-            return None
-
-        # 2. 缩放至目标尺寸
-        texture_scaled = pygame.transform.scale(base_texture, (size, size))
-
-        # 3. 染色纹理 (使用 RGB 元组 (30, 50, 70))
-        stained_texture = client.resources_manager.biome_stain(texture_scaled, self.location).convert_alpha()
-
-        # 4. 存入缓存
-        self._texture_cache[size] = stained_texture
-
-        return stained_texture
 
 class OAK_PLANK(Block):
     block_id = 'oak_plank'
@@ -331,7 +309,7 @@ class ICE(Block):
     name = 'ice'
     _texture_path = 'blocks.ice'
     break_sound = 'dig.glass'
-    friction = 0.1
+    friction = 0.9
 
 class WATER(Block):
     block_id = 'water'

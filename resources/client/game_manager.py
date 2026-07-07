@@ -26,9 +26,9 @@ class GameManager:
         self.handle_events()
         self.handle_key_pressed()
         self.sync_player_camera()
-        self.client.client_player.handle_gravity()
         self.client.client_player.move_update()
         self.client.client_player.game_mode.get_choosing_block()
+        self.client.particle_manager.update()
 
     def client_tick(self):
         ...

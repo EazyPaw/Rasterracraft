@@ -112,6 +112,8 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             client.client_world.update_biomes(packet['rx'], packet['biome_array'])
     elif packet['__class__'] == 'TimeUpdate':
         client.client_world.world_time = packet.get('time', 0) % 24000
+    elif packet['__class__'] == 'Particle':
+        client.particle_manager.handle_packet(packet)
     elif packet['__class__'] == 'ChatMessage':
         # {
         #     '__class__': 'ChatMessage',
@@ -135,6 +137,9 @@ def encode_packet(obj, obj_type = None, args = None) -> dict:
             'x': obj.x,
             'y': obj.y,
             'sneaking': obj.sneaking,
+            'sprinting': obj.sprinting,
+            'facing': obj.facing,
+            'on_ground': obj.on_ground,
         }
     elif  isinstance(obj, Block) and obj_type == 'BreakBlock':
         location: Location = obj.location

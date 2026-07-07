@@ -10,6 +10,7 @@ from resources.server.block_class import Block
 from resources.server.blocks import AIR
 from resources.server.generator import Generator
 from resources.server.location import Location, decide_x_or_loc
+from resources.server.particles import BlockBreakParticleEffect, Particle, get_particle_by_id
 
 
 class Chunk:
@@ -388,12 +389,51 @@ class World:
                 }
                 self.server.send_client_socket(player, light_update, "LightUpdate")
 
+    def spawn_particle(self, particle: Particle, players=None):
+        if players is None:
+            players = self.server.players
+
+        for player in players:
+            if player.is_loading_position(int(particle.x), int(particle.y), particle.z):
+                self.server.send_client_socket(player, particle, "Particle")
+
+    def play_particle(
+        self,
+        particle_id: str | type[Particle],
+        x_loc: float | Location,
+        y: float = None,
+        z: int = None,
+        *,
+        count: int = 1,
+        motion: tuple[float, float] = (0.0, 0.0),
+        data: dict | None = None,
+        players=None,
+    ):
+        x, y, z = decide_x_or_loc(x_loc, y, z)
+        try:
+            particle_cls = get_particle_by_id(particle_id) if isinstance(particle_id, str) else particle_id
+        except ValueError:
+            logging.warning(f"Unknown particle ID: {particle_id}")
+            return
+        self.spawn_particle(
+            particle_cls(
+                float(x),
+                float(y),
+                int(z),
+                count=count,
+                motion=motion,
+                data=data or {},
+            ),
+            players=players,
+        )
+
     def get_block(self, x_loc: int | Location, y: int = None, z: int = None) -> Block:
         """
         获取在某位置的方块
         支持传入 Location 或者 xyz 坐标
         """
         x, y, z = decide_x_or_loc(x_loc, y, z)
+        x, y, z = int(x), int(y), int(z)
         chunk = self.regions.get(x // 16)
         if 0 < y < self.attribute.MAX_BUILD_HEIGHT:
             rela_x = x % 16
@@ -519,10 +559,15 @@ class World:
 
     def break_block(self, x_loc: int | Location, y: int = None, z: int = None):
         x, y, z = decide_x_or_loc(x_loc, y, z)
-        self.get_block(x, y, z).on_break()
+        block = self.get_block(x, y, z)
+        if isinstance(block, AIR):
+            return
+        location = Location(self, x, y, z)
+        self.spawn_particle(BlockBreakParticleEffect(block, location, count=18))
+        block.on_break()
         for player in self.server.players:
             if player.is_loading_position(x, y, z):
-                self.server.send_client_socket(player, Location(self, x, y, z), "BreakBlock")
+                self.server.send_client_socket(player, location, "BreakBlock")
         changed_light_chunks = self.set_block(AIR(), x, y, z, False)
         self.send_light_updates(changed_light_chunks)
 
