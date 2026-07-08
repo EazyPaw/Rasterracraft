@@ -3,7 +3,7 @@ import os
 from resources.server.biome import get_biome_by_id
 
 if os.environ.get('PYCRAFT_CLIENT') == '1':
-    import pygame
+    pass
 
 from resources.server.block_class import *
 from resources.server.tags import BlockTag
@@ -141,6 +141,160 @@ class SHORT_GRASS(GrassStain):
     name = 'short grass'
     _texture_path = 'blocks.tallgrass'
 
+
+class DoublePlantBottomMixin:
+    top_block_id = None
+
+    def _remove_double_plant_neighbor(self, location):
+        world = location.world
+        try:
+            world.set_block(AIR(), location, send_packet=True, block_update=False)
+        except TypeError:
+            world.set_block(AIR(), location)
+
+    def on_update(self):
+        Plant.on_update(self)
+
+    def on_break(self):
+        if self.location is None or self.top_block_id is None:
+            return
+        top = self.location.world.get_block(self.location.add(0, 1, 0))
+        if getattr(top, "block_id", None) == self.top_block_id:
+            self._remove_double_plant_neighbor(top.location)
+
+
+class DoublePlantTopMixin:
+    bottom_block_id = None
+
+    def _remove_double_plant_neighbor(self, location):
+        world = location.world
+        try:
+            world.set_block(AIR(), location, send_packet=True, block_update=False)
+        except TypeError:
+            world.set_block(AIR(), location)
+
+    def on_update(self):
+        if self.location is None or self.bottom_block_id is None:
+            return
+        bottom = self.location.world.get_block(self.location.add(0, -1, 0))
+        if getattr(bottom, "block_id", None) != self.bottom_block_id:
+            self.location.world.break_block(self.location)
+
+    def on_break(self):
+        if self.location is None or self.bottom_block_id is None:
+            return
+        bottom = self.location.world.get_block(self.location.add(0, -1, 0))
+        if getattr(bottom, "block_id", None) == self.bottom_block_id:
+            self._remove_double_plant_neighbor(bottom.location)
+
+
+class TALL_GRASS(DoublePlantBottomMixin, GrassStain):
+    block_id = 'tall_grass'
+    name = 'tall grass'
+    _texture_path = 'blocks.double_plant_grass_bottom'
+    top_block_id = 'tall_grass_top'
+
+
+class TALL_GRASS_TOP(DoublePlantTopMixin, GrassStain):
+    block_id = 'tall_grass_top'
+    name = 'tall grass top'
+    _texture_path = 'blocks.double_plant_grass_top'
+    bottom_block_id = 'tall_grass'
+
+
+class LARGE_FERN(DoublePlantBottomMixin, GrassStain):
+    block_id = 'large_fern'
+    name = 'large fern'
+    _texture_path = 'blocks.double_plant_fern_bottom'
+    top_block_id = 'large_fern_top'
+
+
+class LARGE_FERN_TOP(DoublePlantTopMixin, GrassStain):
+    block_id = 'large_fern_top'
+    name = 'large fern top'
+    _texture_path = 'blocks.double_plant_fern_top'
+    bottom_block_id = 'large_fern'
+
+
+class SUNFLOWER(DoublePlantBottomMixin, Plant):
+    block_id = 'sunflower'
+    name = 'sunflower'
+    _texture_path = 'blocks.double_plant_sunflower_bottom'
+    top_block_id = 'sunflower_top'
+
+
+class SUNFLOWER_TOP(DoublePlantTopMixin, Plant):
+    block_id = 'sunflower_top'
+    name = 'sunflower top'
+    _texture_path = 'blocks.double_plant_sunflower_top'
+    _front_texture_path = 'blocks.double_plant_sunflower_front'
+    bottom_block_id = 'sunflower'
+    _texture_cache = {}
+
+    @client_method
+    def get_texture(self, size, client=None):
+        top = client.resources_manager.get_texture_img(self._texture_path)
+        front = client.resources_manager.get_texture_img(self._front_texture_path)
+        if top is None:
+            return super().get_texture(size, client)
+
+        cache_key = (size, id(top), id(front) if front is not None else 0)
+        if cache_key in self._texture_cache:
+            return self._texture_cache[cache_key]
+
+        final = pygame.transform.scale(top, (size, size)).convert_alpha()
+        if front is not None:
+            front_scaled = pygame.transform.scale(front, (size, size)).convert_alpha()
+            final.blit(front_scaled, (0, 0))
+
+        cls = type(self)
+        if cls.has_transparent_pixels is None:
+            cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(final)
+        self._texture_cache[cache_key] = final
+        return final
+
+
+class ROSE_BUSH(DoublePlantBottomMixin, Plant):
+    block_id = 'rose_bush'
+    name = 'rose bush'
+    _texture_path = 'blocks.double_plant_rose_bottom'
+    top_block_id = 'rose_bush_top'
+
+
+class ROSE_BUSH_TOP(DoublePlantTopMixin, Plant):
+    block_id = 'rose_bush_top'
+    name = 'rose bush top'
+    _texture_path = 'blocks.double_plant_rose_top'
+    bottom_block_id = 'rose_bush'
+
+
+class PEONY(DoublePlantBottomMixin, Plant):
+    block_id = 'peony'
+    name = 'peony'
+    _texture_path = 'blocks.double_plant_paeonia_bottom'
+    top_block_id = 'peony_top'
+
+
+class PEONY_TOP(DoublePlantTopMixin, Plant):
+    block_id = 'peony_top'
+    name = 'peony top'
+    _texture_path = 'blocks.double_plant_paeonia_top'
+    bottom_block_id = 'peony'
+
+
+class LILAC(DoublePlantBottomMixin, Plant):
+    block_id = 'lilac'
+    name = 'lilac'
+    _texture_path = 'blocks.double_plant_syringa_bottom'
+    top_block_id = 'lilac_top'
+
+
+class LILAC_TOP(DoublePlantTopMixin, Plant):
+    block_id = 'lilac_top'
+    name = 'lilac top'
+    _texture_path = 'blocks.double_plant_syringa_top'
+    bottom_block_id = 'lilac'
+
 class OAK_PLANK(Block):
     block_id = 'oak_plank'
     name = 'oak plank'
@@ -271,6 +425,7 @@ class SNOW(BottomSupport):
     break_sound = 'dig.snow'
     solid = False
     light_attenuation = 1
+    has_transparent_pixels = True
 
     _texture_cache = {}
 
@@ -326,6 +481,21 @@ class SUGAR_CANE(Plant):
     name = 'sugar_cane'
     _texture_path = 'blocks.reeds'
 
+    def on_update(self):
+        below = self.location.world.get_block(self.location.add(0, -1, 0))
+        if getattr(below, "block_id", None) == self.block_id:
+            return
+        if not isinstance(below, (DIRT, SAND, RED_SAND, GRASS_BLOCK)):
+            self.location.world.break_block(self.location)
+            return
+        for dx in (-1, 1):
+            neighbor = self.location.world.get_block(
+                self.location.x + dx, self.location.y - 1, self.location.z
+            )
+            if isinstance(neighbor, (WATER, ICE)):
+                return
+        self.location.world.break_block(self.location)
+
 class FERN(GrassStain):
     block_id = 'fern'
     name = 'fern'
@@ -342,6 +512,11 @@ class CACTUS(Block):
     name = 'cactus'
     _texture_path = 'blocks.cactus_side'
     break_sound = 'dig.cloth'
+
+    def on_update(self):
+        below = self.location.world.get_block(self.location.add(0, -1, 0))
+        if not isinstance(below, (CACTUS, SAND, RED_SAND)):
+            self.location.world.break_block(self.location)
 
 class BROWN_MUSHROOM(Plant):
     block_id = 'brown_mushroom'
@@ -410,6 +585,15 @@ class OXEYE_DAISY(Plant):
     block_id = 'oxeye_daisy'
     name = 'oxeye daisy'
     _texture_path = 'blocks.flower_oxeye_daisy'
+
+class DIAMOND_BLOCK(Block):
+    block_id = 'diamond_block'
+    name = 'tile.blockDiamond.name'
+    _texture_path = 'blocks.diamond_block'
+
+
+
+
 
 # ---- block_id → Block 子类 缓存 ----
 _BLOCK_REGISTRY: dict[str, type] = None  # None = 尚未构建

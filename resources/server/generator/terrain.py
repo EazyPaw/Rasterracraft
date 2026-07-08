@@ -8,7 +8,7 @@
 from functools import lru_cache
 
 from resources.server.blocks import *
-from resources.server.generator.config import BiomeProfile
+from resources.server.biome import BIOME_PROFILES, BiomeProfile
 from resources.server.generator.noise import NoiseMixin
 
 
@@ -20,91 +20,10 @@ class TerrainMixin(NoiseMixin):
     需要宿主类提供 ``self.sea_level`` 属性。
     """
 
+    background_surface_offset = 1
+
     # ---- 生物群系配置表 ----
-    # fmt: off
-    biome_profiles = {
-        # ── 平原 / 草甸 ──
-        "plains":                  BiomeProfile("plains",                  "grass_block", "dirt",        "stone",          "oak",         0.020, 0.28, 0.035, 0.0,  0.002, 0.0,   0.018,   0,  1.0),
-        "sunflower_plains":        BiomeProfile("sunflower_plains",        "grass_block", "dirt",        "stone",          "oak",         0.020, 0.32, 0.080, 0.0,  0.002, 0.0,   0.018,   0,  1.0),
-        "meadow":                  BiomeProfile("meadow",                  "grass_block", "dirt",        "stone",          "oak",         0.010, 0.30, 0.080, 0.0,  0.002, 0.0,   0.010,   3,  1.1),
-
-        # ── 森林 ──
-        "forest":                  BiomeProfile("forest",                  "grass_block", "dirt",        "stone",          "oak",         0.100, 0.34, 0.035, 0.02, 0.018, 0.0,   0.010,   2,  1.05),
-        "flower_forest":           BiomeProfile("flower_forest",           "grass_block", "dirt",        "stone",          "oak",         0.070, 0.38, 0.120, 0.02, 0.020, 0.0,   0.008,   2,  1.0),
-        "birch_forest":            BiomeProfile("birch_forest",            "grass_block", "dirt",        "stone",          "birch",       0.090, 0.30, 0.030, 0.015,0.010, 0.0,   0.010,   2,  1.0),
-        "old_growth_birch_forest": BiomeProfile("old_growth_birch_forest", "grass_block", "dirt",        "stone",          "birch",       0.120, 0.28, 0.025, 0.02, 0.014, 0.0,   0.008,   3,  1.05),
-        "dark_forest":             BiomeProfile("dark_forest",             "grass_block", "dirt",        "stone",          "dark_oak",    0.140, 0.22, 0.020, 0.03, 0.040, 0.0,   0.005,   1,  1.0),
-
-        # ── 针叶林 / 雪 ──
-        "taiga":                   BiomeProfile("taiga",                   "grass_block", "dirt",        "stone",          "spruce",      0.090, 0.22, 0.010, 0.14, 0.016, 0.0,   0.004,   3,  1.05),
-        "snowy_taiga":             BiomeProfile("snowy_taiga",             "grass_block", "dirt",        "stone",          "spruce",      0.070, 0.12, 0.000, 0.08, 0.004, 0.0,   0.000,   4,  1.05),
-        "old_growth_pine_taiga":   BiomeProfile("old_growth_pine_taiga",   "grass_block", "dirt",        "stone",          "spruce",      0.110, 0.20, 0.008, 0.16, 0.020, 0.0,   0.003,   5,  1.1),
-        "old_growth_spruce_taiga": BiomeProfile("old_growth_spruce_taiga", "grass_block", "dirt",        "stone",          "spruce",      0.100, 0.18, 0.006, 0.15, 0.022, 0.0,   0.003,   5,  1.1),
-        "snowy_plains":            BiomeProfile("snowy_plains",            "grass_block", "dirt",        "stone",          None,          0.000, 0.08, 0.000, 0.0,  0.000, 0.0,   0.000,   2,  0.95),
-        "ice_spikes":              BiomeProfile("ice_spikes",              "grass_block", "dirt",        "stone",          None,          0.000, 0.02, 0.000, 0.0,  0.000, 0.0,   0.000,   3,  1.0),
-        "grove":                   BiomeProfile("grove",                   "grass_block", "dirt",        "stone",          "spruce",      0.060, 0.16, 0.010, 0.10, 0.008, 0.0,   0.002,   18,  2.0),
-
-        # ── 山地 ──
-        "windswept_hills":         BiomeProfile("windswept_hills",         "grass_block", "dirt",        "stone",          "spruce",      0.030, 0.10, 0.008, 0.04, 0.004, 0.0,   0.002,   18,  2.2),
-        "windswept_gravelly_hills":BiomeProfile("windswept_gravelly_hills","grass_block", "gravel",      "stone",          "spruce",      0.020, 0.06, 0.004, 0.02, 0.002, 0.0,   0.000,   20,  2.3),
-        "windswept_forest":        BiomeProfile("windswept_forest",        "grass_block", "dirt",        "stone",          "oak",         0.055, 0.14, 0.012, 0.04, 0.006, 0.0,   0.003,   14,  1.8),
-        "jagged_peaks":            BiomeProfile("jagged_peaks",            "stone",       "stone",       "stone",          None,          0.000, 0.00, 0.000, 0.0,  0.000, 0.0,   0.000,   55,  3.5),
-        "frozen_peaks":            BiomeProfile("frozen_peaks",            "snow_block",  "stone",       "stone",          None,          0.000, 0.00, 0.000, 0.0,  0.000, 0.0,   0.000,   52,  3.3),
-        "stony_peaks":             BiomeProfile("stony_peaks",             "stone",       "stone",       "stone",          None,          0.000, 0.00, 0.000, 0.0,  0.000, 0.0,   0.000,   46,  3.0),
-        "snowy_slopes":            BiomeProfile("snowy_slopes",            "grass_block", "dirt",        "stone",          "spruce",      0.020, 0.08, 0.004, 0.06, 0.002, 0.0,   0.000,   24,  2.4),
-
-        # ── 沙漠 / 热带草原 ──
-        "desert":                  BiomeProfile("desert",                  "sand",        "sand",        "sandstone",      None,          0.000, 0.00, 0.000, 0.0,  0.000, 0.045, 0.000,  -2,  0.78),
-        "savanna":                 BiomeProfile("savanna",                 "grass_block", "dirt",        "stone",          "acacia",      0.045, 0.20, 0.012, 0.0,  0.000, 0.0,   0.006,   2,  1.2),
-        "savanna_plateau":         BiomeProfile("savanna_plateau",         "grass_block", "dirt",        "stone",          "acacia",      0.038, 0.16, 0.010, 0.0,  0.000, 0.0,   0.004,   10,  1.6),
-        "windswept_savanna":       BiomeProfile("windswept_savanna",       "grass_block", "coarse_dirt", "stone",          "acacia",      0.035, 0.12, 0.006, 0.0,  0.000, 0.0,   0.002,   10,  2.0),
-        "badlands":                BiomeProfile("badlands",                "red_sand",    "hardened_clay","red_sandstone", None,          0.000, 0.00, 0.000, 0.0,  0.000, 0.020, 0.000,   6,  1.4),
-        "wooded_badlands":         BiomeProfile("wooded_badlands",         "red_sand",    "hardened_clay","red_sandstone","oak",         0.030, 0.06, 0.000, 0.0,  0.000, 0.012, 0.000,   8,  1.5),
-        "eroded_badlands":         BiomeProfile("eroded_badlands",         "red_sand",    "hardened_clay","red_sandstone", None,         0.000, 0.00, 0.000, 0.0,  0.000, 0.016, 0.000,  14,  1.8),
-
-        # ── 丛林 ──
-        "jungle":                  BiomeProfile("jungle",                  "grass_block", "dirt",        "stone",          "jungle_tree", 0.160, 0.44, 0.025, 0.20, 0.014, 0.0,   0.040,   1,  1.05),
-        "sparse_jungle":           BiomeProfile("sparse_jungle",           "grass_block", "dirt",        "stone",          "jungle_tree", 0.060, 0.40, 0.020, 0.14, 0.010, 0.0,   0.035,   0,  1.0),
-        "bamboo_jungle":           BiomeProfile("bamboo_jungle",           "grass_block", "dirt",        "stone",          "jungle_tree", 0.140, 0.42, 0.022, 0.18, 0.012, 0.0,   0.038,   1,  1.05),
-
-        # ── 沼泽 ──
-        "swamp":                   BiomeProfile("swamp",                   "grass_block", "dirt",        "stone",          "oak",         0.055, 0.36, 0.015, 0.0,  0.045, 0.0,   0.070,  -4,  0.60),
-        "mangrove_swamp":          BiomeProfile("mangrove_swamp",          "grass_block", "dirt",        "stone",          "oak",         0.070, 0.30, 0.010, 0.0,  0.040, 0.0,   0.055,  -3,  0.58),
-
-        # ── 海洋 ──
-        "ocean":                   BiomeProfile("ocean",                   "sand",        "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.0,   -14,  0.45),
-        "deep_ocean":              BiomeProfile("deep_ocean",              "gravel",      "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.0,   -26,  0.38),
-        "warm_ocean":              BiomeProfile("warm_ocean",              "sand",        "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.0,   -15,  0.42),
-        "lukewarm_ocean":          BiomeProfile("lukewarm_ocean",          "sand",        "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.0,   -16,  0.40),
-        "cold_ocean":              BiomeProfile("cold_ocean",              "gravel",      "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.0,   -17,  0.40),
-        "frozen_ocean":            BiomeProfile("frozen_ocean",            "gravel",      "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.0,   -16,  0.38),
-        "deep_cold_ocean":         BiomeProfile("deep_cold_ocean",         "gravel",      "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.0,   -28,  0.36),
-        "deep_frozen_ocean":       BiomeProfile("deep_frozen_ocean",       "gravel",      "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.0,   -27,  0.36),
-        "deep_lukewarm_ocean":     BiomeProfile("deep_lukewarm_ocean",     "sand",        "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.0,   -27,  0.37),
-
-        # ── 沙滩 / 河流 ──
-        "beach":                   BiomeProfile("beach",                   "sand",        "sand",        "sandstone",      None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.025,  -2,  0.55),
-        "snowy_beach":             BiomeProfile("snowy_beach",             "sand",        "sand",        "sandstone",      None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.000,  -1,  0.52),
-        "stony_shore":             BiomeProfile("stony_shore",             "stone",       "stone",       "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.000,   0,  0.50),
-        "river":                   BiomeProfile("river",                   "sand",        "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.000,  -6,  0.35),
-        "frozen_river":            BiomeProfile("frozen_river",            "sand",        "sand",        "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.000,  -5,  0.35),
-
-        # ── 特殊 ──
-        "mushroom_fields":         BiomeProfile("mushroom_fields",         "grass_block", "dirt",        "stone",          None,          0.0,   0.15, 0.020, 0.0,  0.080, 0.0,   0.000,   0,  0.90),
-
-        # ── 洞穴（地表为最后回退） ──
-        "dripstone_caves":         BiomeProfile("dripstone_caves",         "stone",       "stone",       "stone",          None,          0.0,   0.0,   0.0,   0.0,  0.0,   0.0,   0.000,  -5,  0.7),
-        "lush_caves":              BiomeProfile("lush_caves",              "grass_block", "dirt",        "stone",          "oak",         0.02,  0.22, 0.030, 0.06, 0.030, 0.0,   0.010,  -3,  0.8),
-    }
-    # fmt: on
-
-    # ---- 寒冷群系集合（用于积雪判定） ----
-    COLD_BIOMES = frozenset({
-        "snowy_plains", "snowy_taiga", "ice_spikes",
-        "frozen_peaks", "jagged_peaks", "snowy_slopes", "grove",
-        "snowy_beach", "frozen_river",
-        "frozen_ocean", "deep_frozen_ocean",
-    })
+    biome_profiles = BIOME_PROFILES
 
     # ---- 矿石生成规则 ----
     # 每个元组: (block_id, 生成概率, 最小Y, 最大Y, 哈希盐值)
@@ -158,11 +77,12 @@ class TerrainMixin(NoiseMixin):
         ~6% 丛林, ~4% 沼泽, ~14% 森林, ~5% 平原。
         """
         # 降低 octaves 以避免噪声值过度集中在 0 附近
-        continentalness = self._noise1(x, 0.0085, 2, 10)
-        temperature     = self._noise1(x, 0.011,  2, 20)
-        humidity        = self._noise1(x, 0.010,  2, 30)
-        weirdness       = self._noise1(x, 0.014,  2, 40)
-        erosion         = self._noise1(x, 0.016,  2, 50)
+        continentalness = self._noise1(x, 0.0028, 2, 10)
+        temperature     = self._noise1(x, 0.0031, 2, 20)
+        humidity        = self._noise1(x, 0.0030, 2, 30)
+        weirdness       = self._noise1(x, 0.0039, 2, 40)
+        erosion         = self._noise1(x, 0.0044, 2, 50)
+        river_noise     = self._noise1(x, 0.0068, 2, 60)
         # 非线性拉伸：让噪声值更均匀地分布在整个 [-1,1] 范围
         continentalness = continentalness * (1.0 + abs(continentalness) * 1.2)
         temperature     = temperature * (1.0 + abs(temperature) * 0.6)
@@ -193,9 +113,9 @@ class TerrainMixin(NoiseMixin):
                 return "stony_shore"
             return "beach"
 
-        # ── 3. 河流（大陆性接近 0 + 奇异度低） ──
-        if abs(continentalness) < 0.012 and abs(weirdness) < 0.045:
-            return "frozen_river" if temperature < -0.05 else "river"
+        # ── 3. 河流（独立低频河网，跟随当地温度结冰） ──
+        if continentalness > -0.04 and abs(river_noise) < 0.006 and abs(weirdness) < 0.34:
+            return "frozen_river" if temperature < -0.10 else "river"
 
         # ── 4. 高峰（奇异度 > 0.35） ──
         if weirdness > 0.19:
@@ -226,46 +146,52 @@ class TerrainMixin(NoiseMixin):
                     return "grove"
                 if temperature < -0.32:
                     return "snowy_taiga"
+                if humidity > 0.32 and weirdness < -0.08:
+                    return "old_growth_spruce_taiga"
                 return "taiga" if humidity > 0.25 else "old_growth_pine_taiga"
             else:
-                return "ice_spikes" if weirdness > 0.30 else "snowy_plains"
+                return "ice_spikes" if weirdness > 0.06 else "snowy_plains"
 
         # 7. 炎热气候（温度 > 0.28）
         if temperature > 0.16:
             if humidity < -0.08:                 # 干旱炎热
-                if weirdness > 0.12:
-                    if humidity < -0.32:
+                if weirdness > 0.07:
+                    if humidity < -0.34:
                         return "eroded_badlands"
                     return "wooded_badlands" if humidity < -0.20 else "savanna_plateau"
                 if humidity < -0.30:
                     return "desert" if weirdness < -0.05 else "badlands"
                 if humidity < -0.18:
                     return "savanna"
-                return "savanna_plateau" if weirdness > 0.12 else "savanna"
+                return "savanna_plateau" if weirdness > 0.04 else "savanna"
             elif humidity > 0.18:                # 湿润炎热（丛林）
-                if humidity > 0.34 and temperature > 0.32:
-                    return "bamboo_jungle" if weirdness > 0.08 else "jungle"
+                if humidity > 0.30 and temperature > 0.28:
+                    return "bamboo_jungle" if weirdness > 0.02 else "jungle"
                 return "sparse_jungle"
             else:                                 # 中等炎热
                 return "savanna" if weirdness > -0.12 else "plains"
 
         # 8. 温带气候（温度 -0.12 至 0.28） —— 按湿度细分
         if humidity > 0.24:                      # 湿润
-            if weirdness < -0.06 and temperature > 0.06:
-                return "mangrove_swamp" if temperature > 0.16 else "swamp"
-            if weirdness > 0.16:
+            if weirdness < -0.05 and temperature > 0.04:
+                return "mangrove_swamp" if temperature > 0.12 else "swamp"
+            if humidity > 0.34 and weirdness > 0.02:
                 return "dark_forest"
-            if weirdness > 0.08:
+            if weirdness > 0.02:
                 return "flower_forest"
             return "forest" if temperature > 0.06 else "taiga"
         elif humidity > 0.05:                    # 中等湿润
-            if weirdness > 0.13:
+            if weirdness > 0.06 and temperature > 0.05 and humidity > 0.10:
+                return "old_growth_birch_forest"
+            if weirdness > 0.03:
                 return "birch_forest" if temperature > 0.05 else "taiga"
-            if weirdness < -0.16 and temperature > 0.12:
+            if weirdness < -0.13 and temperature > 0.10:
                 return "swamp"
             return "forest" if temperature > -0.02 else "birch_forest"
         elif humidity > -0.15:                   # 中等干燥
-            if weirdness > 0.10:
+            if temperature > 0.08 and humidity > -0.08 and weirdness < -0.10:
+                return "mushroom_fields"
+            if weirdness > 0.04:
                 return "sunflower_plains"
             return "meadow" if temperature > 0.04 else "plains"
         else:                                     # 干燥
@@ -299,6 +225,14 @@ class TerrainMixin(NoiseMixin):
             weight_sum += weight
         return max(4, min(245, int(round(total / weight_sum))))
 
+    @lru_cache(maxsize=8192)
+    def get_layer_surface_height(self, x: int, z: int) -> int:
+        surface_y = self.get_surface_height(x)
+        if z == 1:
+            offset = max(0, int(getattr(self, "background_surface_offset", 0)))
+            return max(surface_y, min(245, surface_y + offset))
+        return surface_y
+
     # ------------------------------------------------------------------
     # 地下方块
     # ------------------------------------------------------------------
@@ -315,8 +249,10 @@ class TerrainMixin(NoiseMixin):
         depth = surface_y - y
         # 表层（地表方块）
         if depth == 0:
+            if surface_y < self.sea_level and profile.surface == "grass_block":
+                return DIRT()
             # 寒冷群系：使用带积雪的草方块
-            if profile.surface == "grass_block" and profile.biome_id in self.COLD_BIOMES:
+            if profile.surface == "grass_block" and profile.is_cold:
                 return GRASS_BLOCK(snowed=True)
             return self._block(profile.surface)
         # 亚层（地表下 1-4 格）

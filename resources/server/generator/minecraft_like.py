@@ -33,12 +33,7 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
     sea_level = 68       # 海平面高度（Y 坐标）
     stone_level = 52     # 石材起始深度（当前未直接使用，保留）
     max_tree_lookup = 14  # 树木查找范围（横向 ±14 格，原 9）
-
-    # ---- 寒冷海洋群系（用于冰面生成） ----
-    ICE_OCEAN_BIOMES = frozenset({
-        "frozen_ocean", "deep_frozen_ocean",
-        "cold_ocean", "deep_cold_ocean",
-    })
+    background_surface_offset = 1
 
     # ------------------------------------------------------------------
     # 初始化
@@ -111,20 +106,23 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
         # 获取该列的生物群系和地表高度
         column_biome = self.get_column_biome(x)
         profile = self.get_profile(column_biome)
-        surface_y = self.get_surface_height(x)
+        foreground_surface_y = self.get_surface_height(x)
+        surface_y = self.get_layer_surface_height(x, z)
+
+        if y > surface_y and y <= self.sea_level:
+            if profile.freezes_ocean_surface and y == self.sea_level:
+                return ICE()
+            return WATER()
 
         # 优先检查结构方块（树木、积雪、花草等）
-        structure_block = self.get_structure_block(x, y, z, surface_y, profile)
+        structure_block = self.get_structure_block(
+            x, y, z, surface_y, profile, foreground_surface_y
+        )
         if structure_block is not None:
             return structure_block
 
         # 地表以上：水或空气
         if y > surface_y:
-            if y <= self.sea_level and z == 0:
-                # 寒冷海洋表面生成冰
-                if column_biome in self.ICE_OCEAN_BIOMES and y == self.sea_level:
-                    return ICE()
-                return WATER()
             return AIR()
 
         # 洞穴空气：前景层挖空，背景层保留岩壁

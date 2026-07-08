@@ -17,6 +17,7 @@ import pygame
 
 from resources.client.GUI.gui import GUI
 from resources.client.camera import Camera
+from resources.server.biome import get_biome_by_id
 
 from .block import BlockRenderMixin
 from .constants import BLOCK_TINT_COLOR_STEP
@@ -78,7 +79,7 @@ class Render(SkyMixin, BlockRenderMixin):
         self.choosing_position: tuple[int, int] = (0, 0)
 
         # ---- 字体 ----
-        self.font_path: str = "assets\\minecraft\\font\\Minecraft_AE.ttf"
+        self.font_path: str = "assets\\minecraft\\font\\unifont.otf"
         self.default_font: pygame.font.Font = pygame.font.Font(self.font_path, 36)
         self.font_cache: dict[int, pygame.font.Font] = {}
 
@@ -149,6 +150,7 @@ class Render(SkyMixin, BlockRenderMixin):
         self.BLOCK_SECTION_HEIGHT: int = 4
         self.MAX_BLOCK_SECTION_PREFETCH_PER_FRAME: int = 2
         self._last_block_cache_cam: tuple[float, float] | None = None
+        self.biome_debug_colors: dict[str, tuple[int, int, int]] = {}
 
     # ===================== 坐标转换 =====================
 
@@ -371,6 +373,8 @@ class Render(SkyMixin, BlockRenderMixin):
                     self.draw_sky()                          # 天空背景（来自 SkyMixin）
                     self.camera.update()
                     self.draw_block()                        # 方块绘制（来自 BlockRenderMixin）
+                    if self.debug:
+                        self.draw_biome_debug_overlay()
                     self.client.particle_manager.draw(self)
                     self.draw_hovered_block_outline()
                     self.client.client_player.skeleton.update()
@@ -491,6 +495,117 @@ class Render(SkyMixin, BlockRenderMixin):
     def debug_mode(self) -> None:
         """切换调试模式（显示方块光照值）。"""
         self.debug = not self.debug
+
+    def draw_biome_debug_overlay(self) -> None:
+        """Draw a translucent biome-color overlay and a hover tooltip in debug mode."""
+        block_size = self.block_size
+        if block_size <= 0:
+            return
+
+        x_blocks = _math.ceil(self.SCREEN_WIDTH / block_size)
+        y_blocks = _math.ceil(self.SCREEN_HEIGHT / block_size)
+        x_start = int(self.camera.x - x_blocks // 2 - 1)
+        x_end = int(self.camera.x + x_blocks // 2 + 2)
+        y_start = int(self.camera.y - y_blocks // 2 - 1)
+        y_end = int(self.camera.y + y_blocks // 2 + 2)
+
+        overlay = pygame.Surface((self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA)
+        get_biome = self.client_world.get_biome
+        for x in range(x_start, x_end + 1):
+            for y in range(y_start, y_end + 1):
+                biome_id = get_biome(x, y)
+                if not biome_id or biome_id == "void":
+                    continue
+                color = self._biome_debug_color(biome_id)
+                sx = (x - self.camera.x - 0.5) * block_size + self.SCREEN_WIDTH // 2
+                sy = self.SCREEN_HEIGHT - (
+                    ((y + 1) - self.camera.y + 0.5) * block_size + self.SCREEN_HEIGHT // 2
+                )
+                pygame.draw.rect(overlay, (*color, 58), (sx, sy, block_size, block_size))
+                pygame.draw.rect(overlay, (*color, 105), (sx, sy, block_size, block_size), 1)
+
+        self.screen.blit(overlay, (0, 0))
+        self.draw_biome_hover_tooltip()
+
+    def draw_biome_hover_tooltip(self) -> None:
+        mouse_x, mouse_y = pygame.mouse.get_pos()
+        world_x = (mouse_x - self.SCREEN_WIDTH // 2) / self.block_size + self.camera.x + 0.5
+        world_y = -(mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + self.camera.y - 0.5
+        block_x = _math.floor(world_x)
+        block_y = _math.floor(world_y)
+        biome_id = self.client_world.get_biome(block_x, block_y)
+        if not biome_id:
+            return
+
+        biome = get_biome_by_id(biome_id)
+        color = self._biome_debug_color(biome_id)
+        text_lines = [
+            f"Biome: {biome.name}",
+            f"ID: {biome_id}",
+            f"Block at {block_x}, {block_y}: {self.client_world.get_block(block_x, block_y, 0).block_id}"
+        ]
+        font_size = 18
+        font = self.get_font(font_size)
+        padding = 8
+        line_gap = 2
+        text_w = max(font.size(line)[0] for line in text_lines)
+        text_h = len(text_lines) * font_size + (len(text_lines) - 1) * line_gap
+        width = text_w + padding * 2 + 18
+        height = text_h + padding * 2
+        x = min(mouse_x + 14, self.SCREEN_WIDTH - width - 4)
+        y = min(mouse_y + 14, self.SCREEN_HEIGHT - height - 4)
+        rect = pygame.Rect(x, y, width, height)
+
+        panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+        panel.fill((18, 18, 18, 215))
+        pygame.draw.rect(panel, (*color, 255), (0, 0, 6, rect.height))
+        pygame.draw.rect(panel, (255, 255, 255, 90), panel.get_rect(), 1)
+        self.screen.blit(panel, rect.topleft)
+        for index, line in enumerate(text_lines):
+            text = font.render(line, True, (245, 245, 245))
+            self.screen.blit(text, (x + padding + 12, y + padding + index * (font_size + line_gap)))
+
+    def _biome_debug_color(self, biome_id: str) -> tuple[int, int, int]:
+        palette = {
+            "plains": (105, 181, 75),
+            "sunflower_plains": (232, 202, 72),
+            "meadow": (142, 202, 97),
+            "forest": (47, 130, 59),
+            "flower_forest": (238, 91, 166),
+            "birch_forest": (126, 184, 82),
+            "old_growth_birch_forest": (104, 158, 72),
+            "dark_forest": (30, 82, 46),
+            "taiga": (58, 126, 99),
+            "snowy_taiga": (145, 194, 198),
+            "snowy_plains": (220, 236, 245),
+            "ice_spikes": (175, 221, 244),
+            "grove": (128, 177, 176),
+            "river": (55, 121, 220),
+            "frozen_river": (142, 205, 240),
+            "ocean": (44, 91, 183),
+            "deep_ocean": (28, 59, 139),
+            "frozen_ocean": (104, 177, 226),
+            "deep_frozen_ocean": (77, 145, 203),
+            "desert": (226, 196, 100),
+            "savanna": (179, 168, 74),
+            "jungle": (32, 150, 55),
+            "sparse_jungle": (69, 165, 73),
+            "bamboo_jungle": (40, 184, 74),
+            "swamp": (83, 112, 73),
+            "mangrove_swamp": (68, 96, 74),
+        }
+        if biome_id in palette:
+            return palette[biome_id]
+        if biome_id in self.biome_debug_colors:
+            return self.biome_debug_colors[biome_id]
+        h = abs(hash(biome_id))
+        color = (
+            70 + h % 150,
+            70 + (h // 151) % 150,
+            70 + (h // 22801) % 150,
+        )
+        self.biome_debug_colors[biome_id] = color
+        return color
 
     # ===================== 文本与字体 =====================
 

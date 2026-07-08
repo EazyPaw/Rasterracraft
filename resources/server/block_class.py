@@ -162,7 +162,7 @@ class GrassStain(Plant):
         else:
             biome_id = "__default__"
 
-        cache_key = (size, biome_id)
+        cache_key = (type(self), self._texture_path, size, biome_id)
         if cache_key in self._texture_cache:
             return self._texture_cache[cache_key]
 

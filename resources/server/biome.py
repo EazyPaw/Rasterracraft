@@ -1,14 +1,108 @@
 """
 生物群系模块 (Biome Module)
 
-定义所有主世界生物群系类，每个类包含温度、降水、天空/雾气/草地/树叶颜色。
+定义所有主世界生物群系类，每个类包含温度、降水、天空/雾气/草地/树叶颜色，
+以及该群系对应的世界生成参数。
 所有生物群系硬编码，不再从 JSON 文件侧载。
 """
 
 import logging
 from abc import ABC
+from dataclasses import dataclass
 
 from resources.server.utils import client_method, hex_to_rgb
+
+
+@dataclass(frozen=True)
+class BiomeProfile:
+    """单个生物群系的生成参数（不可变数据类）。
+
+    每个生物群系定义了该区域的地形起伏、地表方块构成、
+    装饰物密度等属性，由噪声驱动的生物群系判定后用于实际方块放置。
+    """
+    biome_id: str
+    surface: str
+    subsurface: str
+    filler: str
+    tree: str | None
+    tree_chance: float
+    grass_chance: float
+    flower_chance: float
+    fern_chance: float
+    mushroom_chance: float
+    cactus_chance: float
+    sugar_cane_chance: float
+    elevation_bias: int
+    amplitude: float
+    is_cold: bool = False
+    is_arid: bool = False
+    freezes_ocean_surface: bool = False
+    mushroom_boost: float = 1.0
+    double_plant_chance: float = 0.0
+    double_plant_options: tuple[tuple[float, str, str], ...] = ()
+    flower_options: tuple[tuple[float, str], ...] = ()
+
+
+DEFAULT_DOUBLE_PLANT_OPTIONS = (
+    (0.70, "tall_grass", "tall_grass_top"),
+    (0.82, "rose_bush", "rose_bush_top"),
+    (0.94, "peony", "peony_top"),
+    (1.00, "lilac", "lilac_top"),
+)
+
+SUNFLOWER_PLAINS_DOUBLE_PLANTS = (
+    (0.52, "sunflower", "sunflower_top"),
+    (0.68, "tall_grass", "tall_grass_top"),
+    (0.82, "peony", "peony_top"),
+    (0.92, "lilac", "lilac_top"),
+    (1.00, "rose_bush", "rose_bush_top"),
+)
+
+FLOWER_FOREST_DOUBLE_PLANTS = (
+    (0.24, "rose_bush", "rose_bush_top"),
+    (0.48, "peony", "peony_top"),
+    (0.72, "lilac", "lilac_top"),
+    (0.90, "tall_grass", "tall_grass_top"),
+    (1.00, "sunflower", "sunflower_top"),
+)
+
+FOREST_DOUBLE_PLANTS = (
+    (0.42, "tall_grass", "tall_grass_top"),
+    (0.54, "large_fern", "large_fern_top"),
+    (0.70, "rose_bush", "rose_bush_top"),
+    (0.86, "peony", "peony_top"),
+    (1.00, "lilac", "lilac_top"),
+)
+
+TAIGA_DOUBLE_PLANTS = (
+    (0.48, "large_fern", "large_fern_top"),
+    (0.82, "tall_grass", "tall_grass_top"),
+    (0.91, "peony", "peony_top"),
+    (1.00, "lilac", "lilac_top"),
+)
+
+SNOWY_DOUBLE_PLANTS = (
+    (0.55, "tall_grass", "tall_grass_top"),
+    (0.78, "peony", "peony_top"),
+    (1.00, "lilac", "lilac_top"),
+)
+
+DEFAULT_FLOWERS = (
+    (0.48, "poppy"),
+    (1.00, "dandelion"),
+)
+
+FLOWER_FIELD_FLOWERS = (
+    (0.22, "allium"),
+    (0.44, "azure_bluet"),
+    (0.66, "oxeye_daisy"),
+    (0.83, "poppy"),
+    (1.00, "dandelion"),
+)
+
+SWAMP_FLOWERS = (
+    (1.00, "blue_orchid"),
+)
 
 
 class Biome(ABC):
@@ -21,6 +115,26 @@ class Biome(ABC):
     foliage_color = (0, 0, 0)
     sky_color = hex_to_rgb("#78a7ff")
     fog_color = hex_to_rgb("#c0d8ff")
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 0
+    amplitude = 1.0
+    is_cold = False
+    is_arid = False
+    freezes_ocean_surface = False
+    mushroom_boost = 1.0
+    double_plant_chance = 0.0
+    double_plant_options = DEFAULT_DOUBLE_PLANT_OPTIONS
+    flower_options = DEFAULT_FLOWERS
 
     def __init__(self):
         cls = type(self)
@@ -106,6 +220,20 @@ class Plains(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.4)
     foliage_color = _default_foliage_color(0.8, 0.4)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'oak'
+    tree_chance = 0.02
+    grass_chance = 0.28
+    flower_chance = 0.035
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.018
+    elevation_bias = 0
+    amplitude = 1.0
+    double_plant_chance = 0.045
 
 
 class SunflowerPlains(Biome):
@@ -117,6 +245,22 @@ class SunflowerPlains(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.4)
     foliage_color = _default_foliage_color(0.8, 0.4)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'oak'
+    tree_chance = 0.02
+    grass_chance = 0.32
+    flower_chance = 0.08
+    fern_chance = 0.0
+    mushroom_chance = 0.002
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.018
+    elevation_bias = 0
+    amplitude = 1.0
+    double_plant_chance = 0.1
+    double_plant_options = SUNFLOWER_PLAINS_DOUBLE_PLANTS
+    flower_options = FLOWER_FIELD_FLOWERS
 
 
 class Meadow(Biome):
@@ -128,6 +272,21 @@ class Meadow(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.8)
     foliage_color = _default_foliage_color(0.5, 0.8)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'oak'
+    tree_chance = 0.01
+    grass_chance = 0.3
+    flower_chance = 0.08
+    fern_chance = 0.0
+    mushroom_chance = 0.002
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.01
+    elevation_bias = 3
+    amplitude = 1.1
+    double_plant_chance = 0.1
+    flower_options = FLOWER_FIELD_FLOWERS
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +302,21 @@ class Forest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.7, 0.8)
     foliage_color = _default_foliage_color(0.7, 0.8)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'oak'
+    tree_chance = 0.24
+    grass_chance = 0.42
+    flower_chance = 0.045
+    fern_chance = 0.03
+    mushroom_chance = 0.018
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.01
+    elevation_bias = 2
+    amplitude = 1.05
+    double_plant_chance = 0.095
+    double_plant_options = FOREST_DOUBLE_PLANTS
 
 
 class FlowerForest(Biome):
@@ -154,6 +328,22 @@ class FlowerForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.7, 0.8)
     foliage_color = _default_foliage_color(0.7, 0.8)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'oak'
+    tree_chance = 0.21
+    grass_chance = 0.44
+    flower_chance = 0.32
+    fern_chance = 0.02
+    mushroom_chance = 0.02
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.008
+    elevation_bias = 2
+    amplitude = 1.0
+    double_plant_chance = 0.18
+    double_plant_options = FLOWER_FOREST_DOUBLE_PLANTS
+    flower_options = FLOWER_FIELD_FLOWERS
 
 
 class BirchForest(Biome):
@@ -165,6 +355,21 @@ class BirchForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.6, 0.6)
     foliage_color = _default_foliage_color(0.6, 0.6)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'birch'
+    tree_chance = 0.22
+    grass_chance = 0.36
+    flower_chance = 0.035
+    fern_chance = 0.02
+    mushroom_chance = 0.01
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.01
+    elevation_bias = 2
+    amplitude = 1.0
+    double_plant_chance = 0.095
+    double_plant_options = FOREST_DOUBLE_PLANTS
 
 
 class OldGrowthBirchForest(Biome):
@@ -176,6 +381,21 @@ class OldGrowthBirchForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.6, 0.6)
     foliage_color = _default_foliage_color(0.6, 0.6)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'birch'
+    tree_chance = 0.27
+    grass_chance = 0.34
+    flower_chance = 0.03
+    fern_chance = 0.03
+    mushroom_chance = 0.014
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.008
+    elevation_bias = 3
+    amplitude = 1.05
+    double_plant_chance = 0.095
+    double_plant_options = FOREST_DOUBLE_PLANTS
 
 
 class DarkForest(Biome):
@@ -187,6 +407,20 @@ class DarkForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.7, 0.8)
     foliage_color = _default_foliage_color(0.7, 0.8)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'dark_oak'
+    tree_chance = 0.3
+    grass_chance = 0.28
+    flower_chance = 0.02
+    fern_chance = 0.04
+    mushroom_chance = 0.04
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.005
+    elevation_bias = 1
+    amplitude = 1.0
+    mushroom_boost = 1.8
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +436,21 @@ class Taiga(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.25, 0.8)
     foliage_color = _default_foliage_color(0.25, 0.8)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'spruce'
+    tree_chance = 0.135
+    grass_chance = 0.24
+    flower_chance = 0.012
+    fern_chance = 0.16
+    mushroom_chance = 0.016
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.004
+    elevation_bias = 3
+    amplitude = 1.05
+    double_plant_chance = 0.075
+    double_plant_options = TAIGA_DOUBLE_PLANTS
 
 
 class SnowyTaiga(Biome):
@@ -213,6 +462,22 @@ class SnowyTaiga(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.5, 0.4)
     foliage_color = _default_foliage_color(-0.5, 0.4)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'spruce'
+    tree_chance = 0.125
+    grass_chance = 0.18
+    flower_chance = 0.018
+    fern_chance = 0.1
+    mushroom_chance = 0.004
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 4
+    amplitude = 1.05
+    is_cold = True
+    double_plant_chance = 0.075
+    double_plant_options = TAIGA_DOUBLE_PLANTS
 
 
 class OldGrowthPineTaiga(Biome):
@@ -224,6 +489,21 @@ class OldGrowthPineTaiga(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.25, 0.8)
     foliage_color = _default_foliage_color(0.25, 0.8)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'spruce'
+    tree_chance = 0.165
+    grass_chance = 0.22
+    flower_chance = 0.01
+    fern_chance = 0.18
+    mushroom_chance = 0.02
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.003
+    elevation_bias = 5
+    amplitude = 1.1
+    double_plant_chance = 0.075
+    double_plant_options = TAIGA_DOUBLE_PLANTS
 
 
 class OldGrowthSpruceTaiga(Biome):
@@ -235,6 +515,21 @@ class OldGrowthSpruceTaiga(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.25, 0.8)
     foliage_color = _default_foliage_color(0.25, 0.8)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'spruce'
+    tree_chance = 0.155
+    grass_chance = 0.2
+    flower_chance = 0.008
+    fern_chance = 0.17
+    mushroom_chance = 0.022
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.003
+    elevation_bias = 5
+    amplitude = 1.1
+    double_plant_chance = 0.075
+    double_plant_options = TAIGA_DOUBLE_PLANTS
 
 
 class SnowyPlains(Biome):
@@ -246,6 +541,22 @@ class SnowyPlains(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.0, 0.5)
     foliage_color = _default_foliage_color(0.0, 0.5)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.16
+    flower_chance = 0.035
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 2
+    amplitude = 0.95
+    is_cold = True
+    double_plant_chance = 0.045
+    double_plant_options = SNOWY_DOUBLE_PLANTS
 
 
 class IceSpikes(Biome):
@@ -257,6 +568,20 @@ class IceSpikes(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.0, 0.5)
     foliage_color = _default_foliage_color(0.0, 0.5)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.05
+    flower_chance = 0.01
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 3
+    amplitude = 1.0
+    is_cold = True
 
 
 class Grove(Biome):
@@ -268,6 +593,22 @@ class Grove(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.2, 0.8)
     foliage_color = _default_foliage_color(-0.2, 0.8)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'spruce'
+    tree_chance = 0.11
+    grass_chance = 0.2
+    flower_chance = 0.02
+    fern_chance = 0.12
+    mushroom_chance = 0.008
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.002
+    elevation_bias = 18
+    amplitude = 2.0
+    is_cold = True
+    double_plant_chance = 0.075
+    double_plant_options = TAIGA_DOUBLE_PLANTS
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +624,19 @@ class WindsweptHills(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.2, 0.3)
     foliage_color = _default_foliage_color(0.2, 0.3)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'spruce'
+    tree_chance = 0.03
+    grass_chance = 0.1
+    flower_chance = 0.008
+    fern_chance = 0.04
+    mushroom_chance = 0.004
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.002
+    elevation_bias = 18
+    amplitude = 2.2
 
 
 class WindsweptGravellyHills(Biome):
@@ -294,6 +648,19 @@ class WindsweptGravellyHills(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.2, 0.3)
     foliage_color = _default_foliage_color(0.2, 0.3)
+    surface = 'grass_block'
+    subsurface = 'gravel'
+    filler = 'stone'
+    tree = 'spruce'
+    tree_chance = 0.02
+    grass_chance = 0.06
+    flower_chance = 0.004
+    fern_chance = 0.02
+    mushroom_chance = 0.002
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 20
+    amplitude = 2.3
 
 
 class WindsweptForest(Biome):
@@ -305,6 +672,19 @@ class WindsweptForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.2, 0.3)
     foliage_color = _default_foliage_color(0.2, 0.3)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'oak'
+    tree_chance = 0.055
+    grass_chance = 0.14
+    flower_chance = 0.012
+    fern_chance = 0.04
+    mushroom_chance = 0.006
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.003
+    elevation_bias = 14
+    amplitude = 1.8
 
 
 class JaggedPeaks(Biome):
@@ -316,6 +696,20 @@ class JaggedPeaks(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.7, 0.9)
     foliage_color = _default_foliage_color(-0.7, 0.9)
+    surface = 'stone'
+    subsurface = 'stone'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 55
+    amplitude = 3.5
+    is_cold = True
 
 
 class FrozenPeaks(Biome):
@@ -327,6 +721,20 @@ class FrozenPeaks(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.7, 0.9)
     foliage_color = _default_foliage_color(-0.7, 0.9)
+    surface = 'snow_block'
+    subsurface = 'stone'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 52
+    amplitude = 3.3
+    is_cold = True
 
 
 class StonyPeaks(Biome):
@@ -338,6 +746,19 @@ class StonyPeaks(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(1.0, 0.3)
     foliage_color = _default_foliage_color(1.0, 0.3)
+    surface = 'stone'
+    subsurface = 'stone'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 46
+    amplitude = 3.0
 
 
 class SnowySlopes(Biome):
@@ -349,6 +770,20 @@ class SnowySlopes(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.3, 0.9)
     foliage_color = _default_foliage_color(-0.3, 0.9)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'spruce'
+    tree_chance = 0.02
+    grass_chance = 0.08
+    flower_chance = 0.004
+    fern_chance = 0.06
+    mushroom_chance = 0.002
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 24
+    amplitude = 2.4
+    is_cold = True
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +799,20 @@ class Desert(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(2.0, 0.0)
     foliage_color = _default_foliage_color(2.0, 0.0)
+    surface = 'sand'
+    subsurface = 'sand'
+    filler = 'sandstone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.045
+    sugar_cane_chance = 0.0
+    elevation_bias = -2
+    amplitude = 0.78
+    is_arid = True
 
 
 class Savanna(Biome):
@@ -375,6 +824,19 @@ class Savanna(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(1.2, 0.0)
     foliage_color = _default_foliage_color(1.2, 0.0)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'acacia'
+    tree_chance = 0.045
+    grass_chance = 0.2
+    flower_chance = 0.012
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.006
+    elevation_bias = 2
+    amplitude = 1.2
 
 
 class SavannaPlateau(Biome):
@@ -386,6 +848,19 @@ class SavannaPlateau(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(1.0, 0.0)
     foliage_color = _default_foliage_color(1.0, 0.0)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'acacia'
+    tree_chance = 0.038
+    grass_chance = 0.16
+    flower_chance = 0.01
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.004
+    elevation_bias = 10
+    amplitude = 1.6
 
 
 class WindsweptSavanna(Biome):
@@ -397,6 +872,19 @@ class WindsweptSavanna(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(1.1, 0.0)
     foliage_color = _default_foliage_color(1.1, 0.0)
+    surface = 'grass_block'
+    subsurface = 'coarse_dirt'
+    filler = 'stone'
+    tree = 'acacia'
+    tree_chance = 0.035
+    grass_chance = 0.12
+    flower_chance = 0.006
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.002
+    elevation_bias = 10
+    amplitude = 2.0
 
 
 class Badlands(Biome):
@@ -408,6 +896,20 @@ class Badlands(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(2.0, 0.0)
     foliage_color = _default_foliage_color(2.0, 0.0)
+    surface = 'red_sand'
+    subsurface = 'hardened_clay'
+    filler = 'red_sandstone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.02
+    sugar_cane_chance = 0.0
+    elevation_bias = 6
+    amplitude = 1.4
+    is_arid = True
 
 
 class WoodedBadlands(Biome):
@@ -419,6 +921,20 @@ class WoodedBadlands(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(2.0, 0.0)
     foliage_color = _default_foliage_color(2.0, 0.0)
+    surface = 'red_sand'
+    subsurface = 'hardened_clay'
+    filler = 'red_sandstone'
+    tree = 'oak'
+    tree_chance = 0.03
+    grass_chance = 0.06
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.012
+    sugar_cane_chance = 0.0
+    elevation_bias = 8
+    amplitude = 1.5
+    is_arid = True
 
 
 class ErodedBadlands(Biome):
@@ -430,6 +946,20 @@ class ErodedBadlands(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(2.0, 0.0)
     foliage_color = _default_foliage_color(2.0, 0.0)
+    surface = 'red_sand'
+    subsurface = 'hardened_clay'
+    filler = 'red_sandstone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.016
+    sugar_cane_chance = 0.0
+    elevation_bias = 14
+    amplitude = 1.8
+    is_arid = True
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +975,20 @@ class Jungle(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.95, 0.9)
     foliage_color = _default_foliage_color(0.95, 0.9)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'jungle_tree'
+    tree_chance = 0.16
+    grass_chance = 0.44
+    flower_chance = 0.025
+    fern_chance = 0.2
+    mushroom_chance = 0.014
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.04
+    elevation_bias = 1
+    amplitude = 1.05
+    double_plant_chance = 0.07
 
 
 class SparseJungle(Biome):
@@ -456,6 +1000,20 @@ class SparseJungle(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.95, 0.8)
     foliage_color = _default_foliage_color(0.95, 0.8)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'jungle_tree'
+    tree_chance = 0.06
+    grass_chance = 0.4
+    flower_chance = 0.02
+    fern_chance = 0.14
+    mushroom_chance = 0.01
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.035
+    elevation_bias = 0
+    amplitude = 1.0
+    double_plant_chance = 0.07
 
 
 class BambooJungle(Biome):
@@ -467,6 +1025,20 @@ class BambooJungle(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.95, 0.9)
     foliage_color = _default_foliage_color(0.95, 0.9)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'jungle_tree'
+    tree_chance = 0.14
+    grass_chance = 0.42
+    flower_chance = 0.022
+    fern_chance = 0.18
+    mushroom_chance = 0.012
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.038
+    elevation_bias = 1
+    amplitude = 1.05
+    double_plant_chance = 0.07
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +1054,22 @@ class Swamp(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.9)
     foliage_color = _default_foliage_color(0.8, 0.9)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'oak'
+    tree_chance = 0.055
+    grass_chance = 0.36
+    flower_chance = 0.015
+    fern_chance = 0.0
+    mushroom_chance = 0.045
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.07
+    elevation_bias = -4
+    amplitude = 0.6
+    mushroom_boost = 1.8
+    double_plant_chance = 0.055
+    flower_options = SWAMP_FLOWERS
 
 
 class MangroveSwamp(Biome):
@@ -493,6 +1081,19 @@ class MangroveSwamp(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.9)
     foliage_color = _default_foliage_color(0.8, 0.9)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'oak'
+    tree_chance = 0.07
+    grass_chance = 0.3
+    flower_chance = 0.01
+    fern_chance = 0.0
+    mushroom_chance = 0.04
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.055
+    elevation_bias = -3
+    amplitude = 0.58
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +1109,19 @@ class Ocean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.5)
     foliage_color = _default_foliage_color(0.5, 0.5)
+    surface = 'sand'
+    subsurface = 'sand'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -14
+    amplitude = 0.45
 
 
 class DeepOcean(Biome):
@@ -519,6 +1133,19 @@ class DeepOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.5)
     foliage_color = _default_foliage_color(0.5, 0.5)
+    surface = 'gravel'
+    subsurface = 'sand'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -26
+    amplitude = 0.38
 
 
 class WarmOcean(Biome):
@@ -530,6 +1157,19 @@ class WarmOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.5)
     foliage_color = _default_foliage_color(0.8, 0.5)
+    surface = 'sand'
+    subsurface = 'sand'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -15
+    amplitude = 0.42
 
 
 class LukewarmOcean(Biome):
@@ -541,6 +1181,19 @@ class LukewarmOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.6, 0.5)
     foliage_color = _default_foliage_color(0.6, 0.5)
+    surface = 'sand'
+    subsurface = 'sand'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -16
+    amplitude = 0.4
 
 
 class ColdOcean(Biome):
@@ -552,6 +1205,21 @@ class ColdOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.3, 0.5)
     foliage_color = _default_foliage_color(0.3, 0.5)
+    surface = 'gravel'
+    subsurface = 'sand'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -17
+    amplitude = 0.4
+    freezes_ocean_surface = True
+    is_cold = True
 
 
 class FrozenOcean(Biome):
@@ -563,6 +1231,8 @@ class FrozenOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.0, 0.5)
     foliage_color = _default_foliage_color(0.0, 0.5)
+    is_cold = True
+    freezes_ocean_surface = True
 
 
 class DeepColdOcean(Biome):
@@ -574,6 +1244,21 @@ class DeepColdOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.3, 0.5)
     foliage_color = _default_foliage_color(0.3, 0.5)
+    surface = 'gravel'
+    subsurface = 'sand'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -28
+    amplitude = 0.36
+    freezes_ocean_surface = True
+    is_cold = True
 
 
 class DeepFrozenOcean(Biome):
@@ -585,6 +1270,8 @@ class DeepFrozenOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.0, 0.5)
     foliage_color = _default_foliage_color(0.0, 0.5)
+    freezes_ocean_surface = True
+    is_cold = True
 
 
 class DeepLukewarmOcean(Biome):
@@ -596,6 +1283,19 @@ class DeepLukewarmOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.6, 0.5)
     foliage_color = _default_foliage_color(0.6, 0.5)
+    surface = 'sand'
+    subsurface = 'sand'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -27
+    amplitude = 0.37
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +1311,19 @@ class Beach(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.4)
     foliage_color = _default_foliage_color(0.8, 0.4)
+    surface = 'sand'
+    subsurface = 'sand'
+    filler = 'sandstone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.025
+    elevation_bias = -2
+    amplitude = 0.55
 
 
 class SnowyBeach(Biome):
@@ -622,6 +1335,21 @@ class SnowyBeach(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.05, 0.3)
     foliage_color = _default_foliage_color(0.05, 0.3)
+    surface = 'sand'
+    subsurface = 'sand'
+    filler = 'sandstone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -1
+    amplitude = 0.52
+    is_cold = True
+    freezes_ocean_surface = True
 
 
 class StonyShore(Biome):
@@ -633,6 +1361,19 @@ class StonyShore(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.2, 0.3)
     foliage_color = _default_foliage_color(0.2, 0.3)
+    surface = 'stone'
+    subsurface = 'stone'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 0
+    amplitude = 0.5
 
 
 class River(Biome):
@@ -644,6 +1385,19 @@ class River(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.5)
     foliage_color = _default_foliage_color(0.5, 0.5)
+    surface = 'sand'
+    subsurface = 'sand'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -6
+    amplitude = 0.35
 
 
 class FrozenRiver(Biome):
@@ -655,6 +1409,20 @@ class FrozenRiver(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.0, 0.5)
     foliage_color = _default_foliage_color(0.0, 0.5)
+    surface = 'sand'
+    subsurface = 'sand'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -5
+    amplitude = 0.35
+    is_cold = True
 
 
 # ---------------------------------------------------------------------------
@@ -670,6 +1438,19 @@ class DripstoneCaves(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.4)
     foliage_color = _default_foliage_color(0.8, 0.4)
+    surface = 'stone'
+    subsurface = 'stone'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.0
+    flower_chance = 0.0
+    fern_chance = 0.0
+    mushroom_chance = 0.0
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = -5
+    amplitude = 0.7
 
 
 class LushCaves(Biome):
@@ -681,6 +1462,19 @@ class LushCaves(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.5)
     foliage_color = _default_foliage_color(0.5, 0.5)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = 'oak'
+    tree_chance = 0.02
+    grass_chance = 0.22
+    flower_chance = 0.03
+    fern_chance = 0.06
+    mushroom_chance = 0.03
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.01
+    elevation_bias = -3
+    amplitude = 0.8
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +1490,79 @@ class MushroomFields(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.9, 1.0)
     foliage_color = _default_foliage_color(0.9, 1.0)
+    surface = 'grass_block'
+    subsurface = 'dirt'
+    filler = 'stone'
+    tree = None
+    tree_chance = 0.0
+    grass_chance = 0.15
+    flower_chance = 0.02
+    fern_chance = 0.0
+    mushroom_chance = 0.08
+    cactus_chance = 0.0
+    sugar_cane_chance = 0.0
+    elevation_bias = 0
+    amplitude = 0.9
+
+
+
+
+# ---------------------------------------------------------------------------
+# 生物群系世界生成属性
+# ---------------------------------------------------------------------------
+
+def _iter_biome_classes():
+    """遍历 Biome 的所有子类。"""
+    def collect(cls):
+        for subclass in cls.__subclasses__():
+            yield subclass
+            yield from collect(subclass)
+
+    yield from collect(Biome)
+
+
+def _profile_from_biome_class(cls: type[Biome]) -> BiomeProfile:
+    return BiomeProfile(
+        biome_id=cls.biome_id,
+        surface=cls.surface,
+        subsurface=cls.subsurface,
+        filler=cls.filler,
+        tree=cls.tree,
+        tree_chance=cls.tree_chance,
+        grass_chance=cls.grass_chance,
+        flower_chance=cls.flower_chance,
+        fern_chance=cls.fern_chance,
+        mushroom_chance=cls.mushroom_chance,
+        cactus_chance=cls.cactus_chance,
+        sugar_cane_chance=cls.sugar_cane_chance,
+        elevation_bias=cls.elevation_bias,
+        amplitude=cls.amplitude,
+        is_cold=cls.is_cold,
+        is_arid=cls.is_arid,
+        freezes_ocean_surface=cls.freezes_ocean_surface,
+        mushroom_boost=cls.mushroom_boost,
+        double_plant_chance=cls.double_plant_chance,
+        double_plant_options=cls.double_plant_options,
+        flower_options=cls.flower_options,
+    )
+
+
+def _build_biome_profiles() -> dict[str, BiomeProfile]:
+    profiles = {}
+    for cls in _iter_biome_classes():
+        bid = getattr(cls, "biome_id", None)
+        if bid and bid != "null" and bid != Void.biome_id:
+            profiles[bid] = _profile_from_biome_class(cls)
+    profiles.setdefault("plains", _profile_from_biome_class(Plains))
+    return profiles
+
+
+BIOME_PROFILES: dict[str, BiomeProfile] = _build_biome_profiles()
+COLD_BIOMES = frozenset(bid for bid, profile in BIOME_PROFILES.items() if profile.is_cold)
+ARID_BIOMES = frozenset(bid for bid, profile in BIOME_PROFILES.items() if profile.is_arid)
+ICE_OCEAN_BIOMES = frozenset(
+    bid for bid, profile in BIOME_PROFILES.items() if profile.freezes_ocean_surface
+)
 
 
 # ---------------------------------------------------------------------------
@@ -724,14 +1591,10 @@ def _build_biome_id_cache() -> dict[str, type]:
     """遍历 Biome 的所有子类，构建 biome_id → 子类 的映射（仅执行一次）。"""
     cache: dict[str, type] = {}
 
-    def collect(cls):
-        for subclass in cls.__subclasses__():
-            bid = getattr(subclass, "biome_id", None)
-            if bid is not None and bid != "null":
-                cache[bid] = subclass
-            collect(subclass)
-
-    collect(Biome)
+    for subclass in _iter_biome_classes():
+        bid = getattr(subclass, "biome_id", None)
+        if bid is not None and bid != "null":
+            cache[bid] = subclass
     # 确保 plains 存在
     cache.setdefault("plains", Plains)
     return cache

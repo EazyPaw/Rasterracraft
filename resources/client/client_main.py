@@ -34,7 +34,7 @@ class Client:
             pass
         self.is_shutting_down = False
         self.version = "0.0.1 SNAPSHOT"
-        self.language = "en_US"
+        self.language = "zh_CN"
         self.client_world = client_world.ClientWorld(self)
         self.render = render.Render(self)
         self._prepare_socket_transport()

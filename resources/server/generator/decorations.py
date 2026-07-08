@@ -4,12 +4,15 @@ import json
 from typing import Callable
 
 from resources.server.blocks import *
-from resources.server.generator.config import BiomeProfile, TreeConfig, WORLDGEN_DIR
+from resources.server.biome import BiomeProfile
+from resources.server.generator.config import TreeConfig, WORLDGEN_DIR
 from resources.server.generator.noise import NoiseMixin
 
 
 class DecorationMixin(NoiseMixin):
     """Trees, leaf caps, plants, mushrooms, cacti and sugar cane."""
+
+    foreground_leaf_clearance = 2
 
     default_tree_configs = {
         "oak": TreeConfig("oak_log", "oak_leaves", 4, 2, 0, 2, "oak"),
@@ -33,9 +36,11 @@ class DecorationMixin(NoiseMixin):
         for subclass in cls.__subclasses__():
             self._collect_block_factory(subclass, factories)
 
+    def _block_class(self, block_id: str):
+        return self.block_factories.get(block_id, STONE)
+
     def _block(self, block_id: str):
-        cls = self.block_factories.get(block_id)
-        return cls() if cls is not None else STONE()
+        return self._block_class(block_id)()
 
     def _load_tree_configs(self):
         configs = dict(self.default_tree_configs)
@@ -86,92 +91,131 @@ class DecorationMixin(NoiseMixin):
             return fallback
         return str(name).split(":", 1)[-1]
 
-    def _is_cold_biome(self, biome_id: str) -> bool:
-        return biome_id in {
-            "snowy_plains", "snowy_taiga", "ice_spikes", "frozen_peaks",
-            "jagged_peaks", "snowy_slopes", "grove", "snowy_beach",
-            "frozen_river",
-        }
-
-    def _is_arid_biome(self, biome_id: str) -> bool:
-        return biome_id in {"desert", "badlands", "eroded_badlands", "wooded_badlands"}
-
     def get_structure_block(self, x: int, y: int, z: int, surface_y: int,
-                            profile: BiomeProfile):
-        if z == 1:
-            return self.get_tree_block(x, y, surface_y, profile)
+                            profile: BiomeProfile, foreground_surface_y: int | None = None):
+        if foreground_surface_y is None:
+            foreground_surface_y = surface_y
 
-        cap_block = self.get_leaf_cap_block(x, y, surface_y, profile)
+        if z == 1:
+            tree_block = self.get_tree_block(x, y, surface_y, profile, z)
+            if tree_block is not None:
+                return tree_block
+            return self.get_ground_decoration_block(x, y, z, surface_y, profile)
+
+        cap_block = self.get_leaf_cap_block(x, y, foreground_surface_y, profile)
         if cap_block is not None:
             return cap_block
+
+        return self.get_ground_decoration_block(x, y, z, surface_y, profile)
+
+    def get_ground_decoration_block(self, x: int, y: int, z: int, surface_y: int,
+                                    profile: BiomeProfile):
+        stacked_plant = self._stacked_plant_for_column(x, surface_y, profile)
+        if stacked_plant is not None:
+            block_cls, height = stacked_plant
+            if surface_y + 1 <= y <= surface_y + height:
+                return block_cls()
+
+        double_plant = self._double_plant_for_column(x, surface_y, z, profile)
+        if double_plant is not None:
+            bottom_cls, top_cls = double_plant
+            if y == surface_y + 1:
+                return bottom_cls()
+            if y == surface_y + 2:
+                return top_cls()
 
         if y != surface_y + 1 or surface_y < self.sea_level:
             return None
 
-        if self._is_cold_biome(profile.biome_id):
-            if profile.surface not in {"snow_block", "ice", "water"}:
-                snow_extra = int(self._noise1(x, 0.15, 1, 850) * 3 + 1)
-                return SNOW(layer=max(1, min(4, snow_extra)))
-            return None
-
         local = self._noise1(x, 0.18, 1, 710)
 
-        if profile.cactus_chance and self._rand01(x, surface_y, 700) < profile.cactus_chance:
-            return CACTUS()
-
-        if (self._is_arid_biome(profile.biome_id)
+        if (profile.is_arid
                 and self._rand01(x, surface_y, 701) < 0.07
                 and local > -0.25):
             return DEAD_BUSH()
-
-        if (profile.sugar_cane_chance
-                and self.is_near_water(x, surface_y)
-                and self._rand01(x, surface_y, 702) < profile.sugar_cane_chance * 2.0):
-            return SUGAR_CANE()
 
         if (profile.fern_chance
                 and self._rand01(x, surface_y, 703) < profile.fern_chance
                 and local > -0.45):
             return FERN()
 
-        mushroom_boost = 1.8 if profile.biome_id in {"dark_forest", "swamp"} else 1.0
         if (profile.mushroom_chance
-                and self._rand01(x, surface_y, 704) < profile.mushroom_chance * mushroom_boost
+                and self._rand01(x, surface_y, 704) < profile.mushroom_chance * profile.mushroom_boost
                 and local < 0.22):
             return BROWN_MUSHROOM() if self._rand01(x, surface_y, 711) < 0.55 else RED_MUSHROOM()
 
         if (profile.flower_chance
                 and self._rand01(x, surface_y, 705) < profile.flower_chance
                 and local > 0.02):
-            return self._flower_for_biome(profile.biome_id, x, surface_y)
+            return self._flower_for_profile(profile, x, surface_y)
 
-        if profile.grass_chance and self._rand01(x, surface_y, 706) < profile.grass_chance:
+        grass_chance = self._grass_chance(profile)
+        if grass_chance and self._rand01(x, surface_y, 706) < grass_chance:
             if self._rand01(x, surface_y, 707) < 0.14 and profile.fern_chance > 0:
                 return FERN()
             return SHORT_GRASS()
 
+        if profile.is_cold:
+            if profile.surface not in {"snow_block", "ice", "water"}:
+                snow_extra = int(self._noise1(x, 0.15, 1, 850) * 3 + 1)
+                return SNOW(layer=max(1, min(4, snow_extra)))
+            return None
+
         return None
 
-    def _flower_for_biome(self, biome_id: str, x: int, y: int):
+    def _stacked_plant_for_column(self, x: int, surface_y: int, profile: BiomeProfile):
+        if surface_y < self.sea_level:
+            return None
+
+        if profile.cactus_chance and self._rand01(x, surface_y, 700) < profile.cactus_chance:
+            height = 1 + self._stable_hash(x, surface_y, 721) % 3
+            return CACTUS, height
+
+        if profile.sugar_cane_chance and self.is_adjacent_to_water(x, surface_y):
+            chance = min(0.14, max(0.06, profile.sugar_cane_chance * 3.0))
+            if self._rand01(x, surface_y, 702) < chance:
+                height = 1 + self._stable_hash(x, surface_y, 722) % 3
+                return SUGAR_CANE, height
+
+        return None
+
+    def _grass_chance(self, profile: BiomeProfile) -> float:
+        if profile.surface != "grass_block":
+            return profile.grass_chance
+        return max(profile.grass_chance, 0.10)
+
+    def _double_plant_for_column(self, x: int, surface_y: int, z: int, profile: BiomeProfile):
+        if surface_y < self.sea_level or profile.surface != "grass_block":
+            return None
+
+        chance = profile.double_plant_chance
+        if chance <= 0 or self._rand01(x, surface_y, 730 + z * 17) >= chance:
+            return None
+
+        options = profile.double_plant_options
+        if not options:
+            return None
+
+        roll = self._rand01(x, surface_y, 731 + z * 17)
+        cumulative = 0.0
+        for weight, bottom_id, top_id in options:
+            cumulative += weight
+            if roll <= cumulative:
+                return self._block_class(bottom_id), self._block_class(top_id)
+        bottom_id, top_id = options[-1][1], options[-1][2]
+        return self._block_class(bottom_id), self._block_class(top_id)
+
+    def _flower_for_profile(self, profile: BiomeProfile, x: int, y: int):
         roll = self._rand01(x, y, 712)
-        if biome_id == "swamp":
-            return BLUE_ORCHID()
-        if biome_id in {"flower_forest", "meadow", "sunflower_plains"}:
-            if roll < 0.22:
-                return ALLIUM()
-            if roll < 0.44:
-                return AZURE_BLUET()
-            if roll < 0.66:
-                return OXEYE_DAISY()
-            if roll < 0.83:
-                return POPPY()
-            return DANDELION()
-        return POPPY() if roll < 0.48 else DANDELION()
+        for threshold, block_id in profile.flower_options:
+            if roll < threshold:
+                return self._block(block_id)
+        return self._block(profile.flower_options[-1][1])
 
     def get_tree_block(self, x: int, y: int, surface_y: int,
-                       profile: BiomeProfile):
+                       profile: BiomeProfile, z: int = 1):
         for trunk_x in range(x - self.max_tree_lookup, x + self.max_tree_lookup + 1):
-            tree = self._tree_at_column(trunk_x)
+            tree = self._tree_at_column(trunk_x, z)
             if tree is None:
                 continue
             tree_name, trunk_surface = tree
@@ -183,7 +227,7 @@ class DecorationMixin(NoiseMixin):
                 return self._block(config.trunk)
 
         for trunk_x in range(x - self.max_tree_lookup, x + self.max_tree_lookup + 1):
-            tree = self._tree_at_column(trunk_x)
+            tree = self._tree_at_column(trunk_x, z)
             if tree is None:
                 continue
             tree_name, trunk_surface = tree
@@ -195,45 +239,48 @@ class DecorationMixin(NoiseMixin):
     def get_leaf_cap_block(self, x: int, y: int, surface_y: int,
                            profile: BiomeProfile):
         for trunk_x in range(x - self.max_tree_lookup, x + self.max_tree_lookup + 1):
-            tree = self._tree_at_column(trunk_x)
+            tree = self._tree_at_column(trunk_x, 1)
             if tree is None:
                 continue
             tree_name, trunk_surface = tree
             config = self.tree_configs[tree_name]
             height = self._tree_height(config, trunk_x)
+            if y <= surface_y + self.foreground_leaf_clearance:
+                continue
             radius = self._foreground_leaf_radius(config, height, y - trunk_surface)
             if radius is not None and abs(x - trunk_x) <= radius:
                 return self._block(config.leaves)
         return None
 
-    def _tree_at_column(self, x: int):
+    def _tree_at_column(self, x: int, z: int = 1):
         cache = getattr(self, "_tree_column_cache", None)
-        if cache is not None and x in cache:
-            return cache[x]
-
-        surface_y = self.get_surface_height(x)
-        profile = self.get_profile(self.get_column_biome(x))
-        result = None
-        if profile.tree is not None and self.has_tree_at(x, surface_y, profile):
-            result = (profile.tree, surface_y)
-
-        if cache is not None:
-            cache[x] = result
-        return result
-
-    def has_tree_at(self, x: int, surface_y: int, profile: BiomeProfile) -> bool:
-        cache = getattr(self, "_tree_presence_cache", None)
-        key = (x, surface_y, profile.biome_id)
+        key = (x, z)
         if cache is not None and key in cache:
             return cache[key]
 
-        result = self._compute_has_tree_at(x, surface_y, profile)
+        surface_y = self.get_layer_surface_height(x, z)
+        profile = self.get_profile(self.get_column_biome(x))
+        result = None
+        if profile.tree is not None and self.has_tree_at(x, surface_y, profile, z):
+            result = (profile.tree, surface_y)
+
         if cache is not None:
             cache[key] = result
         return result
 
-    def _compute_has_tree_at(self, x: int, surface_y: int, profile: BiomeProfile) -> bool:
-        if surface_y < self.sea_level - 1 or profile.tree_chance <= 0:
+    def has_tree_at(self, x: int, surface_y: int, profile: BiomeProfile, z: int = 1) -> bool:
+        cache = getattr(self, "_tree_presence_cache", None)
+        key = (x, surface_y, profile.biome_id, z)
+        if cache is not None and key in cache:
+            return cache[key]
+
+        result = self._compute_has_tree_at(x, surface_y, profile, z)
+        if cache is not None:
+            cache[key] = result
+        return result
+
+    def _compute_has_tree_at(self, x: int, surface_y: int, profile: BiomeProfile, z: int = 1) -> bool:
+        if surface_y < self.sea_level or profile.tree_chance <= 0:
             return False
 
         spacing = self._tree_spacing(profile)
@@ -242,19 +289,20 @@ class DecorationMixin(NoiseMixin):
             return False
 
         config = self.tree_configs.get(profile.tree)
-        min_gap = max(6, (config.radius * 2 + 2) if config else spacing - 1)
+        min_gap = 2
         for neighbor_cell in (cell - 1, cell + 1):
             neighbor_x = self._tree_candidate_x(neighbor_cell, spacing)
             if abs(neighbor_x - x) < min_gap:
                 return False
 
         nearby = [self.get_surface_height(nx) for nx in range(x - 3, x + 4)]
-        if max(nearby) - min(nearby) > 2:
+        if max(nearby) - min(nearby) > 3:
             return False
 
         density = (self._noise1(x, 0.026, 2, 811) + 1.0) * 0.5
-        effective = profile.tree_chance * spacing * (0.55 + density * 0.65)
-        effective = max(0.02, min(0.68, effective))
+        effective = profile.tree_chance * spacing * (0.74 + density * 0.85)
+        cap = 0.98 if profile.tree_chance >= 0.13 else 0.86
+        effective = max(0.02, min(cap, effective))
         if self._rand01(cell, surface_y // 4, 812) >= effective:
             return False
 
@@ -262,22 +310,18 @@ class DecorationMixin(NoiseMixin):
         for nx in range(x - min_gap + 1, x + min_gap):
             if nx == x:
                 continue
-            competing = self._tree_candidate_without_gap(nx)
+            competing = self._tree_candidate_without_gap(nx, z)
             if competing is None:
                 continue
             competing_profile, competing_surface = competing
-            competing_config = self.tree_configs.get(competing_profile.tree)
-            competing_gap = max(
-                min_gap,
-                (competing_config.radius * 2 + 2) if competing_config else min_gap,
-            )
+            competing_gap = min_gap
             if abs(nx - x) < competing_gap and self._stable_hash(nx, competing_surface, 817) < priority:
                 return False
         return True
 
-    def _tree_candidate_without_gap(self, x: int):
-        surface_y = self.get_surface_height(x)
-        if surface_y < self.sea_level - 1:
+    def _tree_candidate_without_gap(self, x: int, z: int = 1):
+        surface_y = self.get_layer_surface_height(x, z)
+        if surface_y < self.sea_level:
             return None
         profile = self.get_profile(self.get_column_biome(x))
         if profile.tree is None or profile.tree_chance <= 0:
@@ -287,23 +331,28 @@ class DecorationMixin(NoiseMixin):
         if self._tree_candidate_x(cell, spacing) != x:
             return None
         nearby = [self.get_surface_height(nx) for nx in range(x - 3, x + 4)]
-        if max(nearby) - min(nearby) > 2:
+        if max(nearby) - min(nearby) > 3:
             return None
         density = (self._noise1(x, 0.026, 2, 811) + 1.0) * 0.5
-        effective = profile.tree_chance * spacing * (0.55 + density * 0.65)
-        effective = max(0.02, min(0.68, effective))
+        effective = profile.tree_chance * spacing * (0.74 + density * 0.85)
+        cap = 0.98 if profile.tree_chance >= 0.13 else 0.86
+        effective = max(0.02, min(cap, effective))
         if self._rand01(cell, surface_y // 4, 812) >= effective:
             return None
         return profile, surface_y
 
     def _tree_spacing(self, profile: BiomeProfile) -> int:
+        if profile.tree_chance >= 0.24:
+            return 5
+        if profile.tree_chance >= 0.18:
+            return 6
         if profile.tree_chance >= 0.13:
-            return 8
+            return 6
         if profile.tree_chance >= 0.08:
-            return 9
+            return 7
         if profile.tree_chance >= 0.045:
-            return 11
-        return 14
+            return 9
+        return 12
 
     def _tree_candidate_x(self, cell: int, spacing: int) -> int:
         margin = 2 if spacing >= 8 else 1
@@ -394,8 +443,14 @@ class DecorationMixin(NoiseMixin):
             return None
         return radius - 1
 
-    def is_near_water(self, x: int, surface_y: int) -> bool:
-        for nx in range(x - 3, x + 4):
-            if self.get_surface_height(nx) < self.sea_level:
+    def is_adjacent_to_water(self, x: int, surface_y: int) -> bool:
+        if surface_y > self.sea_level:
+            return False
+        for nx in (x - 1, x + 1):
+            neighbor_surface = self.get_surface_height(nx)
+            if neighbor_surface < surface_y <= self.sea_level:
                 return True
-        return surface_y <= self.sea_level + 1
+        return False
+
+    def is_near_water(self, x: int, surface_y: int) -> bool:
+        return self.is_adjacent_to_water(x, surface_y)
