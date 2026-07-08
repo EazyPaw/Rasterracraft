@@ -23,12 +23,17 @@ class GameManager:
 
     def tick_ig(self):
         """执行一次游戏内逻辑更新"""
-        self.handle_events()
-        self.handle_key_pressed()
-        self.sync_player_camera()
-        self.client.client_player.move_update()
-        self.client.client_player.game_mode.get_choosing_block()
-        self.client.particle_manager.update()
+        if self.client.client_player is None:
+            return
+        try:
+            self.handle_events()
+            self.handle_key_pressed()
+            self.sync_player_camera()
+            self.client.client_player.move_update()
+            self.client.client_player.game_mode.get_choosing_block()
+            self.client.particle_manager.update()
+        except AttributeError:
+            pass
 
     def client_tick(self):
         ...
@@ -39,6 +44,8 @@ class GameManager:
         # 聊天栏打开时禁止游戏键鼠操作
         if self.client.chat_gui and self.client.chat_gui.is_open:
             return
+        if self.ing_mouse_lock > 0:
+            return
         keys = pygame.key.get_pressed()
         mouse_button = pygame.mouse.get_pressed()
         for key, action in self.client.hold_key_map.items():
@@ -46,6 +53,9 @@ class GameManager:
             if keys[key]:
                 action()
                 self.last_pressed_time[key] = time.perf_counter()
+
+        if self.client.client_player is None or self.client.client_player.choosing_block is None:
+            return
 
         if self.ing_mouse_lock == 0:
             if mouse_button[0]:
@@ -73,6 +83,8 @@ class GameManager:
         trans_world_location 内置了方块网格的 -0.5/+0.5 偏移，
         这里反向补偿，并跟踪视觉模型中点（而非碰撞体中点）。"""
         player = self.client.client_player
+        if player is None:
+            return
         # 视觉模型中心 Y = 玩家脚底 + 视觉高度的一半
         visual_mid_y = player.y + player.skeleton.size * player.skeleton.AUTHORED_HEIGHT_BLOCKS / 2
         self.client.render.camera.move_to(
@@ -93,6 +105,9 @@ class GameManager:
             if not self.client.in_game or self.client.client_player is None:
                 continue
             if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.client.open_pause_menu()
+                    continue
                 if event.key == pygame.K_SPACE:
                     now = time.perf_counter()
                     last = self.last_pressed_time.get(pygame.K_SPACE, 0)

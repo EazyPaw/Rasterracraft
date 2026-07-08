@@ -1,11 +1,13 @@
 import logging
 import threading
+import traceback
 from typing import Any
 from typing import cast
 
 import numpy as np
 import resources.server.biome as biome
 
+from resources.server import save_manager
 from resources.server.block_class import Block
 from resources.server.blocks import AIR
 from resources.server.generator import Generator
@@ -288,7 +290,24 @@ class World:
         self.seed = seed
         self.regions: dict[int, Chunk] = {}
         self._regions_lock = threading.Lock()  # 保护 regions 字典的并发写入
+        self.dirty_chunks: set[int] = set()
+        self._dirty_lock = threading.Lock()
         self.world_time = 0
+
+    def mark_chunk_dirty(self, rx: int):
+        if getattr(self.server, "save_id", None):
+            with self._dirty_lock:
+                self.dirty_chunks.add(int(rx))
+
+    def clear_chunk_dirty(self, rx: int):
+        with self._dirty_lock:
+            self.dirty_chunks.discard(int(rx))
+
+    def take_dirty_chunks(self) -> list[int]:
+        with self._dirty_lock:
+            dirty_chunks = list(self.dirty_chunks)
+            self.dirty_chunks.clear()
+        return dirty_chunks
 
     def recalculate_light_for_chunks(self, chunk_rxs: set[int], padding: int = 1) -> set[int]:
         if not chunk_rxs:
@@ -499,6 +518,7 @@ class World:
         chunk = self.regions.get(x // 16)
         rela_x = x % 16
         chunk.region_array[rela_x][y][z] = block
+        self.mark_chunk_dirty(chunk.x)
         # 重算整个区块光照（含跨区块传播）
         changed_light_chunks = self.recalculate_light_for_chunks({chunk.x})
         if send_packet:
@@ -527,6 +547,7 @@ class World:
 
                 # 若方块属性确实发生了变化，向加载了该位置的客户端发送单方块更新
                 if old_nbt != new_nbt:
+                    self.mark_chunk_dirty(nx // 16)
                     for player in self.server.players:
                         if player.is_loading_position(nx, ny, nz):
                             self.server.send_client_socket(player, block, "BlockUpdate")
@@ -534,6 +555,23 @@ class World:
         return changed_light_chunks
 
     def generate_chunk(self, rx: int):
+        save_id = getattr(self.server, "save_id", None)
+        if save_manager.chunk_exists(save_id, self.id_name, rx):
+            logging.debug(f"Loading saved {self.id_name} chunk {rx}")
+            try:
+                saved_chunk = save_manager.load_chunk(save_id, self.id_name, rx, self)
+            except Exception as e:
+                logging.error(f"Failed to load saved chunk {self.id_name}:{rx}: {e}")
+                logging.error(traceback.format_exc())
+                saved_chunk = None
+            if saved_chunk is not None:
+                with self._regions_lock:
+                    if rx in self.regions:
+                        return {rx}
+                    self.regions[rx] = saved_chunk
+                    self.mark_chunk_dirty(rx)
+                    return self.recalculate_light_for_chunks({rx})
+
         logging.debug(f"Generating {self.id_name} chunk {rx}")
         y_max = self.attribute.MAX_BUILD_HEIGHT
         chunk = np.full((16, y_max, 2), AIR(), dtype=Block)
@@ -554,6 +592,7 @@ class World:
         # 光照计算需要读取相邻区块，因此需要串行化以保证一致性
         with self._regions_lock:
             self.regions[rx] = new_chunk
+            self.mark_chunk_dirty(rx)
             # 使用世界上下文重新计算光照以支持跨区块传播
             return self.recalculate_light_for_chunks({rx})
 

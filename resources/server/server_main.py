@@ -5,35 +5,41 @@ import struct
 import threading
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import msgpack
 import numpy as np
 
 import resources.server.generator as generator
+from resources.server import save_manager
 from resources.server.commands import CommandExecutor
 from resources.server.player import Player
 from resources.server.text import Text
 from resources.server.server_packets import encode_packet, decode_packet
 from resources.server.utils import recv_exact, set_client
-from resources.server.world_class import World, WorldAttribute, Chunk
+from resources.server.world_class import World, WorldAttribute
 
 
 class Server:
-    def __init__(self, integrated = False, client = None):
+    def __init__(self, integrated = False, client = None, save_id: str | None = None):
         self.running = True
         self.main_world_id = "overworld"
         self.worlds: dict[str, World] = {}
         self.ready = threading.Event()  # 用于等待初始化完成
-        self.socket_server = self.SocketServer(self)
         self.TPS = 0
         self.rate = 20
         self.server_ticks = 0
         self.view_distance = 4
+        self.chunk_unload_margin = 2
         self.players: list[Player] = []
         self.max_players = 20
         self.integrated = integrated
+        self.save_id = save_id
+        self.level_data: dict[str, Any] | None = None
+        self._save_lock = threading.RLock()
+        self.autosave_interval_ticks = self.rate * 5
+        self.socket_server = self.SocketServer(self)
         self.initialized = False
         self.input_thread = threading.Thread(target=self.check_input, name="Command thread")
         self.input_thread.daemon = True
@@ -82,13 +88,20 @@ class Server:
             logging.info("Server ready, accepting connections.")
             while self.running:
 
-                client_sock, client_addr = self.server_sock.accept()
+                try:
+                    client_sock, client_addr = self.server_sock.accept()
+                except OSError:
+                    if self.running:
+                        logging.error("Socket server accept failed")
+                    break
 
-                player = Player(0, 100, self.server.worlds["overworld"])
+                spawn_x, spawn_y = self.server.get_player_spawn()
+                player = Player(spawn_x, spawn_y, self.server.worlds["overworld"])
                 self.connections[player] = (client_sock, client_addr)
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
                 self.server.broadcast_chat(f"{player.name} joined the game", (255, 255, 85))
+                self.server.send_client_socket(player, player, "Teleport")
                 client_thread = threading.Thread(target=self.handle_client, args=(client_sock, client_addr, player), name="SocketClientThread")
                 client_thread.daemon = True
                 client_thread.start()
@@ -148,7 +161,7 @@ class Server:
         next_time = time.perf_counter()
         over_ticks = 0
 
-        while True:
+        while self.running:
             interval = 1.0 / self.rate
 
             self.tick()
@@ -166,11 +179,23 @@ class Server:
 
     def init(self):
         logging.info("Initializing server")
+        seed = random.randint(-23767, 23767)
+        world_time = 0
+        if self.save_id:
+            self.level_data = save_manager.ensure_level(self.save_id)
+            world_meta = self.level_data.setdefault("worlds", {}).setdefault(self.main_world_id, {})
+            seed = int(world_meta.get("seed", seed))
+            world_time = int(world_meta.get("world_time", 0))
+            world_meta["seed"] = seed
+            world_meta["generator"] = "MinecraftLike2D"
+            world_meta["max_build_height"] = 256
+            save_manager.save_level(self.save_id, self.level_data)
         self.worlds["overworld"] = World(self
                                          ,"overworld"
                                          , generator.MinecraftLike2D
                                          , WorldAttribute()
-                                         , random.randint(-23767, 23767))
+                                         , seed)
+        self.worlds["overworld"].world_time = world_time
         self.initialized = True
         self.ready.set()  # 通知 socket 线程服务器已就绪
         self.run()
@@ -187,6 +212,65 @@ class Server:
                     "Forward"
                 )
         self.load_chunks()
+        self.unload_far_chunks()
+        if self.save_id and self.server_ticks % self.autosave_interval_ticks == 0:
+            self.save_all()
+
+    def get_player_spawn(self) -> tuple[float, float]:
+        if not self.level_data:
+            return 0.0, 100.0
+        player_data = self.level_data.get("player", {})
+        return float(player_data.get("x", 0.0)), float(player_data.get("y", 100.0))
+
+    def save_all(self, last_player: Player | None = None, *, force: bool = False):
+        if not self.save_id:
+            return
+        with self._save_lock:
+            for world in self.worlds.values():
+                self._save_world_chunks(world, world.take_dirty_chunks())
+            self._save_level_metadata(last_player)
+            if force:
+                logging.info(f"Saved world '{self.save_id}'")
+
+    def _save_world_chunks(self, world: World, chunk_rxs) -> bool:
+        if not self.save_id:
+            return False
+        with self._save_lock:
+            rxs = [int(rx) for rx in chunk_rxs]
+            chunks = [world.regions[rx] for rx in rxs if rx in world.regions]
+            if not chunks:
+                return True
+            try:
+                save_manager.save_chunks(self.save_id, world.id_name, chunks)
+                for chunk in chunks:
+                    world.clear_chunk_dirty(chunk.x)
+                return True
+            except Exception as e:
+                for rx in rxs:
+                    world.mark_chunk_dirty(rx)
+                logging.error(f"Failed to save {world.id_name} chunks {rxs}: {e}")
+                logging.error(traceback.format_exc())
+                return False
+
+    def _save_level_metadata(self, last_player: Player | None = None):
+        if not self.save_id:
+            return
+        if self.level_data is None:
+            self.level_data = save_manager.ensure_level(self.save_id)
+        worlds_meta = self.level_data.setdefault("worlds", {})
+        for world in self.worlds.values():
+            worlds_meta[world.id_name] = {
+                "seed": int(world.seed),
+                "world_time": int(world.world_time),
+                "generator": type(world.generator).__name__,
+                "max_build_height": int(world.attribute.MAX_BUILD_HEIGHT),
+            }
+        player = last_player
+        if player is None and self.players:
+            player = self.players[0]
+        if player is not None:
+            self.level_data["player"] = {"x": float(player.x), "y": float(player.y)}
+        save_manager.save_level(self.save_id, self.level_data)
 
     def _resolve_chat_msg(self, msg, color=None):
         """解析聊天消息参数，统一处理 str 和 Text 对象。
@@ -322,6 +406,7 @@ class Server:
             if x in player.world.regions:
                 self.send_client_socket(player, player.world.regions[x])
                 player.loading_regions.append(x)
+                player.world.mark_chunk_dirty(x)
                 # 新区块可能影响了相邻已加载区块的光照，发送邻居的光照更新
                 for neighbor_rx in (x - 1, x + 1):
                     if neighbor_rx in player.loading_regions:
@@ -335,13 +420,46 @@ class Server:
                             }
                             self.send_client_socket(player, light_update, "LightUpdate")
 
+    def unload_far_chunks(self):
+        if not self.save_id:
+            return
+        keep_margin = self.view_distance + self.chunk_unload_margin
+        for player in self.players:
+            center_rx = int(player.x // 16)
+            keep_min = center_rx - keep_margin
+            keep_max = center_rx + keep_margin
+            for rx in list(player.loading_regions):
+                if rx < keep_min or rx > keep_max:
+                    self.send_client_socket(player, {"rx": rx}, "UnloadChunk")
+                    player.loading_regions.remove(rx)
+
+        for world in self.worlds.values():
+            protected: set[int] = set()
+            for player in self.players:
+                if player.world is world:
+                    protected.update(player.loading_regions)
+            unload_rxs = [rx for rx in list(world.regions.keys()) if rx not in protected]
+            if not unload_rxs:
+                continue
+            if self._save_world_chunks(world, unload_rxs):
+                for rx in unload_rxs:
+                    world.regions.pop(rx, None)
+
     def close_server(self):
+        self.save_all(force=True)
         self.running = False
         self.socket_server.running = False
+        try:
+            self.socket_server.server_sock.close()
+        except Exception:
+            pass
         self.chunk_gen_pool.shutdown(wait=True)
+        logging.info("Server closed")
 
     def on_player_disconnect(self, player: Player):
+        self.save_all(player, force=True)
         # 广播离开消息（黄色，排除已离开的玩家）
         self.broadcast_chat(f"{player.name} left the game", (255, 255, 85), exclude=player)
-        self.players.remove(player)
-        self.socket_server.connections.pop(player)
+        if player in self.players:
+            self.players.remove(player)
+        self.socket_server.connections.pop(player, None)

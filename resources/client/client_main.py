@@ -17,8 +17,11 @@ from resources.client.client_packets import decode_packet, encode_packet
 from resources.client.game_manager import GameManager
 from resources.client.client_player import ClientPlayer
 from resources.client.GUI.main_menu import MainMenu
+from resources.client.GUI.pause_menu import PauseMenu
+from resources.client.GUI.saves_menu import SavesMenu
 from resources.client.particles import ParticleManager
 from resources.client.resources_loader import ResourcesManager
+from resources.server import save_manager
 from resources.server.server_main import Server
 from resources.server.utils import recv_exact, set_client
 
@@ -31,13 +34,10 @@ class Client:
             pass
         self.is_shutting_down = False
         self.version = "0.0.1 SNAPSHOT"
+        self.language = "en_US"
         self.client_world = client_world.ClientWorld(self)
         self.render = render.Render(self)
-        self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket_connected = threading.Event()
-        self.socket_thread_running = True
-        self.socket_thread = threading.Thread(target=self.start_socket, name="SocketThread")
-        self.socket_thread.daemon = True
+        self._prepare_socket_transport()
         # 服务端启动模式: "threading" 或 "subprocess"
         #   threading  - 在同一进程内以线程方式运行（受 GIL 影响，高负载时客户端可能卡顿）
         #   subprocess - 以独立子进程运行（绕过 GIL，性能更好，推荐）
@@ -46,11 +46,11 @@ class Client:
         # 在 subprocess 模式下服务端运行在独立进程中，不会调用 set_client()，
         # 因此需要在这里主动注册。
         set_client(self)
-        self.server_thread = threading.Thread(target=self.start_server, name="ServerThread")
-        self.server_thread.daemon = True
+        self._prepare_server_thread()
         self.server: Server | None = None
         self.server_process: subprocess.Popen | None = None
         self.chunk_load_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkLoader")
+        self.save_complete_event = threading.Event()
         self.in_game = False
         self.game_started = False
         self.resources_manager = ResourcesManager(self)
@@ -69,10 +69,26 @@ class Client:
         self.hold_mouse_buttons = [False, False, False]
         self.hold_key_map = {}
         self.key_map = {}
+        self.current_save_id: str | None = None
+        self.saves_menu: SavesMenu | None = None
         self.main_menu = MainMenu(self.render)
         self.render.show_gui(self.main_menu)
         self.game_thread.start()
         pygame.key.stop_text_input()
+
+        # 简写方法
+        # self.transkey = self.resources_manager.get_translation_key
+
+    def _prepare_socket_transport(self):
+        self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket_connected = threading.Event()
+        self.socket_thread_running = True
+        self.socket_thread = threading.Thread(target=self.start_socket, name="SocketThread")
+        self.socket_thread.daemon = True
+
+    def _prepare_server_thread(self):
+        self.server_thread = threading.Thread(target=self.start_server, name="ServerThread")
+        self.server_thread.daemon = True
 
     def start_socket(self):
         # 重试连接：子进程模式下服务端需要时间绑定端口并开始监听
@@ -171,13 +187,22 @@ class Client:
     def start(self):
         self.render.start()
 
-    def start_game(self):
+    def start_game(self, save_id: str | None = None):
         if self.game_started:
             return
 
+        if save_id is None:
+            save_id = save_manager.create_save(
+                self.resources_manager.get_translation_key("selectWorld.newWorld"),
+                version=self.version,
+            )["id"]
+        self.current_save_id = save_id
+        self.save_complete_event.clear()
         self.game_started = True
         if hasattr(self, "main_menu") and self.main_menu in self.render.drawing_GUIs:
             self.render.close_gui(self.main_menu)
+        if self.saves_menu is not None and self.saves_menu in self.render.drawing_GUIs:
+            self.render.close_gui(self.saves_menu)
 
         self.client_player = ClientPlayer(self)
         self._install_game_controls()
@@ -188,6 +213,62 @@ class Client:
             self._start_server_thread()
         self.socket_thread.start()
         self.in_game = True
+
+    def open_pause_menu(self):
+        if not self.in_game:
+            return
+        for gui in self.render.drawing_GUIs:
+            if isinstance(gui, PauseMenu):
+                return
+        self.capture_save_icon()
+        self.render.show_gui(PauseMenu(self.render))
+
+    def capture_save_icon(self):
+        if not self.current_save_id or self.render.screen is None:
+            return
+        try:
+            screen = self.render.screen.copy()
+            width, height = screen.get_size()
+            side = min(width, height)
+            crop = pygame.Rect((width - side) // 2, (height - side) // 2, side, side)
+            icon = screen.subsurface(crop).copy()
+            icon = pygame.transform.smoothscale(icon, (64, 64))
+            path = save_manager.icon_path(self.current_save_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            pygame.image.save(icon, str(path))
+        except Exception as e:
+            logging.warning(f"Failed to save world icon: {e}")
+
+    def return_to_main_menu(self):
+        if not self.game_started:
+            return
+        self.in_game = False
+        self._request_server_save(timeout=8.0)
+        self._close_current_game_transport()
+        self.chunk_load_pool.shutdown(wait=True)
+        self.chunk_load_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkLoader")
+        self.client_world = client_world.ClientWorld(self)
+        self.render.client_world = self.client_world
+        self.client_player = None
+        self.chat_gui = None
+        self.chat_messages.clear()
+        self.particle_manager = ParticleManager(self)
+        self.hold_mouse_buttons = [False, False, False]
+        self.hold_key_map = {}
+        self.key_map = {}
+        self.game_manager.ing_mouse_lock = 0
+        self.game_manager.last_pressed_time.clear()
+        self.current_save_id = None
+        self.server = None
+        self.server_process = None
+        self.game_started = False
+        self.render.drawing_GUIs.clear()
+        self.main_menu = MainMenu(self.render)
+        self.render.show_gui(self.main_menu)
+        pygame.key.stop_text_input()
+        pygame.key.set_repeat(0, 0)
+        self._prepare_socket_transport()
+        self._prepare_server_thread()
 
     def _install_game_controls(self):
         if self.client_player is not None:
@@ -214,8 +295,11 @@ class Client:
         try:
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             server_script = os.path.join(project_root, "start_server.py")
+            args = [sys.executable, server_script, "--integrated"]
+            if self.current_save_id:
+                args.extend(["--save-id", self.current_save_id])
             self.server_process = subprocess.Popen(
-                [sys.executable, server_script],
+                args,
             )
             logging.info(f"Server subprocess started (PID: {self.server_process.pid})")
         except FileNotFoundError:
@@ -228,7 +312,7 @@ class Client:
         """以线程方式启动服务端（同一进程，受 GIL 影响）。"""
         logging.warning("Server is running on threading mode, if you are not debugging your client/server, please use subprocess mode instead to have a better performance.")
         try:
-            self.server = Server(False, self)
+            self.server = Server(True, self, self.current_save_id)
             self.server_thread.start()
         except OSError:  # 端口已被占用，尝试加入已有服务端
             logging.info("Port already in use, trying to join existing server")
@@ -246,14 +330,8 @@ class Client:
         if len(self.chat_messages) > self.max_chat_messages:
             self.chat_messages = self.chat_messages[-self.max_chat_messages:]
 
-    def shutdown(self):
-        """优雅地关闭客户端"""
-        # 1. 先设置标志，让循环知道要退出
+    def _close_current_game_transport(self):
         self.socket_thread_running = False
-
-        self.is_shutting_down = True
-
-        # 2. 关闭 socket（这会中断阻塞的 recv() 调用）
         try:
             self.client_sock.shutdown(socket.SHUT_RDWR)
         except Exception:
@@ -262,12 +340,23 @@ class Client:
             self.client_sock.close()
         except Exception:
             pass
-
-        # 3. 等待 socket 线程结束（现在它会快速退出）
         if self.socket_thread.is_alive():
             self.socket_thread.join(timeout=2.0)
             if self.socket_thread.is_alive():
                 logging.warning("Socket thread did not exit cleanly")
+        self.socket_connected.clear()
+
+        if self.server_mode == "subprocess":
+            self._shutdown_server_subprocess()
+        else:
+            self._shutdown_server_thread()
+
+    def shutdown(self):
+        """优雅地关闭客户端"""
+        # 1. 先设置标志，让循环知道要退出
+        self.is_shutting_down = True
+        self._request_server_save()
+        self._close_current_game_transport()
 
         # 4. 停止游戏循环
         self.game_manager.running = False
@@ -278,12 +367,6 @@ class Client:
 
         # 6. 关闭区块加载线程池
         self.chunk_load_pool.shutdown(wait=True)
-
-        # 7. 关闭服务器
-        if self.server_mode == "subprocess":
-            self._shutdown_server_subprocess()
-        else:
-            self._shutdown_server_thread()
 
         # 8. 清理音频设备
         if hasattr(self, 'audio_device'):
@@ -308,6 +391,7 @@ class Client:
             self.server_process.wait()
         except Exception:
             pass
+        self.server_process = None
 
     def _shutdown_server_thread(self):
         """关闭线程模式下的服务端。"""
@@ -316,8 +400,23 @@ class Client:
                 self.server.close_server()
             except Exception:
                 pass
+        if self.server_thread.is_alive():
+            self.server_thread.join(timeout=2.0)
+            if self.server_thread.is_alive():
+                logging.warning("Server thread did not exit cleanly")
+        self.server = None
 
     def play_sound(self, sound_id: str):
         self.resources_manager.get_resource(sound_id).play()
+
+    def _request_server_save(self, timeout: float = 5.0):
+        if not self.socket_connected.is_set():
+            return
+        try:
+            self.save_complete_event.clear()
+            self.sent_packet({'__class__': 'ClientShutdown'})
+            self.save_complete_event.wait(timeout=timeout)
+        except Exception:
+            pass
 
 

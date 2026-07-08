@@ -8,6 +8,8 @@ import numpy as np
 from collections import OrderedDict
 from resources.server.location import Location
 from resources.server.biome import get_biome_by_id
+from resources.server.utils import client_method
+
 
 class ResourcesManager:
     def __init__(self, client):
@@ -17,7 +19,10 @@ class ResourcesManager:
         self.sound_objects = {}   # 缓存已加载的 pygame.mixer.Sound 对象
         self.stained_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_STAINED_CACHE = 512  # 染色缓存上限
-        
+        self._lang_map = {}
+        self._fallback_lang_map = {}
+        self.load_lang("en_US", target=self._fallback_lang_map)
+        self.load_lang(self.client.language)
 
         missing_surface = pygame.Surface((16, 16), pygame.SRCALPHA)
         missing_surface.fill((0, 0, 0, 255))
@@ -28,6 +33,96 @@ class ResourcesManager:
             for y in range(8, 16):
                 missing_surface.set_at((x, y), (128, 0, 128, 255))
         self.missing_texture = missing_surface.convert()
+
+    def load_lang(self, lang: str, *, target: dict | None = None):
+        if target is None:
+            target = self._lang_map
+        lang_path = f"assets/minecraft/lang/{lang}.lang"
+        try:
+            with open(lang_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        line = line.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        key, value = line.split('=', 1)
+                        target[key] = value
+                    except Exception as e:
+                        logging.error(f"Failed to load language '{lang}': {e} at line: {line}")
+        except FileNotFoundError:
+            logging.warning(f"Language file not found: '{lang_path}'")
+
+    def get_translation_key(self, key: str, *args):
+        if key in self._lang_map:
+            text = self._lang_map[key]
+        elif key in self._fallback_lang_map:
+            text = self._fallback_lang_map[key]
+        else:
+            logging.warning(f"Invalid language key: '{key}'")
+            text = key
+        if args:
+            try:
+                text = self._format_translation(text, args)
+            except (TypeError, ValueError):
+                logging.warning(f"Failed to format language key: '{key}'")
+        return text
+
+    @staticmethod
+    def _format_translation(text: str, args: tuple) -> str:
+        result = []
+        next_arg = 0
+        i = 0
+        while i < len(text):
+            if text[i] != "%" or i == len(text) - 1:
+                result.append(text[i])
+                i += 1
+                continue
+
+            if text[i + 1] == "%":
+                result.append("%")
+                i += 2
+                continue
+
+            j = i + 1
+            explicit_arg = None
+            digit_start = j
+            while j < len(text) and text[j].isdigit():
+                j += 1
+
+            if j > digit_start and j < len(text) and text[j] == "$":
+                explicit_arg = int(text[digit_start:j]) - 1
+                j += 1
+            elif j > digit_start:
+                j = i + 1
+
+            if j >= len(text):
+                result.append(text[i:])
+                break
+
+            spec = text[j]
+            if spec not in "sdfi":
+                result.append(text[i:j + 1])
+                i = j + 1
+                continue
+
+            if explicit_arg is None:
+                arg_index = next_arg
+                next_arg += 1
+            else:
+                arg_index = explicit_arg
+
+            if arg_index < 0 or arg_index >= len(args):
+                raise ValueError("not enough arguments for translation format")
+
+            value = args[arg_index]
+            if spec in "di":
+                value = int(value)
+            elif spec == "f":
+                value = float(value)
+            result.append(str(value))
+            i = j + 1
+
+        return "".join(result)
 
     def get_texture_img(self, key: str, cft=False):
         """
@@ -391,4 +486,8 @@ class ResourcesManager:
         # 释放数组引用以解锁表面（可选）
         del alpha_arr
         return result
+
+@client_method
+def transkey(key: str, *args, client = None):
+    return client.resources_manager.get_translation_key(key, *args)
 

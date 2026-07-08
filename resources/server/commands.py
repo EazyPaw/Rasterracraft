@@ -342,6 +342,8 @@ class CommandExecutor:
                     affected_chunks.add(rx)
 
         # ---- 9. 受影响区块重算光照并同步客户端 ----
+        for rx in affected_chunks:
+            world.mark_chunk_dirty(rx)
         changed_light_chunks = world.recalculate_light_for_chunks(affected_chunks)
         for rx in affected_chunks:
             chunk = world.regions.get(rx)

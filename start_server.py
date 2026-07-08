@@ -18,6 +18,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Run as integrated server (disable stdin input)",
     )
+    parser.add_argument(
+        "--save-id",
+        default=None,
+        help="Save id to load from data/saves",
+    )
     args = parser.parse_args()
 
     # 配置日志：子进程模式下 colorlog 可能未安装，降级为标准 logging
@@ -50,5 +55,5 @@ if __name__ == "__main__":
         logging.info("Starting integrated server (subprocess mode)...")
 
     # 子进程模式下传入 integrated=True（禁用 stdin 输入）和 client=None（无耦合对象）
-    server = Server(integrated=args.integrated)
+    server = Server(integrated=args.integrated, save_id=args.save_id)
     server.init()

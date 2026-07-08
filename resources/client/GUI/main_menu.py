@@ -2,6 +2,8 @@ import pygame
 
 from resources.client.GUI.button import Button
 from resources.client.GUI.gui import GUI
+from resources.client.GUI.saves_menu import SavesMenu
+from resources.client.resources_loader import transkey
 
 
 class MainMenu(GUI):
@@ -14,7 +16,7 @@ class MainMenu(GUI):
         self.starting_world = False
         self._background_cache = None
         self._background_cache_key = None
-        self.add_button("Single player", self.start_singleplayer)
+        self.add_button(transkey("menu.singleplayer"), self.start_singleplayer)
 
     def add_button(
         self,
@@ -36,12 +38,9 @@ class MainMenu(GUI):
     def start_singleplayer(self):
         if self.starting_world:
             return
-        self.starting_world = True
-        for button in self.buttons:
-            button.enabled = False
-        if self.buttons:
-            self.buttons[0].text = "正在创建世界..."
-        self.render.client.start_game()
+        self.render.close_gui(self)
+        self.render.client.saves_menu = SavesMenu(self.render, self)
+        self.render.show_gui(self.render.client.saves_menu)
 
     def draw(self):
         self._layout_buttons()

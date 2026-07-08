@@ -38,6 +38,11 @@ def encode_packet(obj, obj_type, args) -> dict:
             'rx': obj['rx'],
             'biome_array': obj['biome_array']
         }
+    elif obj_type == "UnloadChunk":
+        return {
+            '__class__': 'UnloadChunk',
+            'rx': obj['rx'],
+        }
     elif isinstance(obj, Location) and obj_type == 'BreakBlock':
         return {
             '__class__': 'BreakBlock',
@@ -131,6 +136,9 @@ def decode_packet(packet: dict, player: Player):
         # 普通聊天：广播给所有玩家
         formatted = f"<{player.name}> {text}"
         player.world.server.broadcast_chat(formatted, (255, 255, 255))
+    elif packet['__class__'] == 'ClientShutdown':
+        player.world.server.save_all(player, force=True)
+        player.world.server.send_client_socket(player, {'__class__': 'SaveComplete'}, "Forward")
     # if packet['__class__'] not in ('PlayerMove', 'ChatMessage'):
     #     logging.debug(f"Received {packet['__class__']} packet.")
     #     logging.debug(packet)

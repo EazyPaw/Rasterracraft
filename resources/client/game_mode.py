@@ -1,23 +1,21 @@
 import logging
 from typing import TYPE_CHECKING
 
-from resources.client.GUI.inventory.backpack import Backpack
 from resources.client.GUI.chat import ChatGUI
+from resources.client.GUI.inventory.backpack import Backpack
 from resources.client.GUI.inventory.hotbar import HotBar
 from resources.server.block_class import Block
 from resources.server.blocks import AIR
 from resources.server.entity import Entity
-from resources.server.location import Location
-
-import resources.server.blocks as blocks
-from resources.server.material_class import BlockItem
+from abc import ABC
 
 if TYPE_CHECKING:
     from resources.client.client_player import ClientPlayer
 
-class GameMode:
+class GameMode(ABC):
 
     name_id = "null"
+    name = "null"
 
     def __init__(self, player: 'ClientPlayer'):
         self.player = player
@@ -51,6 +49,7 @@ class GameMode:
 
 class CreativeMode(GameMode):
     name_id = "creative"
+    name = "gameMode.creative"
 
     def __init__(self, player: 'ClientPlayer'):
         super().__init__(player)
@@ -127,6 +126,7 @@ class CreativeMode(GameMode):
 
 class SurvivalMode(GameMode):
     name_id = "survival"
+    name = "gameMode.survival"
 
     def left_click_on_block(self, block: Block):
         block.on_break()

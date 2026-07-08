@@ -111,6 +111,9 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         # }
         if 'rx' in packet and 'biome_array' in packet:
             client.client_world.update_biomes(packet['rx'], packet['biome_array'])
+    elif packet['__class__'] == 'UnloadChunk':
+        if 'rx' in packet:
+            client.client_world.unload_chunk(packet['rx'])
     elif packet['__class__'] == 'TimeUpdate':
         client.client_world.world_time = packet.get('time', 0) % 24000
     elif packet['__class__'] == 'Particle':
@@ -124,6 +127,9 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         color_raw = packet.get('color', [255, 255, 255])
         color = tuple(color_raw) if isinstance(color_raw, list) else color_raw
         client.add_chat_message(packet.get('text', ''), color)
+    elif packet['__class__'] == 'SaveComplete':
+        if hasattr(client, "save_complete_event"):
+            client.save_complete_event.set()
     # logging.debug(f"Received {packet['__class__']} packet.")
 
 def encode_packet(obj, obj_type = None, args = None) -> dict:
