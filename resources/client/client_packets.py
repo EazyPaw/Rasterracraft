@@ -32,6 +32,7 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         # }
         # 通过线程池异步加载，避免频繁创建/销毁线程，同时限制并发数
         pool = client.chunk_load_pool
+        client.client_world.begin_chunk_load(packet['x'])
         pool.submit(client.client_world.load_chunk, packet['x'], packet['region_array'])
         if 'light_array' in packet:
             pool.submit(

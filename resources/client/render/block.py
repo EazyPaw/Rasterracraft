@@ -6,6 +6,7 @@
 """
 
 import math as _math
+import os
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -99,6 +100,589 @@ class BlockRenderMixin:
             cache.popitem(last=False)
         return result
 
+    def _get_block_section_version_key(self, section_x: int) -> tuple[tuple[int, int], ...]:
+        """Return render versions for the chunk and its horizontal neighbors."""
+        section_w = self.BLOCK_SECTION_WIDTH
+        x0 = section_x * section_w
+        x1 = x0 + section_w - 1
+        first_rx = (x0 - 1) // 16
+        last_rx = (x1 + 1) // 16
+        versions = getattr(self.client_world, "_render_chunk_versions", {})
+        return tuple((rx, versions.get(rx, 0)) for rx in range(first_rx, last_rx + 1))
+
+    def _texture_path_can_animate(self, texture_path: str | None) -> bool:
+        if not texture_path:
+            return False
+
+        cache = self.animated_texture_path_cache
+        if texture_path in cache:
+            return cache[texture_path]
+
+        loaded = getattr(self.client.resources_manager, "textures", {}).get(texture_path)
+        if isinstance(loaded, dict):
+            cache[texture_path] = True
+            return True
+
+        parts = texture_path.split('.')
+        if len(parts) < 2:
+            cache[texture_path] = False
+            return False
+        category = parts[0]
+        file_path = '/'.join(parts[1:])
+        meta_path = f'assets/minecraft/textures/{category}/{file_path}.png.mcmeta'
+        animated = os.path.exists(meta_path)
+        cache[texture_path] = animated
+        return animated
+
+    def _block_can_animate(self, block: Optional['Block']) -> bool:
+        if block is None or block.block_id == 'air':
+            return False
+        return self._texture_path_can_animate(getattr(block, "_texture_path", None))
+
+    def _animated_texture_path(self, block: Optional['Block']) -> str | None:
+        if not self._block_can_animate(block):
+            return None
+        return getattr(block, "_texture_path", None)
+
+    def _surface_has_partial_alpha(self, surface: pygame.Surface | None) -> bool:
+        if surface is None or not (surface.get_flags() & pygame.SRCALPHA):
+            return False
+
+        key = id(surface)
+        cache = self.partial_alpha_surface_cache
+        if key in cache:
+            return cache[key]
+
+        alpha = pygame.surfarray.pixels_alpha(surface)
+        has_partial = bool(((alpha > 0) & (alpha < 255)).any())
+        del alpha
+        cache[key] = has_partial
+        return has_partial
+
+    def _block_has_partial_alpha(self, block: Optional['Block']) -> bool:
+        if block is None or block.block_id == 'air' or not block.has_transparent_pixels:
+            return False
+        return self._surface_has_partial_alpha(block.get_texture(self.block_size))
+
+    def _block_section_requires_direct_draw(
+        self,
+        section_x: int,
+        section_y: int,
+        version_key: tuple[tuple[int, int], ...],
+    ) -> bool:
+        """Detect sections where caching through a transparent surface would alter alpha compositing."""
+        probe_key = (section_x, section_y, version_key)
+        cache = self.block_section_direct_cache
+        if probe_key in cache:
+            cache.move_to_end(probe_key)
+            return cache[probe_key]
+
+        section_w = self.BLOCK_SECTION_WIDTH
+        section_h = self.BLOCK_SECTION_HEIGHT
+        x0 = section_x * section_w
+        y0 = section_y * section_h
+        x1 = x0 + section_w - 1
+        y1 = y0 + section_h - 1
+        get_block = self.client_world.get_block
+        requires_direct = False
+
+        for x in range(x0, x1 + 1):
+            for y in range(y0, y1 + 1):
+                b0 = get_block(x, y, 0)
+                if b0 is None or not b0.has_transparent_pixels:
+                    continue
+                b1 = get_block(x, y, 1)
+                if b1 is None or b1.block_id == 'air':
+                    continue
+                if self._block_has_partial_alpha(b0) and self._block_has_partial_alpha(b1):
+                    requires_direct = True
+                    break
+            if requires_direct:
+                break
+
+        cache[probe_key] = requires_direct
+        if len(cache) > self.MAX_BLOCK_SECTION_DIRECT_CACHE:
+            cache.popitem(last=False)
+        return requires_direct
+
+    def _get_block_section_animation_key(
+        self,
+        section_x: int,
+        section_y: int,
+        version_key: tuple[tuple[int, int], ...],
+    ):
+        """Return a bounded frame key for sections containing animated block textures."""
+        probe_key = (section_x, section_y, version_key)
+        cache = self.block_section_animation_cache
+        if probe_key in cache:
+            cache.move_to_end(probe_key)
+            texture_paths = cache[probe_key]
+        else:
+            section_w = self.BLOCK_SECTION_WIDTH
+            section_h = self.BLOCK_SECTION_HEIGHT
+            x0 = section_x * section_w
+            y0 = section_y * section_h
+            x1 = x0 + section_w - 1
+            y1 = y0 + section_h - 1
+            get_block = self.client_world.get_block
+            paths: set[str] = set()
+            for x in range(x0, x1 + 1):
+                for y in range(y0, y1 + 1):
+                    b0 = get_block(x, y, 0)
+                    path = self._animated_texture_path(b0)
+                    if path is not None:
+                        paths.add(path)
+                    b1 = get_block(x, y, 1)
+                    if b0 is not None and b0.has_transparent_pixels:
+                        path = self._animated_texture_path(b1)
+                        if path is not None:
+                            paths.add(path)
+
+            texture_paths = tuple(sorted(paths))
+            cache[probe_key] = texture_paths
+            if len(cache) > self.MAX_BLOCK_SECTION_ANIMATION_CACHE:
+                cache.popitem(last=False)
+
+        if not texture_paths:
+            return 0
+
+        frame_keys = []
+        get_animation_key = self.client.resources_manager.get_texture_animation_key
+        for texture_path in texture_paths:
+            frame_key = get_animation_key(texture_path)
+            if frame_key is not None:
+                frame_keys.append(frame_key)
+        return tuple(frame_keys) if frame_keys else 0
+
+    def _render_block_range(
+        self,
+        target: pygame.Surface,
+        block_size: int,
+        cam_x: float,
+        cam_y: float,
+        width: int,
+        height: int,
+        x_start: int,
+        x_end: int,
+        y_start: int,
+        y_end: int,
+        sky_light_weight: float,
+        sky_color: tuple[int, int, int],
+        *,
+        debug: bool = False,
+    ) -> None:
+        """Render a rectangular block range to an arbitrary target surface."""
+        cw = self.client_world
+        light_map = cw.light_map
+        sky_light_map = getattr(cw, "sky_light_map", {})
+        block_light_map = getattr(cw, "block_light_map", {})
+        get_block = cw.get_block
+        ao_mul = self.ao_multiple
+        font = self.default_font
+
+        # 扩展一圈用于 AO / 光照邻域计算。
+        x_min = x_start - 1
+        x_max = x_end + 1
+        y_min = y_start - 1
+        y_max = y_end + 1
+
+        x_len = x_max - x_min + 1
+        y_len = y_max - y_min + 1
+
+        block_info = [[0] * y_len for _ in range(x_len)]
+        blocks0: list[list[Optional['Block']]] = [[None] * y_len for _ in range(x_len)]
+        blocks1: list[list[Optional['Block']]] = [[None] * y_len for _ in range(x_len)]
+        light_levels = [[0.0] * y_len for _ in range(x_len)]
+        sky_levels = [[0.0] * y_len for _ in range(x_len)]
+        block_light_levels = [[0.0] * y_len for _ in range(x_len)]
+
+        for i in range(x_len):
+            x = x_min + i
+            chunk_light = light_map.get(x // 16)
+            chunk_sky_light = sky_light_map.get(x // 16)
+            chunk_block_light = block_light_map.get(x // 16)
+            local_x = x % 16
+            for j in range(y_len):
+                y = y_min + j
+                b0 = get_block(x, y, 0)
+                b1 = get_block(x, y, 1)
+                solid0 = 1 if (b0 and b0.solid) else 0
+                solid1 = 1 if (b1 and b1.solid) else 0
+                block_info[i][j] = solid0 | (solid1 << 1)
+                blocks0[i][j] = b0
+                blocks1[i][j] = b1
+
+                if chunk_sky_light is not None and chunk_block_light is not None:
+                    if y >= chunk_sky_light.shape[1]:
+                        sky_light = 15.0
+                        block_light = 0.0
+                    elif y >= 0:
+                        sky_light = float(chunk_sky_light[local_x, y])
+                        block_light = float(chunk_block_light[local_x, y])
+                    else:
+                        sky_light = 0.0
+                        block_light = 0.0
+                    sky_levels[i][j] = sky_light / 15.0 * sky_light_weight
+                    block_light_levels[i][j] = block_light / 15.0
+                    light_levels[i][j] = min(1.0, sky_levels[i][j] + block_light_levels[i][j])
+                elif chunk_light is not None and 0 <= y < chunk_light.shape[1]:
+                    light_levels[i][j] = chunk_light[local_x, y] * sky_light_weight / 15.0
+                    sky_levels[i][j] = light_levels[i][j]
+                    block_light_levels[i][j] = 0.0
+
+        def is_solid(x: int, y: int, z: int) -> bool:
+            if x < x_min or x > x_max or y < y_min or y > y_max:
+                return True
+            i = x - x_min
+            j = y - y_min
+            return (block_info[i][j] & (1 << z)) != 0
+
+        def get_light(x: int, y: int) -> float:
+            if x < x_min or x > x_max or y < y_min or y > y_max:
+                return 0.0
+            return light_levels[x - x_min][y - y_min]
+
+        def get_sky(x: int, y: int) -> float:
+            if x < x_min or x > x_max or y < y_min or y > y_max:
+                return 0.0
+            return sky_levels[x - x_min][y - y_min]
+
+        def get_block_l(x: int, y: int) -> float:
+            if x < x_min or x > x_max or y < y_min or y > y_max:
+                return 0.0
+            return block_light_levels[x - x_min][y - y_min]
+
+        if not debug:
+            first_block = blocks0[1][1] if x_len > 2 and y_len > 2 else None
+            can_tile_section = (
+                first_block is not None
+                and first_block.block_id != 'air'
+                and not first_block.has_transparent_pixels
+            )
+            first_tex = first_block.get_texture(block_size) if can_tile_section else None
+            if first_tex is None or first_tex.get_height() != block_size:
+                can_tile_section = False
+
+            if can_tile_section:
+                first_block_id = first_block.block_id
+                first_tex_id = id(first_tex)
+                sample_light = light_levels[0][0]
+                sample_sky = sky_levels[0][0]
+                sample_block_l = block_light_levels[0][0]
+
+                for i in range(x_len):
+                    for j in range(y_len):
+                        if (
+                            light_levels[i][j] != sample_light
+                            or sky_levels[i][j] != sample_sky
+                            or block_light_levels[i][j] != sample_block_l
+                        ):
+                            can_tile_section = False
+                            break
+                    if not can_tile_section:
+                        break
+
+            if can_tile_section:
+                for x in range(x_start, x_end + 1):
+                    i = x - x_min
+                    for y in range(y_start, y_end + 1):
+                        j = y - y_min
+                        b0 = blocks0[i][j]
+                        b1 = blocks1[i][j]
+                        if (
+                            b0 is None
+                            or b0.block_id != first_block_id
+                            or b1 is None
+                            or b1.block_id != 'air'
+                            or b0.has_transparent_pixels
+                            or id(b0.get_texture(block_size)) != first_tex_id
+                        ):
+                            can_tile_section = False
+                            break
+                    if not can_tile_section:
+                        break
+
+            if can_tile_section:
+                tile = pygame.Surface((block_size, block_size), pygame.SRCALPHA).convert_alpha()
+                tile.fill((0, 0, 0, 0))
+                self._draw_block_optimized(
+                    tile, block_size, x_start, y_start + 1, block_size, block_size,
+                    x_start, y_start, 0, first_block,
+                    light_levels, block_info, is_solid, get_light,
+                    get_sky, get_block_l, sky_color,
+                    x_min, y_min, ao_mul, False, font,
+                )
+                blits = []
+                for x in range(x_start, x_end + 1):
+                    sx = (x - cam_x - 0.5) * block_size + width // 2
+                    for y in range(y_start, y_end + 1):
+                        sy = height - (((y + 1) - cam_y + 0.5) * block_size + height // 2)
+                        blits.append((tile, (sx, sy)))
+                target.blits(blits)
+                return
+
+        for x in range(x_start, x_end + 1):
+            i = x - x_min
+            for y in range(y_start, y_end + 1):
+                j = y - y_min
+                b0 = blocks0[i][j]
+                b1 = blocks1[i][j]
+
+                if b1 is not None and b1.block_id != 'air' and b0 is not None and b0.has_transparent_pixels:
+                    self._draw_block_optimized(
+                        target, block_size, cam_x, cam_y, width, height,
+                        x, y, 1, b1,
+                        light_levels, block_info, is_solid, get_light,
+                        get_sky, get_block_l, sky_color,
+                        x_min, y_min, ao_mul, debug, font,
+                    )
+
+                if b0 is not None and b0.block_id != 'air':
+                    self._draw_block_optimized(
+                        target, block_size, cam_x, cam_y, width, height,
+                        x, y, 0, b0,
+                        light_levels, block_info, is_solid, get_light,
+                        get_sky, get_block_l, sky_color,
+                        x_min, y_min, ao_mul, debug, font,
+                    )
+
+    def _get_block_section_surface(
+        self,
+        section_x: int,
+        section_y: int,
+        sky_light_weight: float,
+        sky_color: tuple[int, int, int],
+        lighting_key: tuple,
+        version_key: tuple[tuple[int, int], ...],
+        tick_key: int,
+    ) -> pygame.Surface:
+        """Build or fetch a cached 16xN block section surface."""
+        bs = self.block_size
+        section_w = self.BLOCK_SECTION_WIDTH
+        section_h = self.BLOCK_SECTION_HEIGHT
+        x0 = section_x * section_w
+        y0 = section_y * section_h
+        x1 = x0 + section_w - 1
+        y1 = y0 + section_h - 1
+        key = (
+            section_x, section_y, bs,
+            lighting_key, tick_key, version_key,
+        )
+
+        cache = self.block_section_cache
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+
+        surface_w = section_w * bs
+        surface_h = section_h * bs
+        pool_key = (surface_w, surface_h)
+
+        if tick_key != 0:
+            old_keys = [
+                old_key for old_key in cache
+                if old_key[0] == section_x and old_key[1] == section_y and old_key[2] == bs
+            ]
+            for old_key in old_keys:
+                old_surface = cache.pop(old_key)
+                pool = self.block_section_surface_pool.setdefault(pool_key, [])
+                if old_surface.get_size() == pool_key and len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
+                    pool.append(old_surface)
+
+        if len(cache) >= self.MAX_BLOCK_SECTION_CACHE:
+            _, old_surface = cache.popitem(last=False)
+            pool = self.block_section_surface_pool.setdefault(pool_key, [])
+            if old_surface.get_size() == pool_key and len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
+                pool.append(old_surface)
+
+        pool = self.block_section_surface_pool.get(pool_key)
+        if pool:
+            surface = pool.pop()
+        else:
+            surface = pygame.Surface((surface_w, surface_h), pygame.SRCALPHA).convert_alpha()
+        surface.fill((0, 0, 0, 0))
+
+        local_cam_x = x0 + section_w / 2 - 0.5
+        local_cam_y = y0 + section_h / 2 + 0.5
+        self._render_block_range(
+            surface, bs, local_cam_x, local_cam_y, surface_w, surface_h,
+            x0, x1, y0, y1, sky_light_weight, sky_color,
+            debug=False,
+        )
+
+        cache[key] = surface
+        return surface
+
+    def _trim_distant_animated_sections(
+        self,
+        sx_start: int,
+        sx_end: int,
+        sy_start: int,
+        sy_end: int,
+    ) -> None:
+        cache = self.block_section_cache
+        if not cache:
+            return
+
+        min_x = sx_start - 1
+        max_x = sx_end + 1
+        min_y = sy_start - 1
+        max_y = sy_end + 1
+        for key in list(cache.keys()):
+            section_x, section_y, _, _, tick_key, _ = key
+            if tick_key == 0:
+                continue
+            if min_x <= section_x <= max_x and min_y <= section_y <= max_y:
+                continue
+
+            surface = cache.pop(key)
+            pool_key = surface.get_size()
+            pool = self.block_section_surface_pool.setdefault(pool_key, [])
+            if len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
+                pool.append(surface)
+
+    def _prefetch_block_sections(
+        self,
+        sx_start: int,
+        sx_end: int,
+        sy_start: int,
+        sy_end: int,
+        dx: float,
+        dy: float,
+        sky_light_weight: float,
+        sky_color: tuple[int, int, int],
+        lighting_key: tuple,
+    ) -> None:
+        budget = self.MAX_BLOCK_SECTION_PREFETCH_PER_FRAME
+        if budget <= 0:
+            return
+
+        candidates: list[tuple[int, int]] = []
+        if dx > 0.01:
+            candidates.extend((sx_end + 1, sy) for sy in range(sy_start, sy_end + 1))
+            candidates.extend((sx_end + 2, sy) for sy in range(sy_start, sy_end + 1))
+        elif dx < -0.01:
+            candidates.extend((sx_start - 1, sy) for sy in range(sy_start, sy_end + 1))
+            candidates.extend((sx_start - 2, sy) for sy in range(sy_start, sy_end + 1))
+
+        if dy > 0.01:
+            candidates.extend((sx, sy_end + 1) for sx in range(sx_start, sx_end + 1))
+            candidates.extend((sx, sy_end + 2) for sx in range(sx_start, sx_end + 1))
+        elif dy < -0.01:
+            candidates.extend((sx, sy_start - 1) for sx in range(sx_start, sx_end + 1))
+            candidates.extend((sx, sy_start - 2) for sx in range(sx_start, sx_end + 1))
+
+        built = 0
+        seen: set[tuple[int, int]] = set()
+        for section_x, section_y in candidates:
+            candidate = (section_x, section_y)
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+
+            version_key = self._get_block_section_version_key(section_x)
+            if self._block_section_requires_direct_draw(section_x, section_y, version_key):
+                continue
+            tick_key = self._get_block_section_animation_key(section_x, section_y, version_key)
+            if tick_key != 0:
+                continue
+            key = (
+                section_x, section_y, self.block_size,
+                lighting_key, tick_key, version_key,
+            )
+            if key in self.block_section_cache:
+                continue
+
+            self._get_block_section_surface(
+                section_x, section_y,
+                sky_light_weight, sky_color,
+                lighting_key, version_key, tick_key,
+            )
+            built += 1
+            if built >= budget:
+                return
+
+    def _draw_block_section_cached(self) -> bool:
+        """Draw visible terrain by blitting cached section surfaces."""
+        if self.debug:
+            return False
+
+        screen = self.screen
+        block_size = self.block_size
+        if block_size <= 0:
+            return False
+
+        cam_x = self.camera.x
+        cam_y = self.camera.y
+        width = self.SCREEN_WIDTH
+        height = self.SCREEN_HEIGHT
+
+        sky_state = self.current_sky_state or self.get_sky_state()
+        sky_light_weight = sky_state["sky_light_weight"]
+        night_tint = (36, 48, 128)
+        sky_color = lerp_color(
+            cyclic_lerp_color(self.SKY_LOWER_KEYFRAMES, self.day_time),
+            sky_state["twilight_color"],
+            sky_state["twilight"],
+        )
+        sky_color = lerp_color(sky_color, night_tint, sky_state["night"] * 0.85)
+        sky_color = quantize_color(sky_color, BLOCK_TINT_COLOR_STEP)
+
+        x_blocks = _math.ceil(width / block_size)
+        y_blocks = _math.ceil(height / block_size)
+        x_start = int(cam_x - x_blocks // 2 - 1)
+        x_end = int(cam_x + x_blocks // 2 + 2)
+        y_start = int(cam_y - y_blocks // 2 - 1)
+        y_end = int(cam_y + y_blocks // 2 + 2)
+
+        section_w = self.BLOCK_SECTION_WIDTH
+        section_h = self.BLOCK_SECTION_HEIGHT
+        sx_start = x_start // section_w
+        sx_end = x_end // section_w
+        sy_start = y_start // section_h
+        sy_end = y_end // section_h
+
+        lighting_key = (
+            int(round(sky_light_weight * 1024)),
+            sky_color,
+        )
+        last_cam = self._last_block_cache_cam
+        velocity_x = 0.0 if last_cam is None else cam_x - last_cam[0]
+        velocity_y = 0.0 if last_cam is None else cam_y - last_cam[1]
+        self._last_block_cache_cam = (cam_x, cam_y)
+
+        for section_x in range(sx_start, sx_end + 1):
+            x0 = section_x * section_w
+            version_key = self._get_block_section_version_key(section_x)
+            for section_y in range(sy_start, sy_end + 1):
+                y0 = section_y * section_h
+                y1 = y0 + section_h - 1
+                if self._block_section_requires_direct_draw(section_x, section_y, version_key):
+                    self._render_block_range(
+                        screen, block_size, cam_x, cam_y, width, height,
+                        x0, x0 + section_w - 1, y0, y1,
+                        sky_light_weight, sky_color,
+                        debug=False,
+                    )
+                    continue
+                tick_key = self._get_block_section_animation_key(section_x, section_y, version_key)
+                section = self._get_block_section_surface(
+                    section_x, section_y,
+                    sky_light_weight, sky_color,
+                    lighting_key, version_key, tick_key,
+                )
+                dest_x = (x0 - cam_x - 0.5) * block_size + width // 2
+                dest_y = height - (((y1 + 1) - cam_y + 0.5) * block_size + height // 2)
+                screen.blit(section, (dest_x, dest_y))
+
+        self._trim_distant_animated_sections(sx_start, sx_end, sy_start, sy_end)
+        self._prefetch_block_sections(
+            sx_start, sx_end, sy_start, sy_end,
+            velocity_x, velocity_y,
+            sky_light_weight, sky_color, lighting_key,
+        )
+        return True
+
     def draw_block(self) -> None:
         """批量绘制所有可见方块，应用光照+AO。
 
@@ -109,6 +693,9 @@ class BlockRenderMixin:
 
         绘制顺序：先 z=1（前景），后 z=0（背景）。
         """
+        if self._draw_block_section_cached():
+            return
+
         # ---- 局部变量绑定，消除属性查找开销 ----
         screen = self.screen
         block_size = self.block_size

@@ -1,5 +1,6 @@
 import logging
 import math
+import threading
 from typing import Any, Optional, cast
 import time
 
@@ -21,8 +22,22 @@ class ClientWorld:
         self.y_max = 256
         self.world_time = 0
         self.client = client
+        self._render_revision = 0
+        self._render_chunk_versions: dict[int, int] = {}
+        self._chunk_state_lock = threading.RLock()
+        self._loading_chunks: set[int] = set()
+        self._pending_chunk_block_updates: dict[int, dict[tuple[int, int, int], Block]] = {}
+
+    def _mark_render_chunk_dirty(self, rx: int) -> None:
+        self._render_revision += 1
+        self._render_chunk_versions[rx] = self._render_revision
+
+    def begin_chunk_load(self, rx: int) -> None:
+        with self._chunk_state_lock:
+            self._loading_chunks.add(rx)
 
     def load_chunk(self, rx: int, chunk: dict[str, dict]):
+        self.begin_chunk_load(rx)
         chunk_array = np.full((16, self.y_max, 2), AIR(), dtype=Block)
         logging.debug(f"Loading chunk {rx}")
         for key, value in chunk.items():
@@ -33,7 +48,14 @@ class ClientWorld:
             block.location = Location(self, world_x, y, z)  # 使用绝对坐标
             chunk_array[x][y][z] = block
             time.sleep(0)  # 释放GIL，让出CPU，不然会导致渲染卡顿
-        self._regions[rx] = chunk_array
+        with self._chunk_state_lock:
+            pending_updates = self._pending_chunk_block_updates.pop(rx, {})
+            for (world_x, y, z), block in pending_updates.items():
+                block.location = Location(self, world_x, y, z)
+                chunk_array[world_x % 16, y, z] = block
+            self._regions[rx] = chunk_array
+            self._loading_chunks.discard(rx)
+            self._mark_render_chunk_dirty(rx)
 
     def load_lights(self, rx: int, light_map: dict[str, int],
                     sky_light_map: dict[str, int] | None = None,
@@ -49,6 +71,7 @@ class ClientWorld:
             self.sky_light_map[rx] = self._dict_to_light_array(sky_light_map)
         if block_light_map is not None:
             self.block_light_map[rx] = self._dict_to_light_array(block_light_map)
+        self._mark_render_chunk_dirty(rx)
 
     def update_lights(self, rx: int, light_map: dict[str, int],
                       sky_light_map: dict[str, int] | None = None,
@@ -69,6 +92,7 @@ class ClientWorld:
             self.sky_light_map[rx] = self._dict_to_light_array(sky_light_map)
         if block_light_map is not None:
             self.block_light_map[rx] = self._dict_to_light_array(block_light_map)
+        self._mark_render_chunk_dirty(rx)
 
     def _dict_to_light_array(self, light_map: dict[str, int]):
         light_array = np.full((16, self.y_max), 0, dtype=np.uint8)
@@ -85,6 +109,7 @@ class ClientWorld:
             x, y = int(x_str), int(y_str)
             biome_array[x][y] = biome_id
         self.biome_map[rx] = biome_array
+        self._mark_render_chunk_dirty(rx)
 
     def update_biomes(self, rx: int, biome_dict: dict[str, str]):
         """增量更新生物群系数据（只更新变化的部分）"""
@@ -96,6 +121,7 @@ class ClientWorld:
             x_str, y_str = key.split(",")
             x, y = int(x_str), int(y_str)
             biome_array[x][y] = biome_id
+        self._mark_render_chunk_dirty(rx)
 
     def get_biome(self, x: int, y: int) -> Optional[str]:
         """
@@ -117,6 +143,7 @@ class ClientWorld:
         self.sky_light_map.pop(x, None)
         self.block_light_map.pop(x, None)
         self.biome_map.pop(x, None)
+        self._mark_render_chunk_dirty(x)
 
     def get_block(self, x_loc: int | Location, y: int | None = None, z: int | None = None) -> Block:
         x, y, z = decide_x_or_loc(x_loc, y, z)
@@ -133,10 +160,16 @@ class ClientWorld:
     def set_block(self, block: Block, x_loc: int | Location, y: int | None = None, z: int | None = None):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block.location = Location(self, x, y, z)
-        chunk = self._regions.get(x // 16)
+        rx = x // 16
+        with self._chunk_state_lock:
+            if rx in self._loading_chunks:
+                self._pending_chunk_block_updates.setdefault(rx, {})[(x, y, z)] = block
+        chunk = self._regions.get(rx)
         rela_x = x % 16
-        if chunk is None:return
+        if chunk is None:
+            return
         chunk[rela_x, y, z] = block
+        self._mark_render_chunk_dirty(rx)
 
     def break_block(self,x_loc: int | Location, y: int | None = None, z: int | None = None):
         """

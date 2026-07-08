@@ -18,7 +18,7 @@ class AIR(Block):
     replaceable = True
     breakable = False
     light_attenuation = 1
-    has_transparent_pixels = True
+    has_transparent_pixels = True  # AIR 无纹理，需手动指定
 
     @classmethod
     @client_method
@@ -92,17 +92,19 @@ class GRASS_BLOCK(Block):
         """
         x = self.location.x
         y = self.location.y
-        biome = get_biome_by_id(self.location.world.get_biome(x, y))
+        biome_id = self.location.world.get_biome(x, y)
+        biome = get_biome_by_id(biome_id)
+        cache_key = (size, bool(self.snowed), biome_id, biome.grass_color)
 
         # 检查缓存
-        if (size, self.snowed, biome) in self._side_texture_cache:
-            return self._side_texture_cache[(size, self.snowed, biome)]
+        if cache_key in self._side_texture_cache:
+            return self._side_texture_cache[cache_key]
 
         if self.snowed:
             tex = client.resources_manager.get_texture_img("blocks.grass_side_snowed")
             final_texture = pygame.transform.scale(tex, (size, size))
-            self._side_texture_cache[(size, self.snowed, biome)] = final_texture.convert_alpha()
-            return self._side_texture_cache[(size, self.snowed, biome)]
+            self._side_texture_cache[cache_key] = final_texture.convert_alpha()
+            return self._side_texture_cache[cache_key]
 
         # 1. 获取基础材质
         base_side = client.resources_manager.get_texture_img("blocks.grass_side")
@@ -126,7 +128,7 @@ class GRASS_BLOCK(Block):
         final_texture.blit(stained_overlay, (0, 0))
 
         # 5. 存入缓存
-        self._side_texture_cache[(size, self.snowed, biome)] = final_texture.convert_alpha()
+        self._side_texture_cache[cache_key] = final_texture.convert_alpha()
 
         return final_texture
 
@@ -318,7 +320,6 @@ class WATER(Block):
     solid = False
     replaceable = True
     light_attenuation = 1
-    has_transparent_pixels = True
 
 class SUGAR_CANE(Plant):
     block_id = 'sugar_cane'

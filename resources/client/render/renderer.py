@@ -90,6 +90,11 @@ class Render(SkyMixin, BlockRenderMixin):
         self.total_day_ticks: float = 0.0
         self._last_daytime_update: int = pygame.time.get_ticks()
 
+        # ---- FPS 统计 ----
+        self._fps_samples: list[float] = []
+        self._fps_display_text: str = "avg. 0 max. 0 min. 0"
+        self._last_fps_update: int = pygame.time.get_ticks()
+
         # ---- 天空渲染状态 ----
         self.sky_base = None
         self.sky_layer: pygame.Surface | None = None
@@ -130,6 +135,20 @@ class Render(SkyMixin, BlockRenderMixin):
         self.debug = False
         self.tinted_surface_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_TINTED_SURFACE_CACHE: int = 768
+        self.block_section_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
+        self.MAX_BLOCK_SECTION_CACHE: int = 192
+        self.block_section_surface_pool: dict[tuple[int, int], list[pygame.Surface]] = {}
+        self.MAX_BLOCK_SECTION_SURFACE_POOL: int = 64
+        self.block_section_animation_cache: OrderedDict[tuple, tuple[str, ...]] = OrderedDict()
+        self.MAX_BLOCK_SECTION_ANIMATION_CACHE: int = 256
+        self.block_section_direct_cache: OrderedDict[tuple, bool] = OrderedDict()
+        self.MAX_BLOCK_SECTION_DIRECT_CACHE: int = 256
+        self.animated_texture_path_cache: dict[str, bool] = {}
+        self.partial_alpha_surface_cache: dict[int, bool] = {}
+        self.BLOCK_SECTION_WIDTH: int = 8
+        self.BLOCK_SECTION_HEIGHT: int = 4
+        self.MAX_BLOCK_SECTION_PREFETCH_PER_FRAME: int = 2
+        self._last_block_cache_cam: tuple[float, float] | None = None
 
     # ===================== 坐标转换 =====================
 
@@ -329,6 +348,11 @@ class Render(SkyMixin, BlockRenderMixin):
                     self.stars = self.generate_stars()
                     self.celestial_cache.clear()
                     self.tinted_surface_cache.clear()
+                    self.block_section_cache.clear()
+                    self.block_section_surface_pool.clear()
+                    self.block_section_animation_cache.clear()
+                    self.block_section_direct_cache.clear()
+                    self._last_block_cache_cam = None
                     self.ig_gui_layer = pygame.Surface(
                         (self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA
                     )
@@ -353,9 +377,20 @@ class Render(SkyMixin, BlockRenderMixin):
                     self.draw_player()
                     self.draw_gui()
 
-                    # 帧率显示
-                    fps = clock.get_fps()
-                    self.render_text(f"FPS: {int(fps)}", (10, 10), (255, 255, 255), 36, True)
+                    # 帧率统计（每秒更新一次）
+                    current_ticks = pygame.time.get_ticks()
+                    self._fps_samples.append(clock.get_fps())
+                    if current_ticks - self._last_fps_update >= 1000:
+                        if self._fps_samples:
+                            avg_fps = sum(self._fps_samples) / len(self._fps_samples)
+                            max_fps = max(self._fps_samples)
+                            min_fps = min(self._fps_samples)
+                            self._fps_display_text = (
+                                f"avg. {int(avg_fps)} max. {int(max_fps)} min. {int(min_fps)}"
+                            )
+                        self._fps_samples.clear()
+                        self._last_fps_update = current_ticks
+                    self.render_text(self._fps_display_text, (10, 10), (255, 255, 255), 36, True)
                 else:
                     # ---- 非游戏状态：黑屏 + GUI ----
                     self.screen.fill((0, 0, 0))
@@ -483,6 +518,7 @@ class Render(SkyMixin, BlockRenderMixin):
         shadow: bool = False,
         shadow_strength = 0.4,
         glow: bool = False,
+        clip_rect=None,
     ) -> None:
         """在屏幕上渲染文本。
 
@@ -495,6 +531,11 @@ class Render(SkyMixin, BlockRenderMixin):
             shadow_strength: 阴影亮度
             glow: 是否添加发光效果
         """
+        old_clip = None
+        if clip_rect is not None:
+            old_clip = self.screen.get_clip()
+            self.screen.set_clip(clip_rect)
+
         text_surface = self.get_font(font_size).render(text, True, color)
         if shadow:
             # 阴影：深色版本偏移绘制在文本下方
@@ -502,3 +543,6 @@ class Render(SkyMixin, BlockRenderMixin):
             shadow_surface = self.get_font(font_size).render(text, True, shadow_color)
             self.screen.blit(shadow_surface, (pos[0] + font_size / 8, pos[1] + font_size / 8))
         self.screen.blit(text_surface, pos)
+
+        if old_clip is not None:
+            self.screen.set_clip(old_clip)

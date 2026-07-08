@@ -29,7 +29,7 @@ class Block(ABC):
     light_attenuation = 5
     light_source = 0
     Tags = []
-    has_transparent_pixels = False
+    has_transparent_pixels = None  # None = 自动从纹理检测，也可手动覆盖为 True/False
 
     def __init__(self, nbt = None):
         # 方块应该带有的属性
@@ -53,6 +53,11 @@ class Block(ABC):
         tex = client.resources_manager.get_texture_img(cls._texture_path)
         if tex is None:
             return cls._texture
+
+        # 首次加载纹理时自动检测是否存在透明像素
+        if cls.has_transparent_pixels is None:
+            cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(tex)
+
         # 使用 tex 的 id 作为帧标识：静态纹理 id 不变跳过缩放，动画纹理 id 变化则重新缩放
         if id(tex) != cls._last_tex_id or size != cls._last_scaled:
             cls._texture = pygame.transform.scale(tex, (size, size))
@@ -139,7 +144,6 @@ class Plant(Block):
     break_sound = 'dig.grass'
     solid = False
     light_attenuation = 1
-    has_transparent_pixels = True
 
     def on_update(self):
         if BlockTag.GRASS_BLOCKS not in self.location.world.get_block(self.location.add(0, -1, 0)).Tags:
@@ -148,7 +152,6 @@ class Plant(Block):
 class GrassStain(Plant):
     # 需要更据生物群系染色的植物（草）
     _texture_cache = {}  # key: (size, biome_id)
-    has_transparent_pixels = True
 
     @client_method
     def get_texture(self, size, client: 'Client'):
@@ -169,6 +172,11 @@ class GrassStain(Plant):
         if base_texture is None:
             return None
 
+        # 首次加载纹理时自动检测是否存在透明像素
+        cls = type(self)
+        if cls.has_transparent_pixels is None:
+            cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(base_texture)
+
         # 2. 缩放至目标尺寸
         texture_scaled = pygame.transform.scale(base_texture, (size, size))
 
@@ -185,7 +193,6 @@ class Leaves(Block):
     _texture_cache = {}   # key: (size, biome_id)
     _effect_cache = {}    # key: (size, biome_id, z, front_same, behind_leaf)
     break_sound = 'dig.grass'
-    has_transparent_pixels = True
 
     @client_method
     def get_texture(self, size, client: 'Client'):
@@ -223,6 +230,12 @@ class Leaves(Block):
             base_texture = client.resources_manager.get_texture_img(self._texture_path)
             if base_texture is None:
                 return None
+
+            # 首次加载纹理时自动检测是否存在透明像素
+            cls = type(self)
+            if cls.has_transparent_pixels is None:
+                cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(base_texture)
+
             scaled = pygame.transform.scale(base_texture, (size, size))
             stained = client.resources_manager.biome_stain(
                 scaled, self.location, "foliage"
@@ -261,4 +274,3 @@ class BottomSupport(Block):
 
 class Log(Block):
     break_sound = "dig.wood"
-    has_transparent_pixels = True

@@ -45,9 +45,7 @@ class ResourcesManager:
             if isinstance(r, pygame.Surface):
                 return self.textures[key]
             if isinstance(r, dict):
-                t = self.client.client_ticks
-                c = len(self.textures[key]["textures"])
-                n = int(t / self.textures[key]["frame_time"]) % c
+                n = self._get_animation_frame_index(r)
                 return self.textures[key]["textures"][n]
 
         # 解析路径
@@ -80,18 +78,23 @@ class ResourcesManager:
 
             # 部分带有动画的方块
             if "animation" in meta:
-                frame_time = meta["animation"].get("frame_time", 1)
+                animation = meta["animation"]
+                frame_time = animation.get("frametime", animation.get("frame_time", 1))
                 width = texture.get_size()[0]
                 height = texture.get_size()[1]
                 if height % width != 0:
                     logging.warning(f"Texture height is not a multiple of width: {width}")
                     self.textures[key] = self.missing_texture
                     return self.missing_texture
-                self.textures[key] = {"textures":self.split_horizontal_strips(texture),
-                                      "frame_time": frame_time}
+                strips = self.split_horizontal_strips(texture)
+                frame_indices = self._parse_animation_frames(animation, len(strips))
+                self.textures[key] = {
+                    "textures": strips,
+                    "frame_time": max(1, int(frame_time)),
+                    "frame_indices": frame_indices,
+                }
                 # 首次加载也计算当前帧（与缓存命中分支逻辑一致）
-                strips = self.textures[key]["textures"]
-                n = int(self.client.client_ticks / frame_time) % len(strips)
+                n = self._get_animation_frame_index(self.textures[key])
                 return strips[n]
 
 
@@ -106,6 +109,40 @@ class ResourcesManager:
             logging.warning(f"Failed to load texture '{key}' from '{full_path}': {e}")
             self.textures[key] = self.missing_texture
             return self.missing_texture
+
+    def get_texture_animation_key(self, key: str):
+        self.get_texture_img(key)
+        texture = self.textures.get(key)
+        if not isinstance(texture, dict):
+            return None
+        return key, self._get_animation_frame_index(texture)
+
+    def _get_animation_frame_index(self, animation_data: dict) -> int:
+        frame_indices = animation_data.get("frame_indices")
+        if not frame_indices:
+            frame_indices = list(range(len(animation_data["textures"])))
+        frame_time = max(1, int(animation_data.get("frame_time", 1)))
+        timeline_index = int(self.client.client_ticks / frame_time) % len(frame_indices)
+        frame_index = int(frame_indices[timeline_index])
+        return max(0, min(frame_index, len(animation_data["textures"]) - 1))
+
+    @staticmethod
+    def _parse_animation_frames(animation: dict, frame_count: int) -> list[int]:
+        frames = animation.get("frames")
+        if not frames:
+            return list(range(frame_count))
+
+        result: list[int] = []
+        for frame in frames:
+            if isinstance(frame, int):
+                index = frame
+            elif isinstance(frame, dict):
+                index = int(frame.get("index", 0))
+            else:
+                continue
+            if 0 <= index < frame_count:
+                result.append(index)
+        return result or list(range(frame_count))
 
     @staticmethod
     def _crop_transparent_edges(surface):
