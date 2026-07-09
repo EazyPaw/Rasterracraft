@@ -137,11 +137,20 @@ class BlockRenderMixin:
     def _block_can_animate(self, block: Optional['Block']) -> bool:
         if block is None or block.block_id == 'air':
             return False
-        return self._texture_path_can_animate(getattr(block, "_texture_path", None))
+        return self._texture_path_can_animate(self._get_block_texture_path(block))
 
     def _animated_texture_path(self, block: Optional['Block']) -> str | None:
         if not self._block_can_animate(block):
             return None
+        return self._get_block_texture_path(block)
+
+    @staticmethod
+    def _get_block_texture_path(block: Optional['Block']) -> str | None:
+        if block is None:
+            return None
+        path_getter = getattr(block, "get_texture_path", None)
+        if callable(path_getter):
+            return path_getter()
         return getattr(block, "_texture_path", None)
 
     def _surface_has_partial_alpha(self, surface: pygame.Surface | None) -> bool:

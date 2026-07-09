@@ -31,6 +31,9 @@ class Entity:
         self.facing = 0  # 0: 左边 1: 右边
         self.sprinting = False
         self.removed = False
+        self.in_fluid = False
+        self.in_water = False
+        self.swimming_up = False
 
     def teleport_to(self, x, y, world = None):
         self.x = x
@@ -101,6 +104,48 @@ class Entity:
             return self.world.get_block(math.floor(x), math.floor(y), z)
         except (IndexError, AttributeError, TypeError):
             return None
+
+    def _get_fluid_interaction(self) -> tuple[bool, float, float]:
+        min_x = math.floor(self.x)
+        max_x = math.floor(self.x + self.width)
+        min_y = math.floor(self.y)
+        max_y = math.floor(self.y + self.height)
+
+        flow_x = 0.0
+        flow_y = 0.0
+        touching = 0
+
+        for block_x in range(min_x, max_x + 1):
+            for block_y in range(min_y, max_y + 1):
+                block = self._get_block_at(block_x, block_y)
+                if not getattr(block, "is_fluid", False):
+                    continue
+
+                height_ratio = 1.0
+                height_getter = getattr(block, "fluid_height_ratio", None)
+                if callable(height_getter):
+                    height_ratio = height_getter()
+                fluid_top = block_y + max(0.0, min(1.0, height_ratio))
+                entity_top = self.y + self.height
+                if self.y >= fluid_top or entity_top <= block_y:
+                    continue
+
+                touching += 1
+                vector_getter = getattr(block, "get_flow_vector", None)
+                if callable(vector_getter):
+                    fx, fy = vector_getter()
+                    flow_x += fx
+                    flow_y += fy
+
+        if touching == 0:
+            return False, 0.0, 0.0
+        return True, flow_x / touching, flow_y / touching
+
+    def _get_water_interaction(self) -> tuple[bool, float, float]:
+        return self._get_fluid_interaction()
+
+    def _is_player_like(self) -> bool:
+        return getattr(self, "entity_id", None) == "player" or hasattr(self, "client")
 
     def _check_collision_at(self, x: float, y: float) -> bool:
         min_x = math.floor(x)
@@ -274,10 +319,15 @@ class Entity:
             self.motion.y = self.jump_height
         elif self.flying:
             self.motion += Vector(0, self.jump_height * 1.5)
+        elif self._get_fluid_interaction()[0]:
+            self.swimming_up = True
+            self.motion.y = max(self.motion.y, self.jump_height * 0.08)
 
     def handle_shift(self):
         if self.flying:
             self.motion -= Vector(0, self.jump_height * 1.5)
+        elif self._get_fluid_interaction()[0]:
+            self.motion.y -= self.jump_height * 0.2
 
     def switch_sprint(self, mode = None):
         if mode is None:
@@ -290,6 +340,9 @@ class Entity:
         if self.flying:
             self.damping = 0.91 * 0.6
             return
+        if self.in_fluid:
+            self.damping = 0.8
+            return
 
         block_below = self._get_block_at(self.x, self.y - 0.05)
         if block_below is None or block_below.block_id == 'air':
@@ -298,17 +351,31 @@ class Entity:
             self.damping = 0.91 * block_below.friction
 
     def move_update(self):
+        self.in_fluid, flow_x, flow_y = self._get_fluid_interaction()
+        self.in_water = self.in_fluid
         if self.flying:
             self.motion.y *= 0.5
             if abs(self.motion.y) < 0.1:
                 self.motion.y = 0
+        elif self.in_fluid:
+            self.motion.x += flow_x * 0.018
+            self.motion.y += flow_y * 0.018
+            if self._is_player_like():
+                if self.swimming_up:
+                    self.motion.y += self.jump_height * 0.035
+                else:
+                    self.motion.y -= self.gravity * 0.08
+            else:
+                self.motion.y -= self.gravity * 0.2
+            if not self._is_player_like() and self.motion.y < 0.04:
+                self.motion.y += 0.025
         else:
             self.handle_gravity()
 
         if self.on_ground:
             self.flying = False
 
-        self.motion.y *= self.drag_vertical
+        self.motion.y *= 0.8 if self.in_fluid else self.drag_vertical
 
         self.update_damping()
         self.motion.x *= self.damping
@@ -316,3 +383,4 @@ class Entity:
             self.motion.x = 0
 
         self.collision_check(steps=4)
+        self.swimming_up = False

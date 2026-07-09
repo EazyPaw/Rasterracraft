@@ -81,4 +81,7 @@ class BlockItem(Material):
     @classmethod
     @client_method
     def get_texture(cls, size: float, client):
-        return cls.target_block.get_texture(16 * size)
+        if cls.target_block is None:
+            return None
+        block_size = max(1, int(round(16 * size)))
+        return cls.target_block().get_texture(block_size, client=client)

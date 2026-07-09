@@ -48,6 +48,8 @@ class Block(ABC):
         :param client:
         :return:
         """
+        size = max(1, int(round(size)))
+
         # 每帧都调用 get_texture_img：静态纹理返回缓存的同一 Surface（id 不变），
         # 动画纹理每帧返回不同的 frame subsurface（id 不同）
         tex = client.resources_manager.get_texture_img(cls._texture_path)
@@ -136,6 +138,347 @@ class Block(ABC):
         if nbt := self.parse_nbt():
             rst['nbt'] = nbt
         return rst
+
+
+class FluidBlock(Block):
+    solid = False
+    replaceable = True
+    light_attenuation = 1
+    has_transparent_pixels = True
+    is_fluid = True
+
+    _flow_texture_path = None
+    _texture_cache = {}
+    max_level = 7
+    source_level = 0
+    flow_speed_ticks = 5
+    can_create_source = True
+    source_surface_pixels = 14
+    flowing_surface_step_pixels = 2
+    horizontal_flow_range = 5
+
+    def __init__(self, level: int = 0, falling: bool = False, flow_direction: int = 0, nbt=None):
+        self.level = max(0, min(self.max_level, int(level)))
+        self.falling = bool(falling)
+        self.flow_direction = -1 if flow_direction < 0 else (1 if flow_direction > 0 else 0)
+        super().__init__(nbt)
+
+    @property
+    def is_source(self) -> bool:
+        return self.level == self.source_level and not self.falling
+
+    def is_same_fluid(self, block: Block) -> bool:
+        return type(block) is type(self)
+
+    def make_fluid(self, level: int, falling: bool = False, flow_direction: int = 0):
+        return type(self)(level, falling, flow_direction)
+
+    def get_texture_path(self) -> str:
+        if self.falling or self.level > self.source_level or self.flow_direction != 0:
+            return self._flow_texture_path or self._texture_path
+        if self.location is not None and not self._has_same_fluid_above():
+            left_ratio, right_ratio = self.get_surface_edge_ratios()
+            if abs(left_ratio - right_ratio) > 0.001:
+                return self._flow_texture_path or self._texture_path
+        return self._texture_path
+
+    def _has_same_fluid_above(self) -> bool:
+        if self.location is None:
+            return False
+        above = self.location.world.get_block(self.location.add(0, 1, 0))
+        return self.is_same_fluid(above)
+
+    def fluid_height_ratio(self) -> float:
+        if self.location is None:
+            return 1.0
+        if self._has_same_fluid_above() or self.falling:
+            return 1.0
+        pixels = self.source_surface_pixels - self.level * self.flowing_surface_step_pixels
+        return max(1.0 / 16.0, min(1.0, pixels / 16.0))
+
+    def water_height_ratio(self) -> float:
+        return self.fluid_height_ratio()
+
+    def get_surface_edge_ratios(self) -> tuple[float, float]:
+        own = self.fluid_height_ratio()
+        if self.location is None or self._has_same_fluid_above() or self.falling:
+            return own, own
+
+        world = self.location.world
+        x = int(self.location.x)
+        y = int(self.location.y)
+        z = int(self.location.z)
+        edges = []
+        for direction in (-1, 1):
+            neighbor = world.get_block(x + direction, y, z)
+            if self.is_same_fluid(neighbor):
+                edges.append((own + neighbor.fluid_height_ratio()) * 0.5)
+            else:
+                edges.append(own)
+        return edges[0], edges[1]
+
+    @client_method
+    def get_texture(self, size, client=None):
+        size = max(1, int(round(size)))
+        texture_path = self.get_texture_path()
+        base_texture = client.resources_manager.get_texture_img(texture_path)
+        if base_texture is None:
+            return None
+
+        frame_id = id(base_texture)
+        left_ratio, right_ratio = self.get_surface_edge_ratios()
+        left_h = max(1, min(size, int(round(size * left_ratio))))
+        right_h = max(1, min(size, int(round(size * right_ratio))))
+        tex_h = max(left_h, right_h)
+        cache_key = (texture_path, frame_id, size, left_h, right_h, self.flow_direction)
+        if cache_key in self._texture_cache:
+            return self._texture_cache[cache_key]
+
+        scaled = pygame.transform.scale(base_texture, (size, size)).convert_alpha()
+        if self.flow_direction < 0:
+            scaled = pygame.transform.flip(scaled, True, False)
+
+        texture = scaled.subsurface(pygame.Rect(0, size - tex_h, size, tex_h)).copy()
+        if left_h != right_h:
+            denom = max(1, size - 1)
+            for px in range(size):
+                t = px / denom
+                column_h = int(round(left_h + (right_h - left_h) * t))
+                clear_h = tex_h - max(1, min(tex_h, column_h))
+                if clear_h > 0:
+                    texture.fill((0, 0, 0, 0), (px, 0, 1, clear_h))
+
+        self._texture_cache[cache_key] = texture
+        if len(self._texture_cache) > 512:
+            self._texture_cache.pop(next(iter(self._texture_cache)))
+        return texture
+
+    def on_update(self):
+        if self.location is not None and hasattr(self.location.world, "schedule_fluid_tick"):
+            self.location.world.schedule_fluid_tick(self.location)
+
+    def tick_fluid(self):
+        if self.location is None:
+            return
+
+        world = self.location.world
+        x = int(self.location.x)
+        y = int(self.location.y)
+        z = int(self.location.z)
+
+        if not self.is_source:
+            source_level = self._get_new_source_level(world, x, y, z)
+            if source_level is not None:
+                self._replace_self(self.make_fluid(source_level, False, 0))
+                return
+
+            support = self._get_supporting_flow(world, x, y, z)
+            if support is None:
+                from resources.server.blocks import AIR
+                world.set_block(AIR(), self.location, send_packet=True, block_update=True)
+                return
+
+            target_level, target_falling, target_direction = support
+            if (
+                target_level != self.level
+                or target_falling != self.falling
+                or target_direction != self.flow_direction
+            ):
+                self._replace_self(self.make_fluid(target_level, target_falling, target_direction))
+                return
+
+        flowed_down = self._try_flow_to(world, x, y - 1, z, self.source_level, True, 0)
+        if flowed_down:
+            self._set_own_direction(0)
+            if not self.is_source:
+                return
+        if self.falling and self.is_same_fluid(world.get_block(x, y - 1, z)):
+            self._set_own_direction(0)
+            return
+        below = world.get_block(x, y - 1, z)
+        if (
+            not self.is_source
+            and not self.falling
+            and self.is_same_fluid(below)
+            and below.falling
+        ):
+            self._set_own_direction(0)
+            return
+
+        if self.level >= self.max_level:
+            return
+
+        flow_dirs = self._get_horizontal_flow_directions(world, x, y, z)
+        visible_dirs = [direction for _, _, direction in flow_dirs if direction != 0]
+        self._set_own_direction(visible_dirs[0] if len(visible_dirs) == 1 and len(flow_dirs) == 1 else 0)
+        for dx, dz, direction in flow_dirs:
+            self._try_flow_to(world, x + dx, y, z + dz, self.level + 1, False, direction)
+
+    def get_flow_vector(self) -> tuple[float, float]:
+        horizontal = float(self.flow_direction)
+        vertical = -1.0 if self.falling else 0.0
+        if horizontal == 0.0 and vertical == 0.0 and self.location is not None:
+            x = int(self.location.x)
+            y = int(self.location.y)
+            z = int(self.location.z)
+            for dx, dz, direction in self._iter_horizontal_neighbors(z):
+                if direction == 0:
+                    continue
+                neighbor = self.location.world.get_block(x + dx, y, z + dz)
+                if self.is_same_fluid(neighbor) and neighbor.level < self.level:
+                    horizontal -= direction
+        return horizontal, vertical
+
+    def _replace_self(self, fluid: 'FluidBlock'):
+        self.location.world.set_block(fluid, self.location, send_packet=True, block_update=True)
+
+    def _set_own_direction(self, direction: int):
+        direction = -1 if direction < 0 else (1 if direction > 0 else 0)
+        if self.flow_direction == direction:
+            return
+        self.flow_direction = direction
+        world = self.location.world
+        world.mark_chunk_dirty(int(self.location.x) // 16)
+        for player in world.server.players:
+            if player.is_loading_position(self.location.x, self.location.y, self.location.z):
+                world.server.send_client_socket(player, self, "BlockUpdate")
+
+    def _can_destroy_with_fluid(self, block: Block) -> bool:
+        if getattr(block, "block_id", None) == "air" or self.is_same_fluid(block):
+            return False
+        if getattr(block, "is_fluid", False):
+            return False
+        return bool(getattr(block, "breakable", False) and not getattr(block, "solid", True))
+
+    def _can_flow_into(self, block: Block) -> bool:
+        if self.is_same_fluid(block):
+            return True
+        if getattr(block, "is_fluid", False):
+            return False
+        return (
+            getattr(block, "block_id", None) == "air"
+            or getattr(block, "replaceable", False)
+            or self._can_destroy_with_fluid(block)
+        )
+
+    def _iter_horizontal_neighbors(self, z: int):
+        for dx, dz, direction in ((-1, 0, -1), (1, 0, 1), (0, -1, 0), (0, 1, 0)):
+            nz = z + dz
+            if nz in (0, 1):
+                yield dx, dz, direction
+
+    def _try_flow_to(
+        self,
+        world,
+        x: int,
+        y: int,
+        z: int,
+        level: int,
+        falling: bool,
+        direction: int,
+    ) -> bool:
+        if y < 0 or y >= world.attribute.MAX_BUILD_HEIGHT or z not in (0, 1):
+            return False
+        if not world.is_position_loaded(x, y, z):
+            return False
+
+        level = max(self.source_level, min(self.max_level, int(level)))
+        target = world.get_block(x, y, z)
+        if self.is_same_fluid(target):
+            should_replace = False
+            if falling and not target.falling:
+                should_replace = not target.is_source
+            elif target.falling == falling and target.level > level:
+                should_replace = True
+            elif target.falling and not falling and target.level >= level:
+                should_replace = True
+            if not should_replace:
+                return False
+        elif not self._can_flow_into(target):
+            return False
+        elif self._can_destroy_with_fluid(target):
+            target.on_break()
+
+        world.set_block(self.make_fluid(level, falling, direction), x, y, z, send_packet=True, block_update=True)
+        return True
+
+    def _get_new_source_level(self, world, x: int, y: int, z: int) -> int | None:
+        if not self.can_create_source:
+            return None
+        below = world.get_block(x, y - 1, z)
+        if not (getattr(below, "solid", False) or self.is_same_fluid(below)):
+            return None
+        source_neighbors = 0
+        for dx, dz, _ in self._iter_horizontal_neighbors(z):
+            neighbor = world.get_block(x + dx, y, z + dz)
+            if self.is_same_fluid(neighbor) and neighbor.is_source:
+                source_neighbors += 1
+        if source_neighbors >= 2:
+            return self.source_level
+        return None
+
+    def _get_supporting_flow(self, world, x: int, y: int, z: int) -> tuple[int, bool, int] | None:
+        above = world.get_block(x, y + 1, z)
+        if self.is_same_fluid(above):
+            return self.source_level, True, 0
+
+        best: tuple[int, bool, int] | None = None
+        for dx, dz, _ in self._iter_horizontal_neighbors(z):
+            neighbor = world.get_block(x + dx, y, z + dz)
+            if not self.is_same_fluid(neighbor):
+                continue
+            candidate_level = neighbor.level + 1
+            if candidate_level > self.max_level:
+                continue
+            candidate_direction = -dx if dx != 0 else 0
+            candidate = (candidate_level, False, candidate_direction)
+            if best is None or candidate_level < best[0]:
+                best = candidate
+        return best
+
+    def _get_horizontal_flow_directions(self, world, x: int, y: int, z: int) -> list[tuple[int, int, int]]:
+        candidates = [
+            (dx, dz, direction)
+            for dx, dz, direction in self._iter_horizontal_neighbors(z)
+            if self._can_flow_horizontally(world, x + dx, y, z + dz, self.level + 1)
+        ]
+        if len(candidates) <= 1:
+            return candidates
+
+        drop_distances = {
+            candidate: self._distance_to_drop(world, x, y, z, candidate[0], candidate[1])
+            for candidate in candidates
+        }
+        best_distance = min(drop_distances.values())
+        if best_distance < 999:
+            return [candidate for candidate in candidates if drop_distances[candidate] == best_distance]
+        return candidates
+
+    def _can_flow_horizontally(self, world, x: int, y: int, z: int, level: int) -> bool:
+        if z not in (0, 1):
+            return False
+        if not world.is_position_loaded(x, y, z):
+            return False
+        target = world.get_block(x, y, z)
+        if self.is_same_fluid(target):
+            return target.falling or target.level > level
+        return self._can_flow_into(target)
+
+    def _distance_to_drop(self, world, x: int, y: int, z: int, dx: int, dz: int) -> int:
+        for distance in range(1, self.horizontal_flow_range + 1):
+            nx = x + dx * distance
+            nz = z + dz * distance
+            if nz not in (0, 1):
+                break
+            if not world.is_position_loaded(nx, y, nz):
+                break
+            target = world.get_block(nx, y, nz)
+            if not (self.is_same_fluid(target) or self._can_flow_into(target)):
+                break
+            below = world.get_block(nx, y - 1, nz)
+            if self._can_flow_into(below) and not self.is_same_fluid(below):
+                return distance
+        return 999
 
 
 

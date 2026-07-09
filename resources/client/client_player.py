@@ -18,6 +18,7 @@ class ClientPlayer(Entity):
     def __init__(self, client: 'Client'):
         super().__init__(0, 15, client.client_world)
         self.uuid = uuid.UUID('{00000000-0000-0000-0000-000000000000}')
+        self.entity_id = "player"
         self.client = client
         self.move_speed = 0.3
         self.damping = 0.95
@@ -30,16 +31,19 @@ class ClientPlayer(Entity):
         self.skeleton = PlayerSkeleton(client, self)
         self.skeleton.x = self.client.render.SCREEN_WIDTH / 2
         self.skeleton.y = self.client.render.SCREEN_HEIGHT / 2
-        for i in range(8):
+        for i in range(4):
             self.inventory.set_item(i, ItemStack(GLOWSTONE(), 64))
         for i in range(8, 16):
             self.inventory.set_item(i, ItemStack(SAND(), 64))
+        for i in range(4, 8):
+            self.inventory.set_item(i, ItemStack(WATER(), 64))
         self.selected_slot = 0
         self.game_mode = CreativeMode(self)
 
     def move_update(self):
         keys = pygame.key.get_pressed()
         self.sneaking = (keys[pygame.K_LSHIFT] or keys[pygame.K_s]) and not self.flying
+        self.swimming_up = keys[pygame.K_SPACE] and not self.flying
 
         super().move_update()
 

@@ -495,13 +495,12 @@ class ICE(Block):
     break_sound = 'dig.glass'
     friction = 0.9
 
-class WATER(Block):
+class WATER(FluidBlock):
     block_id = 'water'
     name = 'water'
     _texture_path = 'blocks.water_still'
-    solid = False
-    replaceable = True
-    light_attenuation = 1
+    _flow_texture_path = 'blocks.water_flow'
+    _texture_cache = {}
 
 class SUGAR_CANE(Plant):
     block_id = 'sugar_cane'

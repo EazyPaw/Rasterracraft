@@ -297,6 +297,8 @@ class World:
         self.world_time = 0
         self.entities: dict[str, Entity] = {}
         self._entities_lock = threading.RLock()
+        self._scheduled_fluid_ticks: set[tuple[int, int, int]] = set()
+        self._fluid_lock = threading.RLock()
 
     def mark_chunk_dirty(self, rx: int):
         if getattr(self.server, "save_id", None):
@@ -412,6 +414,74 @@ class World:
                 }
                 self.server.send_client_socket(player, light_update, "LightUpdate")
 
+    def is_position_loaded(self, x: int, y: int, z: int = 0) -> bool:
+        if y < 0 or y >= self.attribute.MAX_BUILD_HEIGHT or z not in (0, 1):
+            return False
+        return int(x) // 16 in self.regions
+
+    def schedule_fluid_tick(self, x_loc: int | Location, y: int = None, z: int = None):
+        x, y, z = decide_x_or_loc(x_loc, y, z)
+        x, y, z = int(x), int(y), int(z)
+        if not self.is_position_loaded(x, y, z):
+            return
+        with self._fluid_lock:
+            self._scheduled_fluid_ticks.add((x, y, z))
+
+    def schedule_fluid_around(self, x_loc: int | Location, y: int = None, z: int = None):
+        x, y, z = decide_x_or_loc(x_loc, y, z)
+        x, y, z = int(x), int(y), int(z)
+        for nx, ny, nz in (
+            (x, y, z),
+            (x + 1, y, z),
+            (x - 1, y, z),
+            (x, y + 1, z),
+            (x, y - 1, z),
+            (x, y, 1 - z),
+        ):
+            self.schedule_fluid_tick(nx, ny, nz)
+
+    def schedule_chunk_fluids(self, rx: int):
+        from resources.server.block_class import FluidBlock
+
+        chunk = self.regions.get(rx)
+        if chunk is None:
+            return
+        for local_x in range(chunk.region_array.shape[0]):
+            world_x = rx * 16 + local_x
+            for y in range(chunk.region_array.shape[1]):
+                for z in range(chunk.region_array.shape[2]):
+                    if isinstance(chunk.region_array[local_x, y, z], FluidBlock):
+                        self.schedule_fluid_tick(world_x, y, z)
+
+    def schedule_chunk_and_boundary_fluids(self, rx: int):
+        for chunk_rx in (rx - 1, rx, rx + 1):
+            self.schedule_chunk_fluids(chunk_rx)
+
+    def tick_fluids(self, max_updates: int = 4096):
+        from resources.server.block_class import FluidBlock
+
+        with self._fluid_lock:
+            if not self._scheduled_fluid_ticks:
+                return
+            positions = sorted(self._scheduled_fluid_ticks)
+            self._scheduled_fluid_ticks.clear()
+            if len(positions) > max_updates:
+                overflow = positions[max_updates:]
+                self._scheduled_fluid_ticks.update(overflow)
+                positions = positions[:max_updates]
+
+        for x, y, z in positions:
+            if not self.is_position_loaded(x, y, z):
+                continue
+            block = self.get_block(x, y, z)
+            if isinstance(block, FluidBlock):
+                speed = max(1, int(getattr(block, "flow_speed_ticks", 1)))
+                server_tick = int(getattr(self.server, "server_ticks", 0))
+                if speed > 1 and server_tick % speed != 0:
+                    self.schedule_fluid_tick(x, y, z)
+                    continue
+                block.tick_fluid()
+
     def spawn_particle(self, particle: Particle, players=None):
         if players is None:
             players = self.server.players
@@ -497,7 +567,7 @@ class World:
         x, y, z = decide_x_or_loc(x_loc, y, z)
         x, y, z = int(x), int(y), int(z)
         chunk = self.regions.get(x // 16)
-        if 0 < y < self.attribute.MAX_BUILD_HEIGHT:
+        if 0 <= y < self.attribute.MAX_BUILD_HEIGHT and z in (0, 1) and chunk is not None:
             rela_x = x % 16
             block = cast(Block, chunk.region_array[rela_x, y, z]) # 强迫症写法，为了避免烦人的IDE警报
             return block
@@ -557,19 +627,26 @@ class World:
         :return:
         """
         x, y, z = decide_x_or_loc(x_loc, y, z)
+        x, y, z = int(x), int(y), int(z)
+        if y < 0 or y >= self.attribute.MAX_BUILD_HEIGHT or z not in (0, 1):
+            return set()
+        placed_block = block
         block.location = Location(self, x, y, z)
         chunk = self.regions.get(x // 16)
+        if chunk is None:
+            return set()
         rela_x = x % 16
+        old_block = cast(Block, chunk.region_array[rela_x][y][z])
         chunk.region_array[rela_x][y][z] = block
         self.mark_chunk_dirty(chunk.x)
+        self.schedule_fluid_around(x, y, z)
         # 重算整个区块光照（含跨区块传播）
         changed_light_chunks = self.recalculate_light_for_chunks({chunk.x})
         if send_packet:
             for player in self.server.players:
                 if player.is_loading_position(x, y, z):
                     self.server.send_client_socket(player, block, "BlockUpdate")
-                    self.server.send_client_socket(player, chunk, "Chunk")
-            self.send_light_updates(changed_light_chunks - {chunk.x})
+            self.send_light_updates(changed_light_chunks)
         if block_update:
             # 收集需要触发 on_update 的邻居坐标
             neighbors = [
@@ -584,17 +661,19 @@ class World:
                 neighbors.append((x, y, 0))
 
             for nx, ny, nz in neighbors:
-                block = self.get_block(nx, ny, nz)
-                old_nbt = block.parse_nbt()  # 更新前快照
-                block.on_update()
-                new_nbt = block.parse_nbt()  # 更新后快照
+                neighbor_block = self.get_block(nx, ny, nz)
+                old_nbt = neighbor_block.parse_nbt()  # 更新前快照
+                neighbor_block.on_update()
+                new_nbt = neighbor_block.parse_nbt()  # 更新后快照
 
                 # 若方块属性确实发生了变化，向加载了该位置的客户端发送单方块更新
                 if old_nbt != new_nbt:
                     self.mark_chunk_dirty(nx // 16)
                     for player in self.server.players:
                         if player.is_loading_position(nx, ny, nz):
-                            self.server.send_client_socket(player, block, "BlockUpdate")
+                            self.server.send_client_socket(player, neighbor_block, "BlockUpdate")
+        if getattr(old_block, "is_fluid", False) or getattr(placed_block, "is_fluid", False):
+            self.schedule_fluid_around(x, y, z)
 
         return changed_light_chunks
 
@@ -614,7 +693,9 @@ class World:
                         return {rx}
                     self.regions[rx] = saved_chunk
                     self.mark_chunk_dirty(rx)
-                    return self.recalculate_light_for_chunks({rx})
+                    changed = self.recalculate_light_for_chunks({rx})
+                    self.schedule_chunk_and_boundary_fluids(rx)
+                    return changed
 
         logging.debug(f"Generating {self.id_name} chunk {rx}")
         y_max = self.attribute.MAX_BUILD_HEIGHT
@@ -638,7 +719,9 @@ class World:
             self.regions[rx] = new_chunk
             self.mark_chunk_dirty(rx)
             # 使用世界上下文重新计算光照以支持跨区块传播
-            return self.recalculate_light_for_chunks({rx})
+            changed = self.recalculate_light_for_chunks({rx})
+            self.schedule_chunk_and_boundary_fluids(rx)
+            return changed
 
     def break_block(self, x_loc: int | Location, y: int = None, z: int = None):
         x, y, z = decide_x_or_loc(x_loc, y, z)

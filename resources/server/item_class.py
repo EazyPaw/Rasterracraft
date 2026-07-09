@@ -62,8 +62,9 @@ class ItemStack:
 
     @client_method
     def get_texture(self, scale: float, client, shadow=False, multiply=False):
-        if (shadow, multiply) in self.material.texture_cache:
-            return self.material.texture_cache[(shadow, multiply)]
+        cache_key = (round(scale, 4), shadow, multiply)
+        if cache_key in self.material.texture_cache:
+            return self.material.texture_cache[cache_key]
 
         px_scale = client.render.gui_scale
 
@@ -94,7 +95,7 @@ class ItemStack:
 
             result.convert_alpha()
 
-            self.material.texture_cache[(shadow, multiply)] = result
+            self.material.texture_cache[cache_key] = result
             
             return result
         

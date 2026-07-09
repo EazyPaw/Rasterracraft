@@ -27,6 +27,8 @@ class ClientWorld:
         self._render_chunk_versions: dict[int, int] = {}
         self._chunk_state_lock = threading.RLock()
         self._loading_chunks: set[int] = set()
+        self._chunk_load_versions: dict[int, int] = {}
+        self._chunk_load_counter = 0
         self._pending_chunk_block_updates: dict[int, dict[tuple[int, int, int], Block]] = {}
         self.entities: dict[str, ClientEntity] = {}
         self._entities_lock = threading.RLock()
@@ -35,12 +37,17 @@ class ClientWorld:
         self._render_revision += 1
         self._render_chunk_versions[rx] = self._render_revision
 
-    def begin_chunk_load(self, rx: int) -> None:
+    def begin_chunk_load(self, rx: int) -> int:
         with self._chunk_state_lock:
+            self._chunk_load_counter += 1
+            load_version = self._chunk_load_counter
+            self._chunk_load_versions[rx] = load_version
             self._loading_chunks.add(rx)
+            return load_version
 
-    def load_chunk(self, rx: int, chunk: dict[str, dict]):
-        self.begin_chunk_load(rx)
+    def load_chunk(self, rx: int, chunk: dict[str, dict], load_version: int | None = None):
+        if load_version is None:
+            load_version = self.begin_chunk_load(rx)
         chunk_array = np.full((16, self.y_max, 2), AIR(), dtype=Block)
         logging.debug(f"Loading chunk {rx}")
         for key, value in chunk.items():
@@ -52,6 +59,8 @@ class ClientWorld:
             chunk_array[x][y][z] = block
             time.sleep(0)  # 释放GIL，让出CPU，不然会导致渲染卡顿
         with self._chunk_state_lock:
+            if self._chunk_load_versions.get(rx) != load_version:
+                return
             pending_updates = self._pending_chunk_block_updates.pop(rx, {})
             for (world_x, y, z), block in pending_updates.items():
                 block.location = Location(self, world_x, y, z)
@@ -62,19 +71,25 @@ class ClientWorld:
 
     def load_lights(self, rx: int, light_map: dict[str, int],
                     sky_light_map: dict[str, int] | None = None,
-                    block_light_map: dict[str, int] | None = None):
+                    block_light_map: dict[str, int] | None = None,
+                    load_version: int | None = None):
         light_array = np.full((16, self.y_max), 0, dtype=np.uint8)
         for key, value in light_map.items():
             x, y = key.split(",")
             x, y = int(x), int(y)
             light_array[x][y] = value
             time.sleep(0) # 同理
-        self.light_map[rx] = light_array
-        if sky_light_map is not None:
-            self.sky_light_map[rx] = self._dict_to_light_array(sky_light_map)
-        if block_light_map is not None:
-            self.block_light_map[rx] = self._dict_to_light_array(block_light_map)
-        self._mark_render_chunk_dirty(rx)
+        sky_array = self._dict_to_light_array(sky_light_map) if sky_light_map is not None else None
+        block_array = self._dict_to_light_array(block_light_map) if block_light_map is not None else None
+        with self._chunk_state_lock:
+            if load_version is not None and self._chunk_load_versions.get(rx) != load_version:
+                return
+            self.light_map[rx] = light_array
+            if sky_array is not None:
+                self.sky_light_map[rx] = sky_array
+            if block_array is not None:
+                self.block_light_map[rx] = block_array
+            self._mark_render_chunk_dirty(rx)
 
     def update_lights(self, rx: int, light_map: dict[str, int],
                       sky_light_map: dict[str, int] | None = None,
@@ -104,15 +119,18 @@ class ClientWorld:
             light_array[int(x)][int(y)] = value
         return light_array
 
-    def load_biomes(self, rx: int, biome_dict: dict[str, str]):
+    def load_biomes(self, rx: int, biome_dict: dict[str, str], load_version: int | None = None):
         """从服务器数据包加载整个区块的生物群系数据"""
         biome_array = np.full((16, self.y_max), "void", dtype="<U32")
         for key, biome_id in biome_dict.items():
             x_str, y_str = key.split(",")
             x, y = int(x_str), int(y_str)
             biome_array[x][y] = biome_id
-        self.biome_map[rx] = biome_array
-        self._mark_render_chunk_dirty(rx)
+        with self._chunk_state_lock:
+            if load_version is not None and self._chunk_load_versions.get(rx) != load_version:
+                return
+            self.biome_map[rx] = biome_array
+            self._mark_render_chunk_dirty(rx)
 
     def update_biomes(self, rx: int, biome_dict: dict[str, str]):
         """增量更新生物群系数据（只更新变化的部分）"""
@@ -141,11 +159,15 @@ class ClientWorld:
 
     def unload_chunk(self, x: int):
         """卸载区块，同时清理方塊、光照和生物群系数据"""
-        self._regions.pop(x, None)
-        self.light_map.pop(x, None)
-        self.sky_light_map.pop(x, None)
-        self.block_light_map.pop(x, None)
-        self.biome_map.pop(x, None)
+        with self._chunk_state_lock:
+            self._regions.pop(x, None)
+            self.light_map.pop(x, None)
+            self.sky_light_map.pop(x, None)
+            self.block_light_map.pop(x, None)
+            self.biome_map.pop(x, None)
+            self._loading_chunks.discard(x)
+            self._chunk_load_versions.pop(x, None)
+            self._pending_chunk_block_updates.pop(x, None)
         with self._entities_lock:
             for uuid, entity in list(self.entities.items()):
                 if int(entity.x // 16) == x:

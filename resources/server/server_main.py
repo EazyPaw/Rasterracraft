@@ -216,6 +216,8 @@ class Server:
                 )
         self.load_chunks()
         for world in self.worlds.values():
+            world.tick_fluids()
+        for world in self.worlds.values():
             world.update_entities()
         self.unload_far_chunks()
         if self.save_id and self.server_ticks % self.autosave_interval_ticks == 0:

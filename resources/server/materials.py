@@ -21,3 +21,8 @@ class SAND(BlockItem):
     name_id = "sand"
     name = "sand"
     target_block = blocks.SAND
+
+class WATER(BlockItem):
+    name_id = "water"
+    name = "water"
+    target_block = blocks.WATER
