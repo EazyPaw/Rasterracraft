@@ -62,6 +62,7 @@ class Client:
         self.max_chat_messages = 100
         self.chat_gui = None  # ChatGUI 在步骤 6 初始化
         self.client_player: ClientPlayer | None = None
+        self.server_player_uuid: str | None = None
         self.game_manager = GameManager(self)
         self.particle_manager = ParticleManager(self)
         self.game_thread = threading.Thread(target=self.game_manager.start_game_loop, name="InGameThread")
@@ -250,6 +251,7 @@ class Client:
         self.client_world = client_world.ClientWorld(self)
         self.render.client_world = self.client_world
         self.client_player = None
+        self.server_player_uuid = None
         self.chat_gui = None
         self.chat_messages.clear()
         self.particle_manager = ParticleManager(self)

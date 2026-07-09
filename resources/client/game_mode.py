@@ -7,6 +7,7 @@ from resources.client.GUI.inventory.hotbar import HotBar
 from resources.server.block_class import Block
 from resources.server.blocks import AIR
 from resources.server.entity import Entity
+from resources.server.location import Location
 from abc import ABC
 
 if TYPE_CHECKING:
@@ -74,8 +75,7 @@ class CreativeMode(GameMode):
         location = self.player.choosing_block.location
         block = self.player.client.client_world.get_block(location)
         if block.breakable:
-            self.player.client.client_world.break_block(location)
-            self.player.client.sent_packet(self.player.client.client_world.get_block(location), 'BreakBlock')
+            self.player.client.sent_packet(block, 'BreakBlock')
 
 
     def right_click_on_block(self, block: Block):
@@ -90,11 +90,16 @@ class CreativeMode(GameMode):
             print(type(item.material))
         logging.debug(f"Placing block {new_block.name} at {location}")
         if not self.player.choosing_block.on_right_click():
+            place_location = None
             if isinstance(self.player.client.client_world.get_block(location), AIR):
-                new_block.place_at(location)
-                self.player.client.resources_manager.play_sound(new_block.place_sound)
-                self.player.client.sent_packet(new_block, 'PlaceBlock')
-            elif new_block.place_at(location.add(0, 0, -1)):
+                place_location = location
+            else:
+                other_z = 1 if location.z == 0 else 0
+                alt_location = Location(location.world, location.x, location.y, other_z)
+                if isinstance(self.player.client.client_world.get_block(alt_location), AIR):
+                    place_location = alt_location
+            if place_location is not None:
+                new_block.location = place_location
                 self.player.client.resources_manager.play_sound(new_block.place_sound)
                 self.player.client.sent_packet(new_block, 'PlaceBlock')
 

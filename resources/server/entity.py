@@ -10,6 +10,7 @@ from resources.server.utils import is_safe_value
 class Entity:
     def __init__(self, x, y, world):
         self.uuid = uuid.uuid4()
+        self.entity_id = "null"
         self.x = x
         self.y = y
         self.world = world
@@ -29,6 +30,7 @@ class Entity:
         self.interact_range = 3.5
         self.facing = 0  # 0: 左边 1: 右边
         self.sprinting = False
+        self.removed = False
 
     def teleport_to(self, x, y, world = None):
         self.x = x
@@ -50,6 +52,29 @@ class Entity:
     def parse_nbt(self) -> str:
         nbt = self.get_safe_attributes()
         return str(nbt)
+
+    def to_entity_data(self) -> dict:
+        data = {
+            'uuid': str(self.uuid),
+            'entity_id': self.entity_id,
+            'x': self.x,
+            'y': self.y,
+            'width': self.width,
+            'height': self.height,
+            'motion': {'x': self.motion.x, 'y': self.motion.y},
+            'facing': self.facing,
+            'sneaking': self.sneaking,
+            'sprinting': self.sprinting,
+            'on_ground': self.on_ground,
+        }
+        if hasattr(self, 'z'):
+            data['z'] = getattr(self, 'z')
+        if hasattr(self, 'name'):
+            data['name'] = getattr(self, 'name')
+        block = getattr(self, 'block', None)
+        if block is not None:
+            data['block_data'] = block.to_dict()
+        return data
 
     def write_nbt(self, nbt: str):
         nbt = ast.literal_eval(nbt)
@@ -291,4 +316,3 @@ class Entity:
             self.motion.x = 0
 
         self.collision_check(steps=4)
-

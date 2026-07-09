@@ -51,6 +51,9 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         #     'x': obj.x,
         #     'y': obj.y,
         # }
+        client.server_player_uuid = packet.get('uuid', getattr(client, "server_player_uuid", None))
+        if packet.get('name') and client.client_player is not None:
+            client.client_player.name = packet['name']
         client.client_player.x = packet['x']
         client.client_player.y = packet['y']
     elif packet['__class__'] == 'BreakBlock':
@@ -74,7 +77,7 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         world = client.client_world
         if 0 <= packet['y'] < world.y_max:
             block = get_block_by_id(packet['block_id'])
-            block.place_at(Location(world, packet['x'], packet['y'], packet['z']))
+            world.set_block(block, packet['x'], packet['y'], packet['z'])
     elif packet['__class__'] == 'BlockUpdate':
         # {
         #     '__class__': 'BlockUpdate',
@@ -118,6 +121,10 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         client.client_world.world_time = packet.get('time', 0) % 24000
     elif packet['__class__'] == 'Particle':
         client.particle_manager.handle_packet(packet)
+    elif packet['__class__'] in ('EntitySpawn', 'EntityUpdate'):
+        client.client_world.update_entity(packet)
+    elif packet['__class__'] == 'EntityRemove':
+        client.client_world.remove_entity(packet.get('uuid', ''))
     elif packet['__class__'] == 'ChatMessage':
         # {
         #     '__class__': 'ChatMessage',

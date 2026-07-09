@@ -1,4 +1,5 @@
 import logging
+import math
 import threading
 import traceback
 from typing import Any
@@ -10,6 +11,7 @@ import resources.server.biome as biome
 from resources.server import save_manager
 from resources.server.block_class import Block
 from resources.server.blocks import AIR
+from resources.server.entity import Entity
 from resources.server.generator import Generator
 from resources.server.location import Location, decide_x_or_loc
 from resources.server.particles import BlockBreakParticleEffect, Particle, get_particle_by_id
@@ -293,6 +295,8 @@ class World:
         self.dirty_chunks: set[int] = set()
         self._dirty_lock = threading.Lock()
         self.world_time = 0
+        self.entities: dict[str, Entity] = {}
+        self._entities_lock = threading.RLock()
 
     def mark_chunk_dirty(self, rx: int):
         if getattr(self.server, "save_id", None):
@@ -446,6 +450,45 @@ class World:
             players=players,
         )
 
+    def spawn_entity(self, entity: Entity):
+        entity.world = self
+        entity.removed = False
+        entity_uuid = str(entity.uuid)
+        with self._entities_lock:
+            self.entities[entity_uuid] = entity
+        for player in self.server.players:
+            if player.is_loading_position(math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)):
+                self.server.send_client_socket(player, entity, "EntitySpawn")
+
+    def remove_entity(self, entity: Entity | str):
+        entity_uuid = str(entity.uuid) if isinstance(entity, Entity) else str(entity)
+        with self._entities_lock:
+            removed = self.entities.pop(entity_uuid, None)
+        if removed is not None:
+            removed.removed = True
+            for player in self.server.players:
+                self.server.send_client_socket(player, {'uuid': entity_uuid}, "EntityRemove")
+
+    def update_entities(self):
+        with self._entities_lock:
+            entities = list(self.entities.values())
+        for entity in entities:
+            if entity.removed:
+                continue
+            entity.move_update()
+            if entity.removed:
+                continue
+            for player in self.server.players:
+                if player.is_loading_position(math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)):
+                    self.server.send_client_socket(player, entity, "EntityUpdate")
+
+    def send_entities_in_chunk_to_player(self, player, rx: int):
+        with self._entities_lock:
+            entities = list(self.entities.values())
+        for entity in entities:
+            if math.floor(entity.x) // 16 == rx:
+                self.server.send_client_socket(player, entity, "EntitySpawn")
+
     def get_block(self, x_loc: int | Location, y: int = None, z: int = None) -> Block:
         """
         获取在某位置的方块
@@ -524,6 +567,7 @@ class World:
         if send_packet:
             for player in self.server.players:
                 if player.is_loading_position(x, y, z):
+                    self.server.send_client_socket(player, block, "BlockUpdate")
                     self.server.send_client_socket(player, chunk, "Chunk")
             self.send_light_updates(changed_light_chunks - {chunk.x})
         if block_update:

@@ -379,13 +379,40 @@ class DARK_OAK_LOG(Log):
     name = 'dark oak log'
     _texture_path = 'blocks.log_big_oak'
 
-class SAND(Block):
+class GravityBlock(Block):
+    def place_at(self, location: Location) -> bool:
+        placed = super().place_at(location)
+        if placed and hasattr(location.world, "spawn_entity"):
+            self.on_update()
+        return placed
+
+    def on_update(self):
+        if self.location is None:
+            return
+        below = self.location.world.get_block(self.location.add(0, -1, 0))
+        if getattr(below, "solid", False):
+            return
+        self._start_falling()
+
+    def _start_falling(self):
+        if self.location is None or not hasattr(self.location.world, "spawn_entity"):
+            return
+        from resources.server.entities.falling_block import FallingBlock
+
+        world = self.location.world
+        x, y, z = int(self.location.x), int(self.location.y), int(self.location.z)
+        world.set_block(AIR(), self.location, send_packet=True, block_update=True)
+        falling = FallingBlock(x + 0.01, y, z, world, self)
+        world.spawn_entity(falling)
+
+
+class SAND(GravityBlock):
     block_id = 'sand'
     name = 'sand'
     _texture_path = 'blocks.sand'
     break_sound = "dig.sand"
 
-class RED_SAND(Block):
+class RED_SAND(GravityBlock):
     block_id = 'red_sand'
     name = 'red sand'
     _texture_path = 'blocks.red_sand'
@@ -401,7 +428,7 @@ class RED_SANDSTONE(Block):
     name = 'red sandstone'
     _texture_path = 'blocks.red_sandstone_normal'
 
-class GRAVEL(Block):
+class GRAVEL(GravityBlock):
     block_id = 'gravel'
     name = 'gravel'
     _texture_path = 'blocks.gravel'

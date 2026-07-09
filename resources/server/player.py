@@ -11,6 +11,7 @@ class Player(Entity):
     def __init__(self, x, y, world):
         super().__init__(x, y, world)
         self.world: World = world
+        self.entity_id = "player"
         self.loading_regions = []
         self.name = "Player_" + self.uuid.hex[:8]
         self.width = 0.3

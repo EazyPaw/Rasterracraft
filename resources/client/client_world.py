@@ -6,6 +6,7 @@ import time
 
 import numpy as np
 
+from resources.client.client_entity import ClientEntity
 from resources.server.block_class import Block
 from resources.server.blocks import get_block_by_id, AIR
 from resources.server.location import Location, decide_x_or_loc
@@ -27,6 +28,8 @@ class ClientWorld:
         self._chunk_state_lock = threading.RLock()
         self._loading_chunks: set[int] = set()
         self._pending_chunk_block_updates: dict[int, dict[tuple[int, int, int], Block]] = {}
+        self.entities: dict[str, ClientEntity] = {}
+        self._entities_lock = threading.RLock()
 
     def _mark_render_chunk_dirty(self, rx: int) -> None:
         self._render_revision += 1
@@ -143,7 +146,33 @@ class ClientWorld:
         self.sky_light_map.pop(x, None)
         self.block_light_map.pop(x, None)
         self.biome_map.pop(x, None)
+        with self._entities_lock:
+            for uuid, entity in list(self.entities.items()):
+                if int(entity.x // 16) == x:
+                    self.entities.pop(uuid, None)
         self._mark_render_chunk_dirty(x)
+
+    def update_entity(self, packet: dict):
+        entity_uuid = str(packet.get('uuid', ''))
+        if not entity_uuid:
+            return
+        if entity_uuid == getattr(self.client, "server_player_uuid", None):
+            self.remove_entity(entity_uuid)
+            return
+        with self._entities_lock:
+            entity = self.entities.get(entity_uuid)
+            if entity is None:
+                self.entities[entity_uuid] = ClientEntity(self.client, packet)
+            else:
+                entity.apply_packet(packet)
+
+    def remove_entity(self, entity_uuid: str):
+        with self._entities_lock:
+            self.entities.pop(str(entity_uuid), None)
+
+    def iter_entities(self):
+        with self._entities_lock:
+            return list(self.entities.values())
 
     def get_block(self, x_loc: int | Location, y: int | None = None, z: int | None = None) -> Block:
         x, y, z = decide_x_or_loc(x_loc, y, z)

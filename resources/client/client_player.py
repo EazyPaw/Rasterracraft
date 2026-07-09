@@ -30,8 +30,10 @@ class ClientPlayer(Entity):
         self.skeleton = PlayerSkeleton(client, self)
         self.skeleton.x = self.client.render.SCREEN_WIDTH / 2
         self.skeleton.y = self.client.render.SCREEN_HEIGHT / 2
-        for i in range(16):
+        for i in range(8):
             self.inventory.set_item(i, ItemStack(GLOWSTONE(), 64))
+        for i in range(8, 16):
+            self.inventory.set_item(i, ItemStack(SAND(), 64))
         self.selected_slot = 0
         self.game_mode = CreativeMode(self)
 

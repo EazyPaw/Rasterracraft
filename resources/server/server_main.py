@@ -100,6 +100,9 @@ class Server:
                 self.connections[player] = (client_sock, client_addr)
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
+                for other in self.server.players:
+                    if other is not player and other.is_loading_position(int(player.x), int(player.y), 0):
+                        self.server.send_client_socket(other, player, "EntitySpawn")
                 self.server.broadcast_chat(f"{player.name} joined the game", (255, 255, 85))
                 self.server.send_client_socket(player, player, "Teleport")
                 client_thread = threading.Thread(target=self.handle_client, args=(client_sock, client_addr, player), name="SocketClientThread")
@@ -212,6 +215,8 @@ class Server:
                     "Forward"
                 )
         self.load_chunks()
+        for world in self.worlds.values():
+            world.update_entities()
         self.unload_far_chunks()
         if self.save_id and self.server_ticks % self.autosave_interval_ticks == 0:
             self.save_all()
@@ -407,6 +412,8 @@ class Server:
                 self.send_client_socket(player, player.world.regions[x])
                 player.loading_regions.append(x)
                 player.world.mark_chunk_dirty(x)
+                player.world.send_entities_in_chunk_to_player(player, x)
+                self._send_players_in_chunk_to_player(player, x)
                 # 新区块可能影响了相邻已加载区块的光照，发送邻居的光照更新
                 for neighbor_rx in (x - 1, x + 1):
                     if neighbor_rx in player.loading_regions:
@@ -445,6 +452,13 @@ class Server:
                 for rx in unload_rxs:
                     world.regions.pop(rx, None)
 
+    def _send_players_in_chunk_to_player(self, player: Player, rx: int):
+        for other in self.players:
+            if other is player or other.world is not player.world:
+                continue
+            if int(other.x // 16) == rx:
+                self.send_client_socket(player, other, "EntitySpawn")
+
     def close_server(self):
         self.save_all(force=True)
         self.running = False
@@ -460,6 +474,9 @@ class Server:
         self.save_all(player, force=True)
         # 广播离开消息（黄色，排除已离开的玩家）
         self.broadcast_chat(f"{player.name} left the game", (255, 255, 85), exclude=player)
+        for other in self.players:
+            if other is not player:
+                self.send_client_socket(other, player, "EntityRemove")
         if player in self.players:
             self.players.remove(player)
         self.socket_server.connections.pop(player, None)

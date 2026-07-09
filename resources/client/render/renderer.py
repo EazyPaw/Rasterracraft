@@ -372,9 +372,11 @@ class Render(SkyMixin, BlockRenderMixin):
                     # ---- 游戏内渲染流程 ----
                     self.draw_sky()                          # 天空背景（来自 SkyMixin）
                     self.camera.update()
+                    self.draw_entities(z_filter=1)
                     self.draw_block()                        # 方块绘制（来自 BlockRenderMixin）
                     if self.debug:
                         self.draw_biome_debug_overlay()
+                    self.draw_entities(z_filter=0)
                     self.client.particle_manager.draw(self)
                     self.draw_hovered_block_outline()
                     self.client.client_player.skeleton.update()
@@ -444,6 +446,20 @@ class Render(SkyMixin, BlockRenderMixin):
     def draw_player(self) -> None:
         """绘制玩家实体。"""
         self.client.client_player.skeleton.draw()
+
+    def draw_entities(self, z_filter: int | None = None) -> None:
+        """绘制服务端同步的非本地实体。"""
+        entities = self.client_world.iter_entities()
+        entities.sort(key=lambda entity: entity.y)
+        for entity in entities:
+            if entity.entity_id == "falling_block":
+                if entity.z != z_filter:
+                    continue
+            elif z_filter == 1:
+                continue
+            if entity.skeleton is not None:
+                entity.skeleton.update()
+                entity.skeleton.draw()
 
     def get_hovered_block_position(self) -> tuple[int | None, int | None]:
         """获取鼠标当前悬停的方块世界坐标。

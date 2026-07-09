@@ -16,3 +16,8 @@ class GLOWSTONE(BlockItem):
     name_id = "glowstone"
     name = "glowstone"
     target_block = blocks.GLOWSTONE
+
+class SAND(BlockItem):
+    name_id = "sand"
+    name = "sand"
+    target_block = blocks.SAND

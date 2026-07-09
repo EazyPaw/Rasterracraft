@@ -1,6 +1,7 @@
 import logging
 
 from resources.server.blocks import get_block_by_id
+from resources.server.entity import Entity
 from resources.server.location import Location
 from resources.server.particles import ParticleEffect
 from resources.server.player import Player
@@ -17,6 +18,17 @@ def encode_packet(obj, obj_type, args) -> dict:
             '__class__': 'Teleport',
             'x': obj.x,
             'y': obj.y,
+            'uuid': str(obj.uuid),
+            'name': obj.name,
+        }
+    elif isinstance(obj, Entity) and obj_type in ("EntitySpawn", "EntityUpdate"):
+        packet = obj.to_entity_data()
+        packet['__class__'] = obj_type
+        return packet
+    elif obj_type == "EntityRemove":
+        return {
+            '__class__': 'EntityRemove',
+            'uuid': str(obj.uuid) if isinstance(obj, Entity) else str(obj['uuid']),
         }
     elif obj_type == "Forward": # 转发给服务器内其它玩家
         return obj
@@ -83,6 +95,7 @@ def decode_packet(packet: dict, player: Player):
         player.facing = packet.get('facing', 0)
         player.on_ground = packet.get('on_ground', False)
         player.on_moving()
+        forward_packet_to_others(player, player, mode="entity_update")
     elif packet['__class__'] == 'BreakBlock':
         # {
         #     '__class__': 'BreakBlock',
@@ -106,7 +119,6 @@ def decode_packet(packet: dict, player: Player):
         if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT:
             block = get_block_by_id(packet['block_id'])
             block.place_at(Location(world, packet['x'], packet['y'], packet['z']))
-            forward_packet_to_others(packet, player)
 
     elif packet['__class__'] == 'ChatMessage':
         # 客户端发送的聊天消息
@@ -167,10 +179,14 @@ def _send_biome_updates_for_boundary(world, player, rx: int):
             }
             player.world.server.send_client_socket(player, biome_update, "BiomeUpdate")
 
-def forward_packet_to_others(packet: dict, player: Player, mode = 0):
+def forward_packet_to_others(packet, player: Player, mode = 0):
     if mode == 0:
         for other_player in player.world.server.players:
             if other_player != player:
                 other_player.world.server.send_client_socket(other_player, packet, "Forward")
+    elif mode == "entity_update":
+        for other_player in player.world.server.players:
+            if other_player != player and other_player.is_loading_position(int(player.x), int(player.y), 0):
+                other_player.world.server.send_client_socket(other_player, packet, "EntityUpdate")
 
 
