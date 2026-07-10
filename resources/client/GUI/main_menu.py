@@ -3,7 +3,7 @@ import pygame
 from resources.client.GUI.button import Button
 from resources.client.GUI.gui import GUI
 from resources.client.GUI.saves_menu import SavesMenu
-from resources.client.resources_loader import transkey
+from resources.client.resources_manager import transkey
 
 
 class MainMenu(GUI):

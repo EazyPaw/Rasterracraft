@@ -991,14 +991,15 @@ class BlockRenderMixin:
         tex_h = tex.get_height()
 
         # ---- 7. 光照纹理缓存 ----
-        # 构建缓存键：包含方块ID、纹理帧标识、离散化光照和色调
+        # Surface 本身作为缓存键会保留对象引用，避免旧纹理淘汰后 Python
+        # 复用 id，导致静水/流水或不同裁切相位命中错误的光照纹理。
         sky_key = (
             sky_color[0] // BLOCK_TINT_COLOR_STEP,
             sky_color[1] // BLOCK_TINT_COLOR_STEP,
             sky_color[2] // BLOCK_TINT_COLOR_STEP,
         )
         key = (
-            block.block_id, id(tex),
+            block.block_id, tex,
             q_ftl, q_ftr, q_fbl, q_fbr,
             q_sr_tl, q_sr_tr, q_sr_bl, q_sr_br,
             sky_key,

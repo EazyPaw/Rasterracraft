@@ -7,7 +7,7 @@ if os.environ.get('PYCRAFT_CLIENT') == '1':
 
 from resources.server.block_class import *
 from resources.server.tags import BlockTag
-from resources.server.utils import client_method
+from resources.server.utils import client_method, server_method
 
 
 class AIR(Block):
@@ -380,19 +380,34 @@ class DARK_OAK_LOG(Log):
     _texture_path = 'blocks.log_big_oak'
 
 class GravityBlock(Block):
+    def __init__(self, nbt=None):
+        # 仅服务端运行期使用，不能作为方块 NBT 发给客户端或写入存档。
+        self._fall_scheduled = False
+        super().__init__(nbt)
+
+    def get_safe_attributes(self):
+        attributes = super().get_safe_attributes()
+        attributes.pop("_fall_scheduled", None)
+        return attributes
+
     def place_at(self, location: Location) -> bool:
         placed = super().place_at(location)
         if placed and hasattr(location.world, "spawn_entity"):
             self.on_update()
         return placed
 
-    def on_update(self):
+    @server_method
+    def on_update(self, server = None):
         if self.location is None:
+            return
+        # 同一轮连锁更新可能多次通知同一个方块；下落事件尚未执行时只入队一次。
+        if getattr(self, "_fall_scheduled", False):
             return
         below = self.location.world.get_block(self.location.add(0, -1, 0))
         if getattr(below, "solid", False):
             return
-        self._start_falling()
+        self._fall_scheduled = True
+        server.register_event(self._start_falling)
 
     def _start_falling(self):
         if self.location is None or not hasattr(self.location.world, "spawn_entity"):
@@ -401,6 +416,15 @@ class GravityBlock(Block):
 
         world = self.location.world
         x, y, z = int(self.location.x), int(self.location.y), int(self.location.z)
+        self._fall_scheduled = False
+
+        # 事件延迟到下一 tick；此时方块可能已被替换或重新获得支撑。
+        if world.get_block(x, y, z) is not self:
+            return
+        below = world.get_block(x, y - 1, z)
+        if getattr(below, "solid", False):
+            return
+
         world.set_block(AIR(), self.location, send_packet=True, block_update=True)
         falling = FallingBlock(x + 0.01, y, z, world, self)
         world.spawn_entity(falling)

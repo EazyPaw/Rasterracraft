@@ -3,7 +3,7 @@ import time
 
 import pygame
 
-from resources.client.resources_loader import transkey
+from resources.client.resources_manager import transkey
 from resources.server import save_manager
 from resources.client.GUI.button import Button
 from resources.client.GUI.gui import GUI

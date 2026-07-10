@@ -50,18 +50,96 @@ def client_method(func):
         texture = Block.get_texture(16, client=some_other_client)
     """
     sig = inspect.signature(func)
-    has_client_param = 'client' in sig.parameters
+    client_param = sig.parameters.get('client')
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        if 'client' not in kwargs and has_client_param:
-            client = get_client()
-            if client is None:
-                raise RuntimeError(
-                    f"@client_only 方法 '{func.__name__}' 需要客户端实例，"
-                    f"但当前无可用客户端。请确保已调用 set_client()。"
-                )
-            kwargs['client'] = client
+        if client_param is not None and 'client' not in kwargs:
+            # 检查 client 是否已通过位置参数传入
+            try:
+                bound = sig.bind_partial(*args, **kwargs)
+            except TypeError:
+                bound = None
+            if bound is None or 'client' not in bound.arguments:
+                client = get_client()
+                if client is not None:
+                    kwargs['client'] = client
+                elif client_param.default is inspect.Parameter.empty:
+                    raise RuntimeError(
+                        f"@client_method 方法 '{func.__name__}' 需要客户端实例，"
+                        f"但当前无可用客户端。请确保已调用 set_client()。"
+                    )
+                # 参数有默认值时，client 为 None 也不注入，让默认值生效
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+# ---- server_method 装饰器基础设施 ----
+
+_server_instance = None
+
+
+def set_server(server):
+    """
+    设置当前服务端实例，供 @server_method 装饰的方法使用。
+    在服务端启动时自动调用。
+    """
+    global _server_instance
+    _server_instance = server
+
+
+def get_server():
+    """获取当前服务端实例。"""
+    return _server_instance
+
+
+def server_method(func):
+    """
+    装饰器：标记一个方法仅供服务端使用，并自动注入 server 实例作为关键字参数。
+
+    用途：写在客户端文件中、但实际只被服务端调用的方法，
+          使用此装饰器后，调用方无需显式传入 server 参数，装饰器会自动注入。
+
+    要求：
+        1. 被装饰方法的参数列表中必须包含名为 'server' 的参数。
+        2. 调用 set_server() 设置服务端实例后方可使用。
+
+    用法：
+        # ---- 定义 ----
+        class SomeClass:
+            @server_method
+            def do_something(self, server):
+                # server 由装饰器自动注入
+                server.broadcast(...)
+
+        # ---- 调用（无需传 server）----
+        obj.do_something()
+
+        # ---- 也可以显式覆盖（用于测试/特殊场景）----
+        obj.do_something(server=some_other_server)
+    """
+    sig = inspect.signature(func)
+    server_param = sig.parameters.get('server')
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        if server_param is not None and 'server' not in kwargs:
+            # 检查 server 是否已通过位置参数传入
+            try:
+                bound = sig.bind_partial(*args, **kwargs)
+            except TypeError:
+                bound = None
+            if bound is None or 'server' not in bound.arguments:
+                server = get_server()
+                if server is not None:
+                    kwargs['server'] = server
+                elif server_param.default is inspect.Parameter.empty:
+                    raise RuntimeError(
+                        f"@server_method 方法 '{func.__name__}' 需要服务端实例，"
+                        f"但当前无可用服务端。请确保已调用 set_server()。"
+                    )
+                # 参数有默认值时，server 为 None 也不注入，让默认值生效
         return func(*args, **kwargs)
 
     return wrapper

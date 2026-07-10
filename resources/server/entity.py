@@ -21,6 +21,12 @@ class Entity:
         self.damping = 0.95
         self.gravity = 0.08
         self.drag_vertical = 0.98  # 垂直方向阻力，每帧保留 98% 的速度
+        # Water has both slower input acceleration and stronger drag.  Keep
+        # these separate from air/flying damping so movement can never build
+        # up faster in water than it does while flying.
+        self.fluid_move_speed_multiplier = 0.35
+        self.fluid_horizontal_drag = 0.65
+        self.fluid_vertical_drag = 0.65
         self.jump_height = 1
         self.max_health = 10
         self.health = self.max_health
@@ -301,6 +307,8 @@ class Entity:
             speed_mult *= 1.3
         if self.flying:
             speed_mult *= 2
+        elif self.in_fluid:
+            speed_mult *= self.fluid_move_speed_multiplier
         self.motion.x += self.move_speed * speed_mult
 
     def move_left(self):
@@ -309,6 +317,8 @@ class Entity:
             speed_mult *= 1.3
         if self.flying:
             speed_mult *= 2
+        elif self.in_fluid:
+            speed_mult *= self.fluid_move_speed_multiplier
         self.motion.x -= self.move_speed * speed_mult
 
     def handle_gravity(self):
@@ -341,7 +351,7 @@ class Entity:
             self.damping = 0.91 * 0.6
             return
         if self.in_fluid:
-            self.damping = 0.8
+            self.damping = self.fluid_horizontal_drag
             return
 
         block_below = self._get_block_at(self.x, self.y - 0.05)
@@ -375,7 +385,7 @@ class Entity:
         if self.on_ground:
             self.flying = False
 
-        self.motion.y *= 0.8 if self.in_fluid else self.drag_vertical
+        self.motion.y *= self.fluid_vertical_drag if self.in_fluid else self.drag_vertical
 
         self.update_damping()
         self.motion.x *= self.damping

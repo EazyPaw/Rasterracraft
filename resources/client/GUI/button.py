@@ -8,7 +8,7 @@ from resources.server.utils import client_method
 class Button:
     """Reusable Minecraft-style GUI button."""
 
-    DEFAULT_SIZE = (200, 40)
+    DEFAULT_SIZE = (400, 40)
     NORMAL_TEXTURE = "gui.sprites.widget.button"
     HOVER_TEXTURE = "gui.sprites.widget.button_highlighted"
     DISABLED_TEXTURE = "gui.sprites.widget.button_disabled"

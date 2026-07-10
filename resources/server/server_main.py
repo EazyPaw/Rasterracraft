@@ -6,7 +6,7 @@ import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, Callable, TypedDict
 
 import msgpack
 import numpy as np
@@ -15,11 +15,16 @@ import resources.server.generator as generator
 from resources.server import save_manager
 from resources.server.commands import CommandExecutor
 from resources.server.player import Player
-from resources.server.text import Text
 from resources.server.server_packets import encode_packet, decode_packet
-from resources.server.utils import recv_exact, set_client
+from resources.server.text import Text
+from resources.server.utils import recv_exact, set_client, set_server
 from resources.server.world_class import World, WorldAttribute
 
+
+class EventDict(TypedDict):
+    tick: int
+    func: Callable
+    args: tuple
 
 class Server:
     def __init__(self, integrated = False, client = None, save_id: str | None = None):
@@ -29,6 +34,7 @@ class Server:
         self.ready = threading.Event()  # 用于等待初始化完成
         self.TPS = 0
         self.rate = 20
+        self.ticks = 0
         self.server_ticks = 0
         self.view_distance = 4
         self.chunk_unload_margin = 2
@@ -50,8 +56,10 @@ class Server:
         # 区块生成线程池：generate_chunk 是 CPU 密集型操作（噪声计算），
         # noise 库（C 扩展）和 numpy 在计算时会释放 GIL，因此多线程有实际收益。
         self.chunk_gen_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ChunkGen")
+        self.registered_events: list[EventDict] = []
         if client is not None:
             set_client(client)
+        set_server(self)
 
     def check_input(self):
         if self.integrated:
@@ -68,6 +76,10 @@ class Server:
             result = result.replace("§c", "\x1b[31;21m")
             logging.info(result)
 
+    def register_event(self, func, *args, ticks = 1):
+        tick = self.ticks + ticks
+        event: EventDict = {"tick": tick, "func": func, "args": args}
+        self.registered_events.append(event)
 
     class SocketServer:
         def __init__(self, server):
@@ -157,6 +169,13 @@ class Server:
                     self.server.on_player_disconnect(player)
                     break
 
+    def process_events(self):
+        for i in range(len(self.registered_events) - 1, -1, -1):
+            e = self.registered_events[i]
+            if e["tick"] == self.ticks:
+                e["func"](*e["args"])  # 解包参数
+                del self.registered_events[i]
+
     def run(self):
 
         logging.info(f"Server initialized")
@@ -168,6 +187,7 @@ class Server:
             interval = 1.0 / self.rate
 
             self.tick()
+            self.process_events()
 
             next_time += interval
             sleep_time = next_time - time.perf_counter()
@@ -179,6 +199,7 @@ class Server:
                     sleep_time = -sleep_time
                     logging.warning(f"Overloaded! Server is {sleep_time}ms behind!")
                     over_ticks = 0
+            self.ticks += 1
 
     def init(self):
         logging.info("Initializing server")
@@ -219,6 +240,8 @@ class Server:
             world.tick_fluids()
         for world in self.worlds.values():
             world.update_entities()
+        for world in self.worlds.values():
+            world.flush_light_updates()
         self.unload_far_chunks()
         if self.save_id and self.server_ticks % self.autosave_interval_ticks == 0:
             self.save_all()

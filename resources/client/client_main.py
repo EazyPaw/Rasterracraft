@@ -20,7 +20,7 @@ from resources.client.GUI.main_menu import MainMenu
 from resources.client.GUI.pause_menu import PauseMenu
 from resources.client.GUI.saves_menu import SavesMenu
 from resources.client.particles import ParticleManager
-from resources.client.resources_loader import ResourcesManager
+from resources.client.resources_manager import ResourcesManager
 from resources.server import save_manager
 from resources.server.server_main import Server
 from resources.server.utils import recv_exact, set_client
@@ -34,7 +34,7 @@ class Client:
             pass
         self.is_shutting_down = False
         self.version = "0.0.1 SNAPSHOT"
-        self.language = "zh_CN"
+        self.language = "en_US"
         self.client_world = client_world.ClientWorld(self)
         self.render = render.Render(self)
         self._prepare_socket_transport()

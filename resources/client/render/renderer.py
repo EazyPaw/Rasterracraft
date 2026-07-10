@@ -79,7 +79,7 @@ class Render(SkyMixin, BlockRenderMixin):
         self.choosing_position: tuple[int, int] = (0, 0)
 
         # ---- 字体 ----
-        self.font_path: str = "assets\\minecraft\\font\\unifont.otf"
+        self.font_path: str = "assets\\minecraft\\font\\Minecraft_AE.ttf"
         self.default_font: pygame.font.Font = pygame.font.Font(self.font_path, 36)
         self.font_cache: dict[int, pygame.font.Font] = {}
 

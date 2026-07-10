@@ -1,5 +1,7 @@
 """Surface decoration generation for the Minecraft-like 2D generator."""
 
+from __future__ import annotations
+
 import json
 from typing import Callable
 

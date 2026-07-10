@@ -148,6 +148,8 @@ class FluidBlock(Block):
     is_fluid = True
 
     _flow_texture_path = None
+    # water_flow frames are 32x32: one frame spans a 2x2 block area.
+    flow_texture_tile_span = 2
     _texture_cache = {}
     max_level = 7
     source_level = 0
@@ -225,20 +227,52 @@ class FluidBlock(Block):
         if base_texture is None:
             return None
 
-        frame_id = id(base_texture)
         left_ratio, right_ratio = self.get_surface_edge_ratios()
         left_h = max(1, min(size, int(round(size * left_ratio))))
         right_h = max(1, min(size, int(round(size * right_ratio))))
         tex_h = max(left_h, right_h)
-        cache_key = (texture_path, frame_id, size, left_h, right_h, self.flow_direction)
+
+        is_flow_texture = bool(
+            self._flow_texture_path and texture_path == self._flow_texture_path
+        )
+        tile_span = self.flow_texture_tile_span if is_flow_texture else 1
+        tile_span = max(1, int(tile_span))
+        if self.location is None or tile_span == 1:
+            phase_x = phase_y = 0
+        else:
+            world_x = int(self.location.x)
+            world_y = int(self.location.y)
+            phase_x = world_x % tile_span
+            # World Y grows upward while image rows grow downward.
+            phase_y = (-world_y - 1) % tile_span
+
+        cache_key = (
+            texture_path,
+            base_texture,
+            size,
+            left_h,
+            right_h,
+            self.flow_direction,
+            tile_span,
+            phase_x,
+            phase_y,
+        )
         if cache_key in self._texture_cache:
             return self._texture_cache[cache_key]
 
-        scaled = pygame.transform.scale(base_texture, (size, size)).convert_alpha()
+        atlas_size = size * tile_span
+        scaled = pygame.transform.scale(
+            base_texture, (atlas_size, atlas_size)
+        ).convert_alpha()
         if self.flow_direction < 0:
             scaled = pygame.transform.flip(scaled, True, False)
 
-        texture = scaled.subsurface(pygame.Rect(0, size - tex_h, size, tex_h)).copy()
+        tile = scaled.subsurface(
+            pygame.Rect(phase_x * size, phase_y * size, size, size)
+        )
+        texture = tile.subsurface(
+            pygame.Rect(0, size - tex_h, size, tex_h)
+        ).copy()
         if left_h != right_h:
             denom = max(1, size - 1)
             for px in range(size):
@@ -317,6 +351,13 @@ class FluidBlock(Block):
     def get_flow_vector(self) -> tuple[float, float]:
         horizontal = float(self.flow_direction)
         vertical = -1.0 if self.falling else 0.0
+        if horizontal == 0.0 and vertical == 0.0 and self.location is not None:
+            left_ratio, right_ratio = self.get_surface_edge_ratios()
+            if left_ratio > right_ratio + 0.001:
+                horizontal = 1.0
+            elif right_ratio > left_ratio + 0.001:
+                horizontal = -1.0
+
         if horizontal == 0.0 and vertical == 0.0 and self.location is not None:
             x = int(self.location.x)
             y = int(self.location.y)
@@ -561,12 +602,12 @@ class Leaves(Block):
                 behind_leaf = isinstance(behind, Leaves)
 
         # 效果缓存键（含世界状态，状态变化时自动失效）
-        effect_key = (size, biome_id, z, front_same, behind_leaf)
+        effect_key = (size, biome_id, z, front_same, behind_leaf, type(self))
         if effect_key in self._effect_cache:
             return self._effect_cache[effect_key]
 
         # 获取/生成染色纹理
-        tex_key = (size, biome_id)
+        tex_key = (size, biome_id, type(self))
         if tex_key in self._texture_cache:
             stained = self._texture_cache[tex_key]
         else:

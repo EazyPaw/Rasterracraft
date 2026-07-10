@@ -4,6 +4,7 @@ import threading
 import traceback
 from typing import Any
 from typing import cast
+from enum import Enum
 
 import numpy as np
 import resources.server.biome as biome
@@ -159,132 +160,19 @@ class Chunk:
 
         return world.recalculate_light_for_chunks({self.x})
 
-        from resources.server.light_manager import flood_fill_light_2d
-
-        # 清零
-        self.sky_light_array.fill(0)
-        self.block_light_array.fill(0)
-
-        # 获取邻居区块
-        left_chunk = world.regions.get(self.x - 1)
-        right_chunk = world.regions.get(self.x + 1)
-
-        # 追踪哪些区块的光照被更新了
-        updated_chunks = {self.x}
-
-        ext_left = 1 if left_chunk is not None else 0
-        ext_right = 1 if right_chunk is not None else 0
-
-        # 没有邻居时退化为内部计算
-        if ext_left == 0 and ext_right == 0:
-            self._recalculate_internal()
-            return updated_chunks
-
-        ext_sx = SX + ext_left + ext_right
-
-        # ---- 构建扩展的方块数组（仅供读取固体/光源属性） ----
-        ext_region = np.full((ext_sx, SY, 2), AIR(), dtype=Block)
-        ext_region[ext_left:ext_left + SX, :, :] = self.region_array
-        if left_chunk is not None:
-            ext_region[0, :, :] = left_chunk.region_array[SX - 1, :, :]
-        if right_chunk is not None:
-            ext_region[ext_sx - 1, :, :] = right_chunk.region_array[0, :, :]
-
-        # ---- 创建扩展的光照数组 ----
-        ext_sky = np.zeros((ext_sx, SY), dtype=np.uint8)
-        ext_block = np.zeros((ext_sx, SY), dtype=np.uint8)
-
-        # ==================== 天空光 ====================
-        sky_sources: list = []
-        for x in range(ext_sx):
-            for y in range(SY - 1, -1, -1):
-                blk = cast(Block, ext_region[x, y, 0])
-                if not blk.solid:
-                    sky_sources.append((x, y, 15))
-                else:
-                    break
-
-        # 从邻居区块引入已计算的天空光作为额外光源
-        if left_chunk is not None:
-            for y in range(SY):
-                lvl = int(left_chunk.sky_light_array[SX - 1, y])
-                if lvl > 0:
-                    sky_sources.append((0, y, lvl))
-        if right_chunk is not None:
-            for y in range(SY):
-                lvl = int(right_chunk.sky_light_array[0, y])
-                if lvl > 0:
-                    sky_sources.append((ext_sx - 1, y, lvl))
-
-        if sky_sources:
-            flood_fill_light_2d(ext_sky, ext_region, 0, sky_sources)
-
-        # ==================== 方块光 ====================
-        block_sources: list = []
-        for x in range(ext_sx):
-            for y in range(SY):
-                blk0 = cast(Block, ext_region[x, y, 0])
-                blk1 = cast(Block, ext_region[x, y, 1])
-                light = blk0.light_source + blk1.light_source
-                if light > 0:
-                    block_sources.append((x, y, min(15, light)))
-
-        # 从邻居区块引入已计算的方块光作为额外光源
-        if left_chunk is not None:
-            for y in range(SY):
-                lvl = int(left_chunk.block_light_array[SX - 1, y])
-                if lvl > 0:
-                    block_sources.append((0, y, lvl))
-        if right_chunk is not None:
-            for y in range(SY):
-                lvl = int(right_chunk.block_light_array[0, y])
-                if lvl > 0:
-                    block_sources.append((ext_sx - 1, y, lvl))
-
-        if block_sources:
-            flood_fill_light_2d(ext_block, ext_region, 0, block_sources)
-
-        # ==================== 写回结果 ====================
-        # 本区块
-        self.sky_light_array = ext_sky[ext_left:ext_left + SX, :]
-        self.block_light_array = ext_block[ext_left:ext_left + SX, :]
-
-        # 更新邻居区块边缘列，并追踪是否有变化
-        if left_chunk is not None:
-            changed = False
-            for y in range(SY):
-                if ext_sky[0, y] > left_chunk.sky_light_array[SX - 1, y]:
-                    left_chunk.sky_light_array[SX - 1, y] = ext_sky[0, y]
-                    changed = True
-                if ext_block[0, y] > left_chunk.block_light_array[SX - 1, y]:
-                    left_chunk.block_light_array[SX - 1, y] = ext_block[0, y]
-                    changed = True
-            if changed:
-                updated_chunks.add(self.x - 1)
-
-        if right_chunk is not None:
-            changed = False
-            for y in range(SY):
-                if ext_sky[ext_sx - 1, y] > right_chunk.sky_light_array[0, y]:
-                    right_chunk.sky_light_array[0, y] = ext_sky[ext_sx - 1, y]
-                    changed = True
-                if ext_block[ext_sx - 1, y] > right_chunk.block_light_array[0, y]:
-                    right_chunk.block_light_array[0, y] = ext_block[ext_sx - 1, y]
-                    changed = True
-            if changed:
-                updated_chunks.add(self.x + 1)
-
-        return updated_chunks
-
-
 
 class WorldAttribute:
     def __init__(self, environment = 0, max_build_height = 256):
         self.ENVIRONMENT = environment
         self.MAX_BUILD_HEIGHT = max_build_height
 
+class Weather(Enum):
+    CLEAR = None
+    RAIN = None
+
+
 class World:
-    def __init__(self,server: 'Server', id_name, generator, attribute: WorldAttribute, seed):
+    def __init__(self,server, id_name, generator, attribute: WorldAttribute, seed):
         self.server = server
         self.id_name = id_name
         self.generator: Generator = generator(seed)
@@ -297,8 +185,15 @@ class World:
         self.world_time = 0
         self.entities: dict[str, Entity] = {}
         self._entities_lock = threading.RLock()
+        # 每次方块变动都会影响整区块光照。把同一 tick 的变动合并处理，
+        # 避免重力/流体连锁时反复重算并发送相同的大型光照包。
+        self._pending_light_recalc_chunks: set[int] = set()
+        self._light_recalc_lock = threading.RLock()
         self._scheduled_fluid_ticks: set[tuple[int, int, int]] = set()
         self._fluid_lock = threading.RLock()
+        self.weather: Weather = Weather.CLEAR
+        self.weather_tick = 6000
+
 
     def mark_chunk_dirty(self, rx: int):
         if getattr(self.server, "save_id", None):
@@ -335,6 +230,24 @@ class World:
         changed_chunks: set[int] = set()
         for span in spans:
             changed_chunks.update(self._recalculate_light_span(span))
+        return changed_chunks
+
+    def schedule_light_recalculation(self, rx: int) -> None:
+        """记录一次方块变动，留待当前 tick 末尾合并更新光照。"""
+        with self._light_recalc_lock:
+            self._pending_light_recalc_chunks.add(int(rx))
+
+    def flush_light_updates(self) -> set[int]:
+        """重算当前 tick 累积的光照，并只同步实际变化的区块。"""
+        with self._light_recalc_lock:
+            if not self._pending_light_recalc_chunks:
+                return set()
+            pending_chunks = self._pending_light_recalc_chunks
+            self._pending_light_recalc_chunks = set()
+
+        changed_chunks = self.recalculate_light_for_chunks(pending_chunks)
+        if changed_chunks:
+            self.send_light_updates(changed_chunks)
         return changed_chunks
 
     def _recalculate_light_span(self, chunk_rxs: list[int]) -> set[int]:
@@ -640,13 +553,11 @@ class World:
         chunk.region_array[rela_x][y][z] = block
         self.mark_chunk_dirty(chunk.x)
         self.schedule_fluid_around(x, y, z)
-        # 重算整个区块光照（含跨区块传播）
-        changed_light_chunks = self.recalculate_light_for_chunks({chunk.x})
+        self.schedule_light_recalculation(chunk.x)
         if send_packet:
             for player in self.server.players:
                 if player.is_loading_position(x, y, z):
                     self.server.send_client_socket(player, block, "BlockUpdate")
-            self.send_light_updates(changed_light_chunks)
         if block_update:
             # 收集需要触发 on_update 的邻居坐标
             neighbors = [
@@ -675,7 +586,7 @@ class World:
         if getattr(old_block, "is_fluid", False) or getattr(placed_block, "is_fluid", False):
             self.schedule_fluid_around(x, y, z)
 
-        return changed_light_chunks
+        return set()
 
     def generate_chunk(self, rx: int):
         save_id = getattr(self.server, "save_id", None)
@@ -734,8 +645,7 @@ class World:
         for player in self.server.players:
             if player.is_loading_position(x, y, z):
                 self.server.send_client_socket(player, location, "BreakBlock")
-        changed_light_chunks = self.set_block(AIR(), x, y, z, False)
-        self.send_light_updates(changed_light_chunks)
+        self.set_block(AIR(), x, y, z, False)
 
     def is_chunk_loaded(self, x):
         return x in self.regions

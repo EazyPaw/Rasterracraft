@@ -16,7 +16,7 @@ SKY_CACHE_TICK_STEP: int = 60
 
 # ===================== 光照常量 =====================
 # 天空光照最小权重，保证夜晚也不会完全黑暗
-MIN_SKY_LIGHT_WEIGHT: float = 0.22
+MIN_SKY_LIGHT_WEIGHT: float = 0.12
 
 # 方块光源色调（暖黄色）
 BLOCK_LIGHT_TINT: tuple[int, int, int] = (255, 200, 120)
