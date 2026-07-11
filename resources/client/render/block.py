@@ -7,8 +7,7 @@
 
 import math as _math
 import os
-from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 import pygame
 
@@ -18,7 +17,7 @@ from .constants import (
     BLOCK_RATIO_LEVELS,
     BLOCK_TINT_COLOR_STEP,
 )
-from .math_utils import clamp, cyclic_lerp_color, lerp_color, quantize_color, quantize_unit
+from .math_utils import cyclic_lerp_color, lerp_color, quantize_color, quantize_unit
 
 if TYPE_CHECKING:
     from resources.server.block_class import Block
