@@ -1,6 +1,7 @@
 import math as _math
 import random as _random
 
+from resources.client.game_mode import SurvivalMode
 from resources.server.entity import Entity
 from resources.server.location import Location, decide_x_or_loc
 from resources.server.particles import SPRINT_STEP
@@ -22,9 +23,17 @@ class Player(Entity):
         self.saturation = 5.0
         self.experience = 0
         self.experience_level = 0
+        # A client may already have PlayerMove packets queued when the server
+        # teleports it.  Do not let one of those stale packets overwrite the
+        # authoritative destination before the client has received the
+        # Teleport packet.
+        self._teleport_id = 0
+        self._pending_teleport_id: int | None = None
         # 疾跑粒子节流：避免每帧都生成粒子造成刷屏
         self._sprint_particle_timer: int = 0
         self._last_sprint_particle_x: float | None = None
+        self.gamemode = SurvivalMode
+        self.spawn_point = 0
 
     def on_moving(self):
         rx = int(self.x // 16)
@@ -95,9 +104,26 @@ class Player(Entity):
     def teleport_to(self, x, y, world = None):
         self.x = x
         self.y = y
-        self.world.server.send_client_socket(self, self, "Teleport")
         if world:
             self.world = world
+        self._teleport_id += 1
+        self._pending_teleport_id = self._teleport_id
+        self.world.server.send_client_socket(self, self, "Teleport")
+
+    def confirm_teleport(self, teleport_id) -> bool:
+        """Accept a client acknowledgement for the most recent teleport."""
+        try:
+            teleport_id = int(teleport_id)
+        except (TypeError, ValueError):
+            return False
+        if teleport_id != self._pending_teleport_id:
+            return False
+        self._pending_teleport_id = None
+        return True
+
+    @property
+    def is_awaiting_teleport_confirmation(self) -> bool:
+        return self._pending_teleport_id is not None
 
     def is_loading_position(self, x_loc: int | Location, y = None, z = None) -> bool:
         """

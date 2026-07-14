@@ -657,6 +657,12 @@ class World:
     def is_chunk_loaded(self, x):
         return x in self.regions
 
+    def find_top_block(self, x, z) -> Block | None:
+        for y in range(self.attribute.MAX_BUILD_HEIGHT - 1, 0, -1):
+            if (block := self.get_block(x, y, z)).block_id != "air":
+                return block
+        return None
+
 
 
 

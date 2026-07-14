@@ -2,6 +2,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from resources.client.client_player import ClientPlayer
+from resources.client.game_mode import get_gamemode_by_id
 from resources.server.block_class import Block
 from resources.server.blocks import get_block_by_id
 from resources.server.item_class import ItemStack
@@ -59,11 +60,26 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             client.client_player.name = packet['name']
         client.client_player.x = packet['x']
         client.client_player.y = packet['y']
+        # Teleports replace the local physics state as well as the position.
+        # In particular, a player who died while falling must not carry the
+        # old downward velocity into the respawn position.
+        client.client_player.motion.x = 0
+        client.client_player.motion.y = 0
+        client.client_player.fall_distance = 0.0
         if client.client_player is not None:
             for key in ('health', 'food_level', 'saturation', 'experience', 'experience_level'):
                 if key in packet:
                     setattr(client.client_player, key, packet[key])
             client.client_player.dead = False
+        # Acknowledge immediately.  The server ignores queued PlayerMove
+        # packets until this acknowledgement arrives, preventing an old local
+        # position from undoing a command teleport or respawn.
+        teleport_id = packet.get('teleport_id')
+        if teleport_id is not None:
+            client.sent_packet({
+                '__class__': 'TeleportConfirm',
+                'teleport_id': teleport_id,
+            })
     elif packet['__class__'] == 'BreakBlock':
         # {
         #     '__class__': 'BreakBlock',
@@ -158,6 +174,14 @@ def decode_packet(packet: dict, client: 'Client') -> None:
     elif packet['__class__'] == 'SaveComplete':
         if hasattr(client, "save_complete_event"):
             client.save_complete_event.set()
+    elif packet['__class__'] == 'GamemodeUpdate':
+        if client.client_player is None:
+            return
+        gamemode_type = get_gamemode_by_id(packet['new_mode'])
+        client.client_player.game_mode = gamemode_type(client.client_player)
+        # Mouse and keyboard callbacks store bound methods, so changing only
+        # game_mode would leave them pointing at the old SurvivalMode object.
+        client._install_game_controls()
     # logging.debug(f"Received {packet['__class__']} packet.")
 
 def encode_packet(obj, obj_type = None, args = None) -> dict:

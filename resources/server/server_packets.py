@@ -26,6 +26,7 @@ def encode_packet(obj, obj_type, args) -> dict:
             'saturation': getattr(obj, 'saturation', 5.0),
             'experience': getattr(obj, 'experience', 0),
             'experience_level': getattr(obj, 'experience_level', 0),
+            'teleport_id': getattr(obj, '_pending_teleport_id', None),
         }
     elif isinstance(obj, Entity) and obj_type in ("EntitySpawn", "EntityUpdate"):
         packet = obj.to_entity_data()
@@ -77,6 +78,11 @@ def encode_packet(obj, obj_type, args) -> dict:
             'z': obj.location.z,
             'block_data': obj.to_dict(),
         }
+    elif obj_type == "GamemodeUpdate" and isinstance(obj, Player):
+        return {
+            '__class__': 'GamemodeUpdate',
+            'new_mode': obj.gamemode.name_id
+        }
     logging.warning("Unknown packet type to encode")
     return {}
 
@@ -91,6 +97,11 @@ def decode_packet(packet: dict, player: Player):
         #     'x': obj.x,
         #     'y': obj.y,
         # }
+        # Ignore movement that was sent before a server-side teleport.  TCP
+        # preserves ordering in each direction, but it cannot remove movement
+        # packets the client had already sent before it received Teleport.
+        if player.is_awaiting_teleport_confirmation:
+            return
         if not player.world.is_chunk_loaded(packet['x']//16):
             player.teleport_to(player.x, player.y)
             return
@@ -107,6 +118,8 @@ def decode_packet(packet: dict, player: Player):
         player.saturation = max(0.0, min(float(player.food_level), float(packet.get('saturation', getattr(player, 'saturation', 5.0)))))
         player.on_moving()
         forward_packet_to_others(player, player, mode="entity_update")
+    elif packet['__class__'] == 'TeleportConfirm':
+        player.confirm_teleport(packet.get('teleport_id'))
     elif packet['__class__'] == 'BreakBlock':
         # {
         #     '__class__': 'BreakBlock',
@@ -178,7 +191,9 @@ def decode_packet(packet: dict, player: Player):
         player.health = player.max_health
         player.food_level = 20
         player.saturation = 5.0
-        player.teleport_to(0.0, 100.0)
+        block = player.world.find_top_block(player.spawn_point, 0)
+        if block is not None:
+            player.teleport_to(0.0, block.location.y + 1)
     # if packet['__class__'] not in ('PlayerMove', 'ChatMessage'):
     #     logging.debug(f"Received {packet['__class__']} packet.")
     #     logging.debug(packet)

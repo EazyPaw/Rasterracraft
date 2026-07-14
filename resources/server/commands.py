@@ -3,6 +3,7 @@ import logging
 import traceback
 from typing import TYPE_CHECKING, Callable, List, Dict
 
+from resources.client.game_mode import get_gamemode_by_id
 from resources.server.blocks import get_block_by_id
 from resources.server.entity import Entity
 from resources.server.location import Location
@@ -23,7 +24,8 @@ class CommandExecutor:
         "setblock": self.set_block_c,
         "say": self.say_command,
         "fill": self.fill_command,
-        "time": self.time
+        "time": self.time,
+        "gamemode": self.switch_gamemode,
     }
 
     def python_execute(self, args, executor: Player | str):
@@ -35,6 +37,19 @@ class CommandExecutor:
         exec(code)
 
         return f"Done"
+
+    def switch_gamemode(self, args, executor: Player | str):
+        if not isinstance(executor, Player) or len(args) != 1:
+            raise ValueError("Usage: /gamemode <creative|survival>")
+
+        gamemode = get_gamemode_by_id(args[0].lower())
+        # gamemode belongs to an individual player.  Assigning Player.gamemode
+        # only creates a class attribute, leaving executor.gamemode unchanged
+        # and causing GamemodeUpdate to report the old mode to the client.
+        executor.gamemode = gamemode
+        self.server.send_client_socket(executor, executor, "GamemodeUpdate")
+        return f"Gamemode is set to {gamemode.name_id}"
+
 
     def time(self, args, executor: Player | str):
         if args[0] == "add" and isinstance(executor, Player):

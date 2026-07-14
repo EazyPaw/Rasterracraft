@@ -292,3 +292,29 @@ class SurvivalMode(GameMode):
             self.player.client.render.close_gui(self.inv)
         else:
             self.player.client.render.show_gui(self.inv)
+
+_GAMEMODE_REGISTRY: dict[str, type] = None  # None = 尚未构建
+
+
+def _build_gamemode_id_cache() -> dict[str, type]:
+    cache: dict[str, type] = {}
+
+    def collect(cls):
+        for subclass in cls.__subclasses__():
+            bid = getattr(subclass, 'name_id', None)
+            if bid is not None:
+                cache[bid] = subclass
+            collect(subclass)
+
+    collect(GameMode)
+    return cache
+
+def get_gamemode_by_id(gamemode_id: str) -> type:
+    global _GAMEMODE_REGISTRY
+    if _GAMEMODE_REGISTRY is None:
+        _GAMEMODE_REGISTRY = _build_gamemode_id_cache()
+
+    cls = _GAMEMODE_REGISTRY.get(gamemode_id)
+    if cls is not None:
+        return cls
+    raise ValueError(f"Unknown gamemode ID: {gamemode_id}")

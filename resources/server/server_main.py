@@ -117,7 +117,9 @@ class Server:
                     if other is not player and other.is_loading_position(int(player.x), int(player.y), 0):
                         self.server.send_client_socket(other, player, "EntitySpawn")
                 self.server.broadcast_chat(f"{player.name} joined the game", (255, 255, 85))
-                self.server.send_client_socket(player, player, "Teleport")
+                # Use Player.teleport_to even for the initial position so the
+                # first client movement cannot race ahead of its spawn packet.
+                player.teleport_to(player.x, player.y)
                 client_thread = threading.Thread(target=self.handle_client, args=(client_sock, client_addr, player), name="SocketClientThread")
                 client_thread.daemon = True
                 client_thread.start()
