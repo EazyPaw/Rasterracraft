@@ -16,6 +16,12 @@ class Player(Entity):
         self.name = "Player_" + self.uuid.hex[:8]
         self.width = 0.3
         self.height = 1.8
+        self.max_health = 20
+        self.health = self.max_health
+        self.food_level = 20
+        self.saturation = 5.0
+        self.experience = 0
+        self.experience_level = 0
         # 疾跑粒子节流：避免每帧都生成粒子造成刷屏
         self._sprint_particle_timer: int = 0
         self._last_sprint_particle_x: float | None = None

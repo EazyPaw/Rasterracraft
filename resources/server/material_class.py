@@ -1,6 +1,8 @@
 import pygame
+import math
 
 from resources.server.utils import client_method
+from resources.server.location import Location
 
 
 class Material:
@@ -84,4 +86,15 @@ class BlockItem(Material):
         if cls.target_block is None:
             return None
         block_size = max(1, int(round(16 * size)))
-        return cls.target_block().get_texture(block_size, client=client)
+        block = cls.target_block()
+        # Some block item textures (grass/leaves) use biome colouring.  Item
+        # entities do not carry a Block instance, so borrow the local player's
+        # biome solely for rendering instead of dereferencing a None location.
+        player = getattr(client, "client_player", None)
+        block.location = Location(
+            client.client_world,
+            math.floor(player.x) if player is not None else 0,
+            math.floor(player.y) if player is not None else 0,
+            0,
+        )
+        return block.get_texture(block_size, client=client)

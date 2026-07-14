@@ -3,6 +3,7 @@ import logging
 from resources.server.blocks import get_block_by_id
 from resources.server.entity import Entity
 from resources.server.location import Location
+from resources.server.materials import get_material_by_id
 from resources.server.particles import ParticleEffect
 from resources.server.player import Player
 from resources.server.world_class import Chunk
@@ -20,6 +21,11 @@ def encode_packet(obj, obj_type, args) -> dict:
             'y': obj.y,
             'uuid': str(obj.uuid),
             'name': obj.name,
+            'health': obj.health,
+            'food_level': getattr(obj, 'food_level', 20),
+            'saturation': getattr(obj, 'saturation', 5.0),
+            'experience': getattr(obj, 'experience', 0),
+            'experience_level': getattr(obj, 'experience_level', 0),
         }
     elif isinstance(obj, Entity) and obj_type in ("EntitySpawn", "EntityUpdate"):
         packet = obj.to_entity_data()
@@ -94,6 +100,11 @@ def decode_packet(packet: dict, player: Player):
         player.sprinting = packet.get('sprinting', False)
         player.facing = packet.get('facing', 0)
         player.on_ground = packet.get('on_ground', False)
+        # Integrated clients simulate survival locally; clamp state on receipt
+        # so it persists safely and cannot corrupt the save format.
+        player.health = max(0.0, min(player.max_health, float(packet.get('health', player.health))))
+        player.food_level = max(0, min(20, int(packet.get('food_level', getattr(player, 'food_level', 20)))))
+        player.saturation = max(0.0, min(float(player.food_level), float(packet.get('saturation', getattr(player, 'saturation', 5.0)))))
         player.on_moving()
         forward_packet_to_others(player, player, mode="entity_update")
     elif packet['__class__'] == 'BreakBlock':
@@ -105,7 +116,19 @@ def decode_packet(packet: dict, player: Player):
         # }
         world = player.world
         if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT:
-            world.break_block(packet['x'], packet['y'], packet['z'])
+            tool = get_material_by_id(packet.get('held_item', 'air'))
+            experience = world.break_block(packet['x'], packet['y'], packet['z'], tool=tool)
+            if experience:
+                player.experience += experience
+                player.world.server.send_client_socket(
+                    player, {'__class__': 'Experience', 'amount': experience}, 'Forward'
+                )
+
+    elif packet['__class__'] == 'PickupItem':
+        from resources.server.entities.item import Item
+        entity = player.world.entities.get(str(packet.get('uuid', '')))
+        if isinstance(entity, Item):
+            entity.pick_up(player)
 
     elif packet['__class__'] == 'PlaceBlock':
         # {
@@ -151,6 +174,11 @@ def decode_packet(packet: dict, player: Player):
     elif packet['__class__'] == 'ClientShutdown':
         player.world.server.save_all(player, force=True)
         player.world.server.send_client_socket(player, {'__class__': 'SaveComplete'}, "Forward")
+    elif packet['__class__'] == 'RequestRespawn':
+        player.health = player.max_health
+        player.food_level = 20
+        player.saturation = 5.0
+        player.teleport_to(0.0, 100.0)
     # if packet['__class__'] not in ('PlayerMove', 'ChatMessage'):
     #     logging.debug(f"Received {packet['__class__']} packet.")
     #     logging.debug(packet)

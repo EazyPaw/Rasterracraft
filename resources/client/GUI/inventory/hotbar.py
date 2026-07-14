@@ -30,15 +30,21 @@ class HotBar(GUI):
 
         for i in range(9):
             item = self.render.client.client_player.inventory[i]
+            # 计算当前槽位的起始x坐标
+            slot_x = x_start + i * slot_width
+
+            # 绘制选择框
+            if self.render.client.client_player.selected_slot == i:
+                sx = x + i * slot_width - self.render.gui_scale
+                sy = y - self.render.gui_scale
+                self.render.blit(self.selection_texture, (sx, sy))
+
             if item.is_empty():
                 continue
             texture_ = item.get_texture(self.render.gui_scale * 0.7, shadow=True)
 
             if texture_ is None:
                 continue
-
-            # 计算当前槽位的起始x坐标
-            slot_x = x_start + i * slot_width
 
             # 物品在槽位内水平居中
             item_x = slot_x + (slot_width - texture_.get_width()) / 2 - self.render.gui_scale * self.bar_width / 48
@@ -47,12 +53,6 @@ class HotBar(GUI):
             item_y = y + self.render.gui_scale * self.bar_height / 2 - texture_.get_height() / 2
 
             self.render.blit(texture_, (item_x, item_y))
-
-            # 绘制选择框
-            if self.render.client.client_player.selected_slot == i:
-                sx = x + i * slot_width - self.render.gui_scale
-                sy = y - self.render.gui_scale
-                self.render.blit(self.selection_texture, (sx, sy))
 
             # 绘制物品数量
             if item.amount > 1:

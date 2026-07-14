@@ -28,8 +28,9 @@ class Entity:
         self.fluid_horizontal_drag = 0.65
         self.fluid_vertical_drag = 0.65
         self.jump_height = 1
-        self.max_health = 10
+        self.max_health = 20
         self.health = self.max_health
+        self.hurt_time = 0
         self.on_ground = False
         self.flying = False
         self.sneaking = False
@@ -75,6 +76,8 @@ class Entity:
             'sneaking': self.sneaking,
             'sprinting': self.sprinting,
             'on_ground': self.on_ground,
+            'health': self.health,
+            'hurt_time': self.hurt_time,
         }
         if hasattr(self, 'z'):
             data['z'] = getattr(self, 'z')
@@ -83,6 +86,13 @@ class Entity:
         block = getattr(self, 'block', None)
         if block is not None:
             data['block_data'] = block.to_dict()
+        item = getattr(self, 'item', None)
+        if item is not None:
+            data['item_data'] = {
+                'id': item.material.name_id,
+                'amount': item.amount,
+                'nbt': item.nbt,
+            }
         return data
 
     def write_nbt(self, nbt: str):

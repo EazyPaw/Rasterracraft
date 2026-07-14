@@ -71,6 +71,7 @@ class Client:
         self.hold_key_map = {}
         self.key_map = {}
         self.current_save_id: str | None = None
+        self.current_game_mode: str = "survival"
         self.saves_menu: SavesMenu | None = None
         self.main_menu = MainMenu(self.render)
         self.render.show_gui(self.main_menu)
@@ -205,7 +206,10 @@ class Client:
         if self.saves_menu is not None and self.saves_menu in self.render.drawing_GUIs:
             self.render.close_gui(self.saves_menu)
 
-        self.client_player = ClientPlayer(self)
+        level = save_manager.load_level(save_id) or {}
+        requested_mode = str(level.get("game_mode", "survival")).lower()
+        self.current_game_mode = requested_mode if requested_mode in ("creative", "survival") else "survival"
+        self.client_player = ClientPlayer(self, self.current_game_mode)
         self._install_game_controls()
 
         if self.server_mode == "subprocess":
@@ -261,6 +265,7 @@ class Client:
         self.game_manager.ing_mouse_lock = 0
         self.game_manager.last_pressed_time.clear()
         self.current_save_id = None
+        self.current_game_mode = "survival"
         self.server = None
         self.server_process = None
         self.game_started = False

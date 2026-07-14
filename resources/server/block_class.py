@@ -13,6 +13,12 @@ from resources.server.location import Location
 from resources.server.tags import BlockTag
 
 
+BLOCK_EXPERIENCE = {
+    "coal_ore": (0, 2), "diamond_ore": (3, 7), "emerald_ore": (3, 7),
+    "lapis_ore": (2, 5), "redstone_ore": (1, 5),
+}
+
+
 class Block(ABC):
     block_id = None
     name = None
@@ -22,6 +28,12 @@ class Block(ABC):
     _last_tex_id = -1    # 用于检测动画帧变化（id(tex)）
     solid = True
     friction = 0.6
+    # Used by the survival client to calculate vanilla-like hand mining time.
+    # Subclasses may override this with their Minecraft hardness value.
+    hardness = 1.5
+    preferred_tool = None
+    requires_correct_tool = False
+    required_tool_tier = "wood"
     break_sound = 'dig.stone'
     place_sound = None    # 放置时播放的音效，默认 None 与 break_sound 一样
     replaceable = False
@@ -117,6 +129,30 @@ class Block(ABC):
 
     def on_break(self):
         pass
+
+    def can_harvest(self, material) -> bool:
+        if not self.requires_correct_tool:
+            return True
+        tiers = {"wood": 0, "stone": 1, "iron": 2, "diamond": 3, "netherite": 4}
+        return (
+            getattr(material, "tool_type", None) == self.preferred_tool
+            and tiers.get(getattr(material, "tier", ""), -1) >= tiers.get(self.required_tool_tier, 0)
+        )
+
+    def get_drops(self, material):
+        """Base loot until specialised loot tables/functions are implemented."""
+        if not self.can_harvest(material):
+            return []
+        from resources.server.item_class import ItemStack
+        from resources.server.materials import get_block_item
+        return [ItemStack(get_block_item(self), 1)]
+
+    def get_experience(self, material) -> int:
+        if not self.can_harvest(material):
+            return 0
+        import random
+        bounds = BLOCK_EXPERIENCE.get(self.block_id)
+        return random.randint(*bounds) if bounds else 0
 
     def on_right_click(self) -> bool:
         """
@@ -577,6 +613,8 @@ class Leaves(Block):
     _texture_cache = {}   # key: (size, biome_id)
     _effect_cache = {}    # key: (size, biome_id, z, front_same, behind_leaf)
     break_sound = 'dig.grass'
+    hardness = 0.2
+    preferred_tool = "hoe"
 
     @client_method
     def get_texture(self, size, client: 'Client'):
@@ -658,6 +696,10 @@ class BottomSupport(Block):
 
 class Log(Block):
     break_sound = "dig.wood"
+    hardness = 2.0
+    preferred_tool = "axe"
+    hardness = 2.0
+    preferred_tool = 'axe'
 
 
 class GravityBlock(Block):

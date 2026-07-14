@@ -379,6 +379,7 @@ class Render(SkyMixin, BlockRenderMixin):
                     self.draw_entities(z_filter=0)
                     self.client.particle_manager.draw(self)
                     self.draw_hovered_block_outline()
+                    self.draw_destroy_progress()
                     self.client.client_player.skeleton.update()
                     self.draw_player()
                     self.draw_gui()
@@ -452,7 +453,7 @@ class Render(SkyMixin, BlockRenderMixin):
         entities = self.client_world.iter_entities()
         entities.sort(key=lambda entity: entity.y)
         for entity in entities:
-            if entity.entity_id == "falling_block":
+            if entity.entity_id in ("falling_block", "item"):
                 if entity.z != z_filter:
                     continue
             elif z_filter == 1:
@@ -505,6 +506,27 @@ class Render(SkyMixin, BlockRenderMixin):
 
         outline_rect = pygame.Rect(screen_x, screen_y, self.block_size, self.block_size)
         pygame.draw.rect(self.screen, (0, 0, 0), outline_rect, 1)
+
+    def draw_destroy_progress(self) -> None:
+        """Overlay the bundled destroy_stage texture while a survival block is mined."""
+        player = self.client.client_player
+        if player is None:
+            return
+        get_stage = getattr(player.game_mode, "get_destroy_stage", None)
+        if not callable(get_stage):
+            return
+        stage = get_stage()
+        target = getattr(player.game_mode, "break_target", None)
+        if stage is None or target is None:
+            return
+        x, y, _z, _block_id = target
+        texture = self.client.resources_manager.get_texture_img(f"blocks.destroy_stage_{stage}")
+        if texture is None:
+            return
+        texture = pygame.transform.scale(texture, (self.block_size, self.block_size))
+        sx = (x - self.camera.x - 0.5) * self.block_size + self.SCREEN_WIDTH // 2
+        sy = self.SCREEN_HEIGHT - (((y + 1) - self.camera.y + 0.5) * self.block_size + self.SCREEN_HEIGHT // 2)
+        self.blit(texture, (round(sx), round(sy)))
 
     # ===================== 调试 =====================
 

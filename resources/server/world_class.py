@@ -634,18 +634,25 @@ class World:
             self.schedule_chunk_and_boundary_fluids(rx)
             return changed
 
-    def break_block(self, x_loc: int | Location, y: int = None, z: int = None):
+    def break_block(self, x_loc: int | Location, y: int = None, z: int = None, tool=None):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block = self.get_block(x, y, z)
         if isinstance(block, AIR):
-            return
+            return 0
         location = Location(self, x, y, z)
         self.spawn_particle(BlockBreakParticleEffect(block, location, count=18))
         block.on_break()
+        # Drops exist in the world first; they are never placed directly into
+        # the miner's inventory.
+        for stack in block.get_drops(tool):
+            from resources.server.entities.item import Item
+            self.spawn_entity(Item(x + 0.5, y + 0.45, self, stack, z))
+        experience = block.get_experience(tool)
         for player in self.server.players:
             if player.is_loading_position(x, y, z):
                 self.server.send_client_socket(player, location, "BreakBlock")
         self.set_block(AIR(), x, y, z, False)
+        return experience
 
     def is_chunk_loaded(self, x):
         return x in self.regions

@@ -269,6 +269,11 @@ class EntitySkeleton(ABC):
         tint_x = self.entity.x + getattr(self.entity, "width", 1.0) * 0.5
         tint_y = self.entity.y + self._visual_center[1]
         tint = render.get_world_light_tint(tint_x, tint_y)
+        # Minecraft communicates damage on the model itself, not with a
+        # fullscreen flash.  Keep this after world lighting so the red hurt
+        # animation is visible even in a dark cave.
+        if getattr(self.entity, "hurt_time", 0) > 0:
+            tint = (255, 72, 72)
 
         if self._pinned:
             # 屏幕固定模式：视觉中心精确对准屏幕中央，完全绕过相机
@@ -419,8 +424,9 @@ class PlayerSkeleton(EntitySkeleton):
     # ---------- 公开触发方法 ----------
 
     def trigger_swing(self):
-        """由外部调用，触发一次挥臂动画（每次挥到固定位置，不累加）。"""
-        self._swing_time = 0.0
+        """Trigger a repeatable mining/use swing without resetting every held tick."""
+        if self._swing_time < 0 or self._swing_time >= 0.13:
+            self._swing_time = 0.0
 
     # ---------- 内部动画更新 ----------
 

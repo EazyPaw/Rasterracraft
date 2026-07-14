@@ -147,7 +147,7 @@ class SavesMenu(GUI):
         data = save_manager.create_save(
             name,
             version=getattr(self.render.client, "version", ""),
-            game_mode="creative",
+            game_mode="survival",
         )
         self._load_saves(data["id"])
         self.start_selected()

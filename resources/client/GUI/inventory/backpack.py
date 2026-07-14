@@ -23,12 +23,17 @@ import pygame
 
 from resources.client.GUI.gui import GUI
 from resources.server.item_class import EmptyItemStack, ItemStack
+from resources.server.crafting import find_recipe
 from resources.server.utils import reverse_search_dict
 
 
 class Backpack(GUI):
     """背包 GUI 主类，继承自 GUI 基类"""
     _texture_path = "gui.container.inventory"  # 背包背景纹理路径
+    crafting_columns = 2
+    crafting_rows = 2
+    crafting_offset = (98, 17)
+    crafting_output_offset = (154, 28)
 
     def __init__(self, render):
         super().__init__(render)
@@ -55,6 +60,9 @@ class Backpack(GUI):
         self.slot_rows = 4   # 物品栏行数（含快捷栏）
         self.slot_cols = 9   # 物品栏列数
         self.slot_size = 18  # 每格像素尺寸（缩放前基准值）
+        self.crafting_slots = [self._empty_stack() for _ in range(self.crafting_columns * self.crafting_rows)]
+        self.crafting_result = None
+        self.crafting_inputs = []
 
 
     @property
@@ -83,7 +91,117 @@ class Backpack(GUI):
 
     def _clear_slot(self, slot):
         """将指定槽位清空（替换为 EmptyItemStack）"""
-        self.inventory[slot] = self._empty_stack()
+        self._set_slot_stack(slot, self._empty_stack())
+
+    @staticmethod
+    def _is_crafting_slot(slot):
+        return isinstance(slot, tuple) and len(slot) == 2 and slot[0] == "crafting"
+
+    def _get_slot_stack(self, slot):
+        if self._is_crafting_slot(slot):
+            return self.crafting_slots[slot[1]]
+        return self.inventory[slot]
+
+    def _set_slot_stack(self, slot, stack):
+        if self._is_crafting_slot(slot):
+            self.crafting_slots[slot[1]] = stack
+        else:
+            self.inventory[slot] = stack
+
+    def _craft_positions(self):
+        texture = self.get_texture(self.render.gui_scale, self.render.client)
+        x = (self.render.SCREEN_WIDTH - texture.get_width()) // 2
+        y = (self.render.SCREEN_HEIGHT - texture.get_height()) // 2
+        scale = self.render.gui_scale
+        positions = []
+        for row in range(self.crafting_rows):
+            for col in range(self.crafting_columns):
+                positions.append((
+                    x + (self.crafting_offset[0] + col * self.slot_size) * scale,
+                    y + (self.crafting_offset[1] + row * self.slot_size) * scale,
+                ))
+        output = (
+            x + self.crafting_output_offset[0] * scale,
+            y + self.crafting_output_offset[1] * scale,
+        )
+        return positions, output
+
+    def _refresh_crafting(self):
+        match = find_recipe(self.crafting_slots, self.crafting_columns, self.crafting_rows)
+        if match is None:
+            self.crafting_result = None
+            self.crafting_inputs = []
+        else:
+            self.crafting_result, self.crafting_inputs = match
+
+    def _craft_slot_at_pos(self, pos):
+        positions, output = self._craft_positions()
+        size = self.slot_size * self.render.gui_scale
+        for index, (x, y) in enumerate(positions):
+            if x <= pos[0] <= x + size and y <= pos[1] <= y + size:
+                return ("crafting", index)
+        if output[0] <= pos[0] <= output[0] + size and output[1] <= pos[1] <= output[1] + size:
+            return "output"
+        return None
+
+    def _slot_target_at_pos(self, pos):
+        """Return the inventory or crafting-input slot under the cursor."""
+        crafting_slot = self._craft_slot_at_pos(pos)
+        if crafting_slot is not None:
+            return crafting_slot
+        return self._slot_at_pos(pos)
+
+    def _handle_crafting_click(self, target, button):
+        if target == "output":
+            result = self.crafting_result
+            if result is None:
+                return
+            if self._is_empty(self.dragging_item):
+                self.dragging_item = self._copy_stack(result)
+            elif self._can_stack(self.dragging_item, result) and self.dragging_item.amount + result.amount <= self.dragging_item.max_stack_size:
+                self.dragging_item.amount += result.amount
+            else:
+                return
+            for index in self.crafting_inputs:
+                stack = self.crafting_slots[index]
+                stack.reduce_amount(1)
+                if stack.is_empty():
+                    self.crafting_slots[index] = self._empty_stack()
+            self._refresh_crafting()
+            return
+
+        if button == 1:
+            self._left_click_slot(target)
+        else:
+            self._right_click_slot(target)
+        self._refresh_crafting()
+
+    def _draw_crafting_stack(self, stack, pos):
+        if self._is_empty(stack):
+            return
+        icon = stack.get_texture(self.render.gui_scale * 0.7, shadow=True)
+        if icon is None:
+            return
+        size = self.slot_size * self.render.gui_scale
+        x = pos[0] + (size - icon.get_width()) / 2
+        y = pos[1] + (size - icon.get_height()) / 2
+        self.render.blit(icon, (x, y))
+        if stack.amount > 1:
+            self.render.render_text(str(stack.amount), (pos[0] + size - self.render.gui_scale * 10, pos[1] + size - self.render.gui_scale * 11), (255, 255, 255), int(20 * self.render.gui_scale / 3.5), True)
+
+    def _draw_crafting(self):
+        self._refresh_crafting()
+        positions, output = self._craft_positions()
+        for index, pos in enumerate(positions):
+            if ("crafting", index) in self.drag_slots:
+                self.render.blit(
+                    self.selection_texture,
+                    (pos[0] + self.render.gui_scale, pos[1] + self.render.gui_scale),
+                )
+        for stack, pos in zip(self.crafting_slots, positions):
+            self._draw_crafting_stack(stack, pos)
+        if self.crafting_result is not None:
+            self._draw_crafting_stack(self.crafting_result, output)
 
     def _split_stack(self, item, amount):
         """
@@ -157,7 +275,7 @@ class Backpack(GUI):
         if self._is_empty(source):
             return 0
 
-        target = self.inventory[slot]
+        target = self._get_slot_stack(slot)
         if self._is_empty(target):
             # 空槽位：可以放入完整的最大堆叠数
             return source.max_stack_size
@@ -182,10 +300,10 @@ class Backpack(GUI):
         if amount <= 0:
             return 0
 
-        target = self.inventory[slot]
+        target = self._get_slot_stack(slot)
         if self._is_empty(target):
             # 目标为空：复制一个新的物品堆放入槽位
-            self.inventory[slot] = self._copy_stack(source, amount)
+            self._set_slot_stack(slot, self._copy_stack(source, amount))
         else:
             # 目标非空：直接在原有数量上累加
             target.amount += amount
@@ -206,17 +324,18 @@ class Backpack(GUI):
         if self._is_empty(self.dragging_item):
             return
 
-        target = self.inventory[slot]
+        target = self._get_slot_stack(slot)
         if self._is_empty(target):
             # 目标槽位为空：放入整组物品
-            self.inventory[slot] = self.dragging_item
+            self._set_slot_stack(slot, self.dragging_item)
             self.dragging_item = self._empty_stack()
         elif self._can_stack(target, self.dragging_item):
             # 可堆叠：尽可能多地合并（受 max_stack_size 限制）
             self._add_amount_to_slot(slot, self.dragging_item, self.dragging_item.amount)
         else:
             # 不可堆叠：交换位置
-            self.inventory[slot], self.dragging_item = self.dragging_item, target
+            self._set_slot_stack(slot, self.dragging_item)
+            self.dragging_item = target
 
     def _place_one_or_swap_with_slot(self, slot):
         """
@@ -226,13 +345,14 @@ class Backpack(GUI):
         if self._is_empty(self.dragging_item):
             return
 
-        target = self.inventory[slot]
+        target = self._get_slot_stack(slot)
         if self._is_empty(target) or self._can_stack(target, self.dragging_item):
             # 目标为空或可堆叠：放入 1 个
             self._add_amount_to_slot(slot, self.dragging_item, 1)
         else:
             # 不可堆叠：交换位置
-            self.inventory[slot], self.dragging_item = self.dragging_item, target
+            self._set_slot_stack(slot, self.dragging_item)
+            self.dragging_item = target
 
     def _left_click_slot(self, slot):
         """
@@ -240,7 +360,7 @@ class Backpack(GUI):
         - 手中无物品 → 拿起槽位中整组物品
         - 手中有物品 → 合并或交换（调用 _merge_or_swap_with_slot）
         """
-        target = self.inventory[slot]
+        target = self._get_slot_stack(slot)
         if self._is_empty(self.dragging_item):
             if not self._is_empty(target):
                 # 拿起整组物品
@@ -255,7 +375,7 @@ class Backpack(GUI):
         - 手中无物品 → 拿起槽位中半组物品（向上取整）
         - 手中有物品 → 放入 1 个或交换（调用 _place_one_or_swap_with_slot）
         """
-        target = self.inventory[slot]
+        target = self._get_slot_stack(slot)
         if self._is_empty(self.dragging_item):
             if not self._is_empty(target):
                 # 拿起半组（向上取整）：64→32, 63→32, 1→1
@@ -372,7 +492,7 @@ class Backpack(GUI):
         用于在拖拽槽位变化时重新计算分配方案。
         """
         for slot, amount in list(self._drag_preview_slots.items()):
-            target = self.inventory[slot]
+            target = self._get_slot_stack(slot)
             # 使用 _drag_material 比对材料（因为 dragging_item 可能已被设为 EmptyItemStack）
             if not self._is_empty(target) and target.material == self._drag_material:
                 take_back = min(amount, target.amount)
@@ -430,7 +550,7 @@ class Backpack(GUI):
         :param slot: 要丢弃物品的槽位索引
         :param single: True=只丢弃1个，False=丢弃整组
         """
-        target = self.inventory[slot]
+        target = self._get_slot_stack(slot)
         if self._is_empty(target):
             return
         if single:
@@ -536,6 +656,7 @@ class Backpack(GUI):
                             self.render.render_text(str(item.amount), (text_x, text_y), (255, 255, 255), font_size, True)
 
         # ---- 第3步：绘制鼠标上的拖拽物品（始终渲染在最上层） ----
+        self._draw_crafting()
         if self.dragging_item and not self.dragging_item.is_empty():
             texture_item = self.dragging_item.get_texture(self.render.gui_scale * 0.7, shadow=True)
             if texture_item is not None:
@@ -562,7 +683,11 @@ class Backpack(GUI):
         for event in events[:]:
             # ---- 鼠标按下（左键=1, 右键=3） ----
             if event.type == pygame.MOUSEBUTTONDOWN and event.button in (1, 3):
-                slot = self._slot_at_pos(event.pos)
+                slot = self._slot_target_at_pos(event.pos)
+                if slot == "output":
+                    self._handle_crafting_click(slot, event.button)
+                    events.remove(event)
+                    continue
                 if self._is_empty(self.dragging_item):
                     # 手中无物品：从槽位拿起物品
                     if slot is not None:
@@ -583,13 +708,15 @@ class Backpack(GUI):
             # ---- 鼠标移动（拖拽过程中记录经过的槽位，即使光标已空也允许继续） ----
             elif event.type == pygame.MOUSEMOTION:
                 if self.drag_button in (1, 3) and self.dragging_item is not None:
-                    self._add_drag_slot(self._slot_at_pos(event.pos))
+                    slot = self._slot_target_at_pos(event.pos)
+                    self._add_drag_slot(None if slot == "output" else slot)
                     events.remove(event)
 
             # ---- 鼠标松开（拖拽结束或确认操作） ----
             elif event.type == pygame.MOUSEBUTTONUP and event.button in (1, 3):
                 if self.drag_button == event.button:
-                    slot = self._slot_at_pos(event.pos)
+                    slot = self._slot_target_at_pos(event.pos)
+                    slot = None if slot == "output" else slot
                     self._add_drag_slot(slot)
                     # 拖拽移动过且有有效槽位 → 确认分发（物品已在实时预览中放入）
                     if self.drag_moved and len(self.drag_slots) >= 1:
@@ -609,8 +736,18 @@ class Backpack(GUI):
 
             # ---- 键盘事件 ----
             elif event.type == pygame.KEYDOWN:
+                # ESC closes the currently open container instead of opening
+                # the pause menu through the global game-event handler.
+                if event.key == pygame.K_ESCAPE:
+                    open_containers = [
+                        gui for gui in self.render.drawing_GUIs
+                        if isinstance(gui, Backpack)
+                    ]
+                    if open_containers and open_containers[-1] is self:
+                        self.render.close_gui(self)
+                        events.remove(event)
                 # 打开/关闭背包快捷键
-                if event.key in reverse_search_dict(self.render.client.key_map, self.render.client.client_player.game_mode.open_inventory):
+                elif event.key in reverse_search_dict(self.render.client.key_map, self.render.client.client_player.game_mode.open_inventory):
                     self.render.client.client_player.game_mode.open_inventory()
                     events.remove(event)
                 # Q键丢弃物品
@@ -632,8 +769,16 @@ class Backpack(GUI):
         self.render.client.game_manager.ing_mouse_lock += 1
 
     def on_close(self):
-        """背包关闭时的回调：重置拖拽状态、丢弃手中物品、解除鼠标锁定"""
+        """背包关闭时归还临时物品并解除鼠标锁定。"""
+        for index, stack in enumerate(self.crafting_slots):
+            if not self._is_empty(stack):
+                if not self.render.client.client_player.add_item_stack(stack):
+                    self.drop_item_stack(stack)
+                self.crafting_slots[index] = self._empty_stack()
+        self._refresh_crafting()
         self._reset_drag()
-        self._drop_cursor_item(single=False)
+        if not self._is_empty(self.dragging_item):
+            if not self.render.client.client_player.add_item_stack(self.dragging_item):
+                self.drop_item_stack(self.dragging_item)
+            self.dragging_item = self._empty_stack()
         self.render.client.game_manager.ing_mouse_lock -= 1
-

@@ -115,7 +115,7 @@ def save_level(save_id: str, data: dict[str, Any]) -> None:
     _write_msgpack(level_path(save_id), data, compress=False)
 
 
-def create_save(display_name: str = "New World", *, version: str = "", game_mode: str = "creative") -> dict[str, Any]:
+def create_save(display_name: str = "New World", *, version: str = "", game_mode: str = "survival") -> dict[str, Any]:
     ensure_saves_root()
     base_id = _safe_save_id(display_name)
     save_id = f"{base_id}_{int(_now())}_{uuid.uuid4().hex[:6]}"
@@ -139,7 +139,7 @@ def ensure_level(
     *,
     display_name: str = "New World",
     version: str = "",
-    game_mode: str = "creative",
+    game_mode: str = "survival",
 ) -> dict[str, Any]:
     data = load_level(save_id)
     if data is not None:

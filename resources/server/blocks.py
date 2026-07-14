@@ -3,7 +3,7 @@ import os
 from resources.server.biome import get_biome_by_id
 
 if os.environ.get('PYCRAFT_CLIENT') == '1':
-    pass
+    import pygame
 
 from resources.server.block_class import *
 from resources.server.tags import BlockTag
@@ -32,44 +32,60 @@ class STONE(Block):
     block_id = 'stone'
     name = 'stone'
     _texture_path = 'blocks.stone'
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
 
 class GRANITE(Block):
     block_id = 'granite'
     name = 'granite'
     _texture_path = 'blocks.stone_granite'
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
 
 class DIORITE(Block):
     block_id = 'diorite'
     name = 'diorite'
     _texture_path = 'blocks.stone_diorite'
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
 
 class ANDESITE(Block):
     block_id = 'andesite'
     name = 'andesite'
     _texture_path = 'blocks.stone_andesite'
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
 
 class BEDROCK(Block):
     block_id = 'bedrock'
     name = 'bedrock'
     _texture_path = 'blocks.bedrock'
+    breakable = False
+    hardness = -1
 
 class DIRT(Block):
     block_id = 'dirt'
     name = 'dirt'
     _texture_path = 'blocks.dirt'
     break_sound = 'dig.gravel'
+    hardness = 0.5
+    preferred_tool = 'shovel'
 
 class COARSE_DIRT(Block):
     block_id = 'coarse_dirt'
     name = 'coarse dirt'
     _texture_path = 'blocks.coarse_dirt'
     break_sound = 'dig.gravel'
+    hardness = 0.5
+    preferred_tool = 'shovel'
 
 class PODZOL(Block):
     block_id = 'podzol'
     name = 'podzol'
     _texture_path = 'blocks.dirt_podzol_side'
     break_sound = 'dig.gravel'
+    hardness = 0.5
+    preferred_tool = 'shovel'
     Tags = [BlockTag.GRASS_BLOCKS]
 
 class GRASS_BLOCK(Block):
@@ -77,6 +93,8 @@ class GRASS_BLOCK(Block):
     name = 'grass block'
     light_attenuation = 5
     break_sound = 'dig.gravel'
+    hardness = 0.6
+    preferred_tool = 'shovel'
     _side_texture_cache = {}  # 缓存不同尺寸的侧面纹理
     Tags = [BlockTag.GRASS_BLOCKS]
 
@@ -140,6 +158,7 @@ class SHORT_GRASS(GrassStain):
     block_id = 'short_grass'
     name = 'short grass'
     _texture_path = 'blocks.tallgrass'
+    hardness = 0.0
 
 
 class DoublePlantBottomMixin:
@@ -300,6 +319,57 @@ class OAK_PLANK(Block):
     name = 'oak plank'
     _texture_path = 'blocks.planks_oak'
     break_sound = 'dig.wood'
+    hardness = 2.0
+    preferred_tool = 'axe'
+
+class BIRCH_PLANK(Block):
+    block_id = 'birch_plank'
+    name = 'birch plank'
+    _texture_path = 'blocks.planks_birch'
+    break_sound = 'dig.wood'
+    hardness = 2.0
+    preferred_tool = 'axe'
+
+class SPRUCE_PLANK(Block):
+    block_id = 'spruce_plank'
+    name = 'spruce plank'
+    _texture_path = 'blocks.planks_spruce'
+    break_sound = 'dig.wood'
+    hardness = 2.0
+    preferred_tool = 'axe'
+
+class JUNGLE_PLANK(Block):
+    block_id = 'jungle_plank'
+    name = 'jungle plank'
+    _texture_path = 'blocks.planks_jungle'
+    break_sound = 'dig.wood'
+    hardness = 2.0
+    preferred_tool = 'axe'
+
+class ACACIA_PLANK(Block):
+    block_id = 'acacia_plank'
+    name = 'acacia plank'
+    _texture_path = 'blocks.planks_acacia'
+    break_sound = 'dig.wood'
+    hardness = 2.0
+    preferred_tool = 'axe'
+
+class DARK_OAK_PLANK(Block):
+    block_id = 'dark_oak_plank'
+    name = 'dark oak plank'
+    _texture_path = 'blocks.planks_big_oak'
+    break_sound = 'dig.wood'
+    hardness = 2.0
+    preferred_tool = 'axe'
+
+
+class CRAFTING_TABLE(Block):
+    block_id = 'crafting_table'
+    name = 'crafting table'
+    _texture_path = 'blocks.crafting_table_front'
+    break_sound = 'dig.wood'
+    hardness = 2.5
+    preferred_tool = 'axe'
 
 class GLOWSTONE(Block):
     block_id = 'glowstone'
@@ -308,6 +378,8 @@ class GLOWSTONE(Block):
     light_source = 15
     light_attenuation = 0
     break_sound = 'dig.glass'
+    hardness = 0.3
+    preferred_tool = 'pickaxe'
 
 class POPPY(Plant):
     block_id = 'poppy'
@@ -384,39 +456,56 @@ class SAND(GravityBlock):
     name = 'sand'
     _texture_path = 'blocks.sand'
     break_sound = "dig.sand"
+    hardness = 0.5
+    preferred_tool = 'shovel'
 
 class RED_SAND(GravityBlock):
     block_id = 'red_sand'
     name = 'red sand'
     _texture_path = 'blocks.red_sand'
     break_sound = "dig.sand"
+    hardness = 0.5
+    preferred_tool = 'shovel'
 
 class SANDSTONE(Block):
     block_id = 'sandstone'
     name = 'sandstone'
     _texture_path = 'blocks.sandstone_normal'
+    hardness = 0.8
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
 
 class RED_SANDSTONE(Block):
     block_id = 'red_sandstone'
     name = 'red sandstone'
     _texture_path = 'blocks.red_sandstone_normal'
+    hardness = 0.8
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
 
 class GRAVEL(GravityBlock):
     block_id = 'gravel'
     name = 'gravel'
     _texture_path = 'blocks.gravel'
     break_sound = 'dig.gravel'
+    hardness = 0.6
+    preferred_tool = 'shovel'
 
 class CLAY(Block):
     block_id = 'clay'
     name = 'clay'
     _texture_path = 'blocks.clay'
     break_sound = 'dig.gravel'
+    hardness = 0.6
+    preferred_tool = 'shovel'
 
 class HARDENED_CLAY(Block):
     block_id = 'hardened_clay'
     name = 'hardened clay'
     _texture_path = 'blocks.hardened_clay'
+    hardness = 1.25
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
 
 class SNOW(BottomSupport):
     block_id = 'snow'
@@ -426,6 +515,8 @@ class SNOW(BottomSupport):
     solid = False
     light_attenuation = 1
     has_transparent_pixels = True
+    hardness = 0.1
+    preferred_tool = 'shovel'
 
     _texture_cache = {}
 
@@ -460,6 +551,8 @@ class SNOW_BLOCK(Block):
     name = 'snow block'
     _texture_path = 'blocks.snow'
     break_sound = 'dig.snow'
+    hardness = 0.2
+    preferred_tool = 'shovel'
 
 class ICE(Block):
     block_id = 'ice'
@@ -467,6 +560,8 @@ class ICE(Block):
     _texture_path = 'blocks.ice'
     break_sound = 'dig.glass'
     friction = 0.9
+    hardness = 0.5
+    preferred_tool = 'pickaxe'
 
 class WATER(FluidBlock):
     block_id = 'water'
@@ -511,6 +606,8 @@ class CACTUS(Block):
     name = 'cactus'
     _texture_path = 'blocks.cactus_side'
     break_sound = 'dig.cloth'
+    hardness = 0.4
+    preferred_tool = 'axe'
 
     def on_update(self):
         below = self.location.world.get_block(self.location.add(0, -1, 0))
@@ -534,36 +631,63 @@ class COAL_ORE(Block):
     block_id = 'coal_ore'
     name = 'coal ore'
     _texture_path = 'blocks.coal_ore'
+    hardness = 3.0
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
 
 class IRON_ORE(Block):
     block_id = 'iron_ore'
     name = 'iron ore'
     _texture_path = 'blocks.iron_ore'
+    hardness = 3.0
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
+    required_tool_tier = 'stone'
 
 class GOLD_ORE(Block):
     block_id = 'gold_ore'
     name = 'gold ore'
     _texture_path = 'blocks.gold_ore'
+    hardness = 3.0
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
+    required_tool_tier = 'iron'
 
 class DIAMOND_ORE(Block):
     block_id = 'diamond_ore'
     name = 'diamond ore'
     _texture_path = 'blocks.diamond_ore'
+    hardness = 3.0
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
+    required_tool_tier = 'iron'
 
 class EMERALD_ORE(Block):
     block_id = 'emerald_ore'
     name = 'emerald ore'
     _texture_path = 'blocks.emerald_ore'
+    hardness = 3.0
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
+    required_tool_tier = 'iron'
 
 class LAPIS_ORE(Block):
     block_id = 'lapis_ore'
     name = 'lapis ore'
     _texture_path = 'blocks.lapis_ore'
+    hardness = 3.0
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
+    required_tool_tier = 'stone'
 
 class REDSTONE_ORE(Block):
     block_id = 'redstone_ore'
     name = 'redstone ore'
     _texture_path = 'blocks.redstone_ore'
+    hardness = 3.0
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
+    required_tool_tier = 'iron'
 
 class BLUE_ORCHID(Plant):
     block_id = 'blue_orchid'
@@ -589,6 +713,10 @@ class DIAMOND_BLOCK(Block):
     block_id = 'diamond_block'
     name = 'tile.blockDiamond.name'
     _texture_path = 'blocks.diamond_block'
+    hardness = 5.0
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
+    required_tool_tier = 'iron'
 
 
 

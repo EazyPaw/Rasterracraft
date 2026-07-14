@@ -1,8 +1,38 @@
 import math
+import time
+
+import pygame
 
 from resources.client.entity_skeleton import FallingBlockSkeleton, PlayerSkeleton
 from resources.server.blocks import get_block_by_id
+from resources.server.item_class import ItemStack
 from resources.server.location import Location, Vector
+from resources.server.materials import get_material_by_id
+
+
+class ItemEntityRenderer:
+    """Small, bobbing world item renderer for server-synchronised drops."""
+    def __init__(self, client, entity):
+        self.client = client
+        self.entity = entity
+        self.created_at = time.perf_counter()
+
+    def update(self):
+        pass
+
+    def draw(self):
+        item = getattr(self.entity, "item", None)
+        if item is None or item.is_empty():
+            return
+        render = self.client.render
+        texture = item.get_texture(render.trans_scale * 0.36, shadow=True)
+        if texture is None:
+            return
+        bob = math.sin((time.perf_counter() - self.created_at) * 4.0) * render.block_size * 0.04
+        sx, sy = render.trans_world_location((self.entity.x, self.entity.y + 0.22))
+        tint = (255, 72, 72) if getattr(self.entity, "hurt_time", 0) > 0 else render.get_world_light_tint(self.entity.x, self.entity.y)
+        texture = render.get_tinted_surface(texture, tint)
+        render.blit(texture, (round(sx - texture.get_width() / 2), round(sy - texture.get_height() / 2 + bob)))
 
 
 class ClientEntity:
@@ -20,6 +50,8 @@ class ClientEntity:
         self.sneaking = bool(packet.get('sneaking', False))
         self.sprinting = bool(packet.get('sprinting', False))
         self.on_ground = bool(packet.get('on_ground', False))
+        self.health = float(packet.get('health', 20))
+        self.hurt_time = int(packet.get('hurt_time', 0))
         self.name = packet.get('name', self.uuid[:8])
         self.block = None
         self.skeleton = None
@@ -42,6 +74,8 @@ class ClientEntity:
         self.sneaking = bool(packet.get('sneaking', self.sneaking))
         self.sprinting = bool(packet.get('sprinting', self.sprinting))
         self.on_ground = bool(packet.get('on_ground', self.on_ground))
+        self.health = float(packet.get('health', self.health))
+        self.hurt_time = int(packet.get('hurt_time', self.hurt_time))
         self.name = packet.get('name', self.name)
 
         block_data = packet.get('block_data')
@@ -55,6 +89,13 @@ class ClientEntity:
                 self.z,
             )
             self.block = block
+        item_data = packet.get('item_data')
+        if item_data:
+            self.item = ItemStack(
+                get_material_by_id(item_data.get('id', 'air')),
+                int(item_data.get('amount', 1)),
+                item_data.get('nbt', {}),
+            )
         self._ensure_skeleton()
 
     def _ensure_skeleton(self):
@@ -64,3 +105,5 @@ class ClientEntity:
             self.skeleton = PlayerSkeleton(self.client, self, pinned=False)
         elif self.entity_id == "falling_block":
             self.skeleton = FallingBlockSkeleton(self.client, self)
+        elif self.entity_id == "item":
+            self.skeleton = ItemEntityRenderer(self.client, self)

@@ -109,6 +109,7 @@ class Server:
 
                 spawn_x, spawn_y = self.server.get_player_spawn()
                 player = Player(spawn_x, spawn_y, self.server.worlds["overworld"])
+                self.server.restore_player_state(player)
                 self.connections[player] = (client_sock, client_addr)
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
@@ -252,6 +253,16 @@ class Server:
         player_data = self.level_data.get("player", {})
         return float(player_data.get("x", 0.0)), float(player_data.get("y", 100.0))
 
+    def restore_player_state(self, player: Player) -> None:
+        if not self.level_data:
+            return
+        data = self.level_data.get("player", {})
+        player.health = max(0.0, min(player.max_health, float(data.get("health", player.max_health))))
+        player.food_level = max(0, min(20, int(data.get("food_level", 20))))
+        player.saturation = max(0.0, min(float(player.food_level), float(data.get("saturation", 5.0))))
+        player.experience = max(0, int(data.get("experience", 0)))
+        player.experience_level = max(0, int(data.get("experience_level", 0)))
+
     def save_all(self, last_player: Player | None = None, *, force: bool = False):
         if not self.save_id:
             return
@@ -299,7 +310,14 @@ class Server:
         if player is None and self.players:
             player = self.players[0]
         if player is not None:
-            self.level_data["player"] = {"x": float(player.x), "y": float(player.y)}
+            self.level_data["player"] = {
+                "x": float(player.x), "y": float(player.y),
+                "health": float(player.health),
+                "food_level": int(getattr(player, "food_level", 20)),
+                "saturation": float(getattr(player, "saturation", 5.0)),
+                "experience": int(getattr(player, "experience", 0)),
+                "experience_level": int(getattr(player, "experience_level", 0)),
+            }
         save_manager.save_level(self.save_id, self.level_data)
 
     def _resolve_chat_msg(self, msg, color=None):

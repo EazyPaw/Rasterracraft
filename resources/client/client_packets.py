@@ -4,7 +4,9 @@ from typing import TYPE_CHECKING
 from resources.client.client_player import ClientPlayer
 from resources.server.block_class import Block
 from resources.server.blocks import get_block_by_id
+from resources.server.item_class import ItemStack
 from resources.server.location import Location
+from resources.server.materials import get_material_by_id
 
 if TYPE_CHECKING:
     from resources.client.client_main import Client
@@ -57,6 +59,11 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             client.client_player.name = packet['name']
         client.client_player.x = packet['x']
         client.client_player.y = packet['y']
+        if client.client_player is not None:
+            for key in ('health', 'food_level', 'saturation', 'experience', 'experience_level'):
+                if key in packet:
+                    setattr(client.client_player, key, packet[key])
+            client.client_player.dead = False
     elif packet['__class__'] == 'BreakBlock':
         # {
         #     '__class__': 'BreakBlock',
@@ -122,6 +129,19 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         client.client_world.world_time = packet.get('time', 0) % 24000
     elif packet['__class__'] == 'Particle':
         client.particle_manager.handle_packet(packet)
+    elif packet['__class__'] == 'ItemPickup':
+        player = client.client_player
+        item_data = packet.get('item', {})
+        if player is not None:
+            player.add_item_stack(ItemStack(
+                get_material_by_id(item_data.get('id', 'air')),
+                int(item_data.get('amount', 1)),
+                item_data.get('nbt', {}),
+            ))
+            player.world.play_sound("random.pop", player.x, player.y, 0)
+    elif packet['__class__'] == 'Experience':
+        if client.client_player is not None:
+            client.client_player.add_experience(int(packet.get('amount', 0)))
     elif packet['__class__'] in ('EntitySpawn', 'EntityUpdate'):
         client.client_world.update_entity(packet)
     elif packet['__class__'] == 'EntityRemove':
@@ -155,6 +175,9 @@ def encode_packet(obj, obj_type = None, args = None) -> dict:
             'sprinting': obj.sprinting,
             'facing': obj.facing,
             'on_ground': obj.on_ground,
+            'health': obj.health,
+            'food_level': obj.food_level,
+            'saturation': obj.saturation,
         }
     elif  isinstance(obj, Block) and obj_type == 'BreakBlock':
         location: Location = obj.location
