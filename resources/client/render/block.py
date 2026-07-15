@@ -699,7 +699,7 @@ class BlockRenderMixin:
         2. 缓存纹理：基于光照参数构建缓存键，复用光照纹理
         3. 内联计算：关键路径使用内联辅助函数消除函数调用开销
 
-        绘制顺序：先 z=1（前景），后 z=0（背景）。
+        绘制顺序：先 z=1（背景），后 z=0（前景）。
         """
         if self._draw_block_section_cached():
             return
@@ -884,7 +884,7 @@ class BlockRenderMixin:
         管线：
         1. 计算四角总光照（TL/TR/BL/BR 四点平均）
         2. 分离天空/方块光照贡献，计算天空占比
-        3. AO 计算（仅 z=1 层受周围实体方块影响）
+        3. AO 计算（仅 z=1 背景层受周围实体方块影响）
         4. 计算最终角颜色（含色调）
         5. 从缓存获取/生成光照纹理
         6. 绘制到屏幕
@@ -923,7 +923,7 @@ class BlockRenderMixin:
         sr_br = _sky_ratio(br_sky, br_bl)
 
         # ---- 2. AO 环境光遮蔽 ----
-        # 仅 z=1 层受周围方块遮挡影响
+            # 仅 z=1 背景层受周围方块遮挡影响
         if z == 0:
             ao_tl = ao_tr = ao_bl = ao_br = 1.0
         else:

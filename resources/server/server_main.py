@@ -18,7 +18,7 @@ from resources.server.player import Player
 from resources.server.server_packets import encode_packet, decode_packet
 from resources.server.text import Text
 from resources.server.utils import recv_exact, set_client, set_server
-from resources.server.world_class import World, WorldAttribute
+from resources.server.world_class import Weather, World, WorldAttribute
 
 
 class EventDict(TypedDict):
@@ -120,6 +120,8 @@ class Server:
                 # Use Player.teleport_to even for the initial position so the
                 # first client movement cannot race ahead of its spawn packet.
                 player.teleport_to(player.x, player.y)
+                self.server.send_client_socket(player, player.world.get_weather_packet(), "Forward")
+                self.server.send_client_socket(player, player, "GamemodeUpdate")
                 client_thread = threading.Thread(target=self.handle_client, args=(client_sock, client_addr, player), name="SocketClientThread")
                 client_thread.daemon = True
                 client_thread.start()
@@ -223,6 +225,15 @@ class Server:
                                          , WorldAttribute()
                                          , seed)
         self.worlds["overworld"].world_time = world_time
+        weather_name = str(world_meta.get("weather", Weather.CLEAR.value)) if self.save_id else Weather.CLEAR.value
+        try:
+            self.worlds["overworld"].weather = Weather(weather_name)
+        except ValueError:
+            self.worlds["overworld"].weather = Weather.CLEAR
+        if self.save_id:
+            self.worlds["overworld"].weather_tick = max(
+                1, int(world_meta.get("weather_tick", self.worlds["overworld"].weather_tick))
+            )
         self.initialized = True
         self.ready.set()  # 通知 socket 线程服务器已就绪
         self.run()
@@ -231,6 +242,8 @@ class Server:
         self.server_ticks += 1
         for world in self.worlds.values():
             world.world_time = (world.world_time + 1) % 24000
+            world.tick_weather()
+            world.tick_random_blocks()
         if self.server_ticks % 5 == 0:
             for player in self.players:
                 self.send_client_socket(
@@ -264,6 +277,11 @@ class Server:
         player.saturation = max(0.0, min(float(player.food_level), float(data.get("saturation", 5.0))))
         player.experience = max(0, int(data.get("experience", 0)))
         player.experience_level = max(0, int(data.get("experience_level", 0)))
+        # 恢复玩家的游戏模式（优先读取玩家存档，回退到世界默认模式）
+        saved_gamemode = data.get("gamemode") or self.level_data.get("game_mode")
+        if saved_gamemode:
+            from resources.client.game_mode import get_gamemode_by_id
+            player.gamemode = get_gamemode_by_id(saved_gamemode)
 
     def save_all(self, last_player: Player | None = None, *, force: bool = False):
         if not self.save_id:
@@ -307,6 +325,8 @@ class Server:
                 "world_time": int(world.world_time),
                 "generator": type(world.generator).__name__,
                 "max_build_height": int(world.attribute.MAX_BUILD_HEIGHT),
+                "weather": world.weather.value,
+                "weather_tick": int(world.weather_tick),
             }
         player = last_player
         if player is None and self.players:
@@ -319,6 +339,7 @@ class Server:
                 "saturation": float(getattr(player, "saturation", 5.0)),
                 "experience": int(getattr(player, "experience", 0)),
                 "experience_level": int(getattr(player, "experience_level", 0)),
+                "gamemode": player.gamemode.name_id if hasattr(player.gamemode, "name_id") else "survival",
             }
         save_manager.save_level(self.save_id, self.level_data)
 

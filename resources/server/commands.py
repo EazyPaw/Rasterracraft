@@ -25,6 +25,7 @@ class CommandExecutor:
         "say": self.say_command,
         "fill": self.fill_command,
         "time": self.time,
+        "weather": self.weather,
         "gamemode": self.switch_gamemode,
     }
 
@@ -62,6 +63,25 @@ class CommandExecutor:
             return f"Now time is {executor.world.world_time}"
         else:
             raise ValueError(f"Invalid args: {args}")
+
+    def weather(self, args, executor: Player | str):
+        """Set or query the Minecraft-style global precipitation cycle."""
+        if not args or args[0].lower() == "query":
+            world = executor.world if isinstance(executor, Player) else self.server.worlds[self.server.main_world_id]
+            return f"Weather is {world.weather.value} ({world.weather_tick} ticks remaining)"
+        state = args[0].lower()
+        if state not in ("clear", "rain"):
+            raise ValueError("Usage: /weather <clear|rain> [seconds]")
+        duration_ticks = None
+        if len(args) > 1:
+            try:
+                duration_ticks = max(1, int(float(args[1]) * self.server.rate))
+            except (ValueError, OverflowError) as exc:
+                raise ValueError("Weather duration must be a number of seconds") from exc
+        world = executor.world if isinstance(executor, Player) else self.server.worlds[self.server.main_world_id]
+        from resources.server.world_class import Weather
+        world.set_weather(Weather(state), duration_ticks)
+        return f"Weather set to {state}"
 
     def list_region(self, args, executor: Player | str):
         world_name = args[0]

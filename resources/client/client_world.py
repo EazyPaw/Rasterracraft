@@ -10,6 +10,7 @@ from resources.client.client_entity import ClientEntity
 from resources.server.block_class import Block
 from resources.server.blocks import get_block_by_id, AIR
 from resources.server.location import Location, decide_x_or_loc
+from resources.server.biome import get_precipitation_type
 
 
 class ClientWorld:
@@ -22,6 +23,8 @@ class ClientWorld:
         self.biome_map: dict[int, np.ndarray[Any, np.dtype[np.str_]]] = {}
         self.y_max = 256
         self.world_time = 0
+        self.weather = "clear"
+        self.weather_remaining_ticks = 0
         self.client = client
         self._render_revision = 0
         self._render_chunk_versions: dict[int, int] = {}
@@ -32,6 +35,7 @@ class ClientWorld:
         self._pending_chunk_block_updates: dict[int, dict[tuple[int, int, int], Block]] = {}
         self.entities: dict[str, ClientEntity] = {}
         self._entities_lock = threading.RLock()
+        self._precipitation_height_cache: dict[tuple[int, int], tuple[int, int]] = {}
 
     def _mark_render_chunk_dirty(self, rx: int) -> None:
         self._render_revision += 1
@@ -157,6 +161,34 @@ class ClientWorld:
         local_x = x % 16
         return str(chunk[local_x, y])
 
+    def get_precipitation_type(self, x: int, y: int) -> str:
+        biome_id = self.get_biome(x, max(0, min(self.y_max - 1, int(y))))
+        if biome_id is None or biome_id == "void":
+            return "none"
+        return get_precipitation_type(biome_id, y)
+
+    def get_precipitation_height(self, x: int, z: int = 0) -> int | None:
+        """Return the first open Y above the highest solid block in one layer."""
+        rx = int(x) // 16
+        chunk = self._regions.get(rx)
+        if chunk is None:
+            return None
+        chunk_version = self._render_chunk_versions.get(rx, 0)
+        z = 1 if int(z) else 0
+        cache_key = (int(x), z)
+        cached = self._precipitation_height_cache.get(cache_key)
+        if cached is not None and cached[0] == chunk_version:
+            return cached[1]
+
+        local_x = int(x) % 16
+        height = 0
+        for y in range(self.y_max - 1, -1, -1):
+            if chunk[local_x, y, z].solid:
+                height = y + 1
+                break
+        self._precipitation_height_cache[cache_key] = (chunk_version, height)
+        return height
+
     def unload_chunk(self, x: int):
         """卸载区块，同时清理方塊、光照和生物群系数据"""
         with self._chunk_state_lock:
@@ -168,6 +200,9 @@ class ClientWorld:
             self._loading_chunks.discard(x)
             self._chunk_load_versions.pop(x, None)
             self._pending_chunk_block_updates.pop(x, None)
+            for world_x in range(x * 16, x * 16 + 16):
+                self._precipitation_height_cache.pop((world_x, 0), None)
+                self._precipitation_height_cache.pop((world_x, 1), None)
         with self._entities_lock:
             for uuid, entity in list(self.entities.items()):
                 if int(entity.x // 16) == x:
@@ -237,21 +272,29 @@ class ClientWorld:
         self.play_sound(block.break_sound, block.location)
         self.set_block(AIR(), x, y, z)
 
-    def play_sound(self, sound_id: str, x_loc: int | Location, y: int | None = None, z: int | None = None):
+    def play_sound(
+        self,
+        sound_id: str,
+        x_loc: int | Location,
+        y: int | None = None,
+        z: int | None = None,
+        *,
+        volume: float = 1.0,
+    ):
         """
         在指定坐标播放音效，根据玩家位置自动调整立体声左右平衡及距离衰减。
         """
         # 解析坐标
         x, y, z = decide_x_or_loc(x_loc, y, z)
 
-        # 获取玩家位置（假设 client 有 player 对象，且 player 有 x, y, z 属性）
-        player = getattr(self.client, 'player', None)
+        # 客户端实际使用 client_player；兼容旧的 client.player 引用。
+        player = getattr(self.client, 'client_player', None) or getattr(self.client, 'player', None)
         if player is None:
             # 无玩家信息时降级为普通播放
-            self.client.resources_manager.play_sound(sound_id)
+            self.client.resources_manager.play_sound(sound_id, volume=volume)
             return
 
-        px, py, pz = player.x, player.y, player.z
+        px, py, pz = player.x, player.y, getattr(player, 'z', 0.0)
 
         # 计算相对位置
         dx = x - px
@@ -270,11 +313,13 @@ class ClientWorld:
         # 立体声左右平衡计算（基于水平偏移 dx）
         # pan 范围 [-1, 1]，-1 完全左声道，1 完全右声道
         pan = max(-1.0, min(1.0, dx / max_pan_range))
-        left_vol = vol_factor * (1.0 - pan) / 2.0
-        right_vol = vol_factor * (1.0 + pan) / 2.0
+        # Equal-power panning keeps a centered source from sounding quieter
+        # while still reaching a single channel at the far left/right.
+        left_vol = vol_factor * math.sqrt((1.0 - pan) / 2.0)
+        right_vol = vol_factor * math.sqrt((1.0 + pan) / 2.0)
 
         # 调用资源管理器播放立体声音效
         self.client.resources_manager.play_sound(
             sound_id,
-            stereo_balance=(left_vol, right_vol)
+            stereo_balance=(left_vol * volume, right_vol * volume)
         )

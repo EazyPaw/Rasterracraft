@@ -9,7 +9,7 @@ from resources.server.world_class import World
 
 
 class Player(Entity):
-    def __init__(self, x, y, world):
+    def __init__(self, x, y, world, gamemode = None):
         super().__init__(x, y, world)
         self.world: World = world
         self.entity_id = "player"
@@ -32,7 +32,7 @@ class Player(Entity):
         # 疾跑粒子节流：避免每帧都生成粒子造成刷屏
         self._sprint_particle_timer: int = 0
         self._last_sprint_particle_x: float | None = None
-        self.gamemode = SurvivalMode
+        self.gamemode = gamemode if gamemode is not None else SurvivalMode
         self.spawn_point = 0
 
     def on_moving(self):

@@ -377,22 +377,34 @@ class ResourcesManager:
                 'sounds': info.get('sounds', [])
             }
 
-    def play_sound(self, sound_id: str, volume: float = 1.0, stereo_balance: tuple = None):
+    def play_sound(
+        self,
+        sound_id: str,
+        volume: float = 1.0,
+        stereo_balance: tuple = None,
+        loops: int = 0,
+        fade_ms: int = 0,
+        channel_id: int | None = None,
+    ):
         """
         播放音效。
         :param sound_id: 音效 ID（对应 sounds.json 中的键）
         :param volume: 单通道音量（当 stereo_balance 为 None 时使用）
         :param stereo_balance: 可选的 (left, right) 音量元组，用于立体声定位。
+        :param loops: 额外循环次数；-1 表示持续循环。
+        :param fade_ms: 淡入时长（毫秒）。
+        :param channel_id: 可选的固定混音通道，适合持续环境音。
+        :return: 非流式音效的 pygame Channel，无法播放时返回 None。
         """
         if sound_id not in self.sounds:
             print(f"Sound ID '{sound_id}' not found in loaded sounds.json")
-            return
+            return None
 
         sound_data = self.sounds[sound_id]
         sound_list = sound_data['sounds']
         if not sound_list:
             print(f"No sound files defined for ID '{sound_id}'")
-            return
+            return None
 
         # 随机选择一个条目
         chosen = random.choice(sound_list)
@@ -408,7 +420,7 @@ class ResourcesManager:
                 print(f"Invalid sound entry for ID '{sound_id}': missing 'name'")
                 return
             stream = chosen.get('stream', False)
-            base_volume = chosen.get('volume', volume)
+            base_volume = float(chosen.get('volume', 1.0)) * volume
         else:
             print(f"Invalid sound entry type for ID '{sound_id}'")
             return
@@ -424,7 +436,8 @@ class ResourcesManager:
                 # 流式播放（背景音乐）不支持立体声控制，使用基础音量
                 pygame.mixer.music.load(full_path)
                 pygame.mixer.music.set_volume(base_volume)
-                pygame.mixer.music.play()
+                pygame.mixer.music.play(loops=loops, fade_ms=fade_ms)
+                return None
             else:
                 # 非流式音效
                 if full_path not in self.sound_objects:
@@ -433,15 +446,35 @@ class ResourcesManager:
 
                 if stereo_balance is not None:
                     left, right = stereo_balance
+                    left *= base_volume
+                    right *= base_volume
                     # 播放并获取 Channel，直接设置左右音量
-                    channel = sound_obj.play()
+                    channel = (
+                        pygame.mixer.Channel(channel_id)
+                        if channel_id is not None
+                        else sound_obj.play(loops=loops, fade_ms=fade_ms)
+                    )
+                    if channel_id is not None:
+                        channel.play(sound_obj, loops=loops, fade_ms=fade_ms)
                     if channel:
                         channel.set_volume(left, right)
+                    return channel
                 else:
-                    sound_obj.set_volume(base_volume)
-                    sound_obj.play()
+                    # Set volume on the channel, not the shared Sound object;
+                    # the same effect may be playing at multiple distances.
+                    channel = (
+                        pygame.mixer.Channel(channel_id)
+                        if channel_id is not None
+                        else sound_obj.play(loops=loops, fade_ms=fade_ms)
+                    )
+                    if channel_id is not None:
+                        channel.play(sound_obj, loops=loops, fade_ms=fade_ms)
+                    if channel:
+                        channel.set_volume(base_volume)
+                    return channel
         except pygame.error as e:
             print(f"Error playing sound '{full_path}': {e}")
+        return None
 
     @staticmethod
     def split_horizontal_strips(surface):

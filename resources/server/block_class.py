@@ -175,6 +175,9 @@ class Block(ABC):
             rst['nbt'] = nbt
         return rst
 
+    def on_random_tick(self):
+        pass
+
 
 class FluidBlock(Block):
     solid = False
@@ -730,8 +733,7 @@ class GravityBlock(Block):
         if getattr(below, "solid", False):
             return
         self._fall_scheduled = True
-        self._start_falling()
-        # server.register_event(self._start_falling)
+        server.register_event(self._start_falling)
 
     def _start_falling(self):
         if self.location is None or not hasattr(self.location.world, "spawn_entity"):

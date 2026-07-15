@@ -145,14 +145,16 @@ class ParticleManager:
                     alive.append(particle)
             self.particles = alive
 
-    def draw(self, render: 'Render') -> None:
-        """绘制当前存活的所有粒子。"""
+    def draw(self, render: 'Render', z_filter: int | None = None) -> None:
+        """绘制当前存活的粒子，可按前景/背景层筛选。"""
         with self._lock:
             if not self.particles:
                 return
             particles = tuple(self.particles)
 
         for particle in particles:
+            if z_filter is not None and int(getattr(particle, "z", 0)) != int(z_filter):
+                continue
             particle.draw(self, render)
 
     def move_with_collision(self, particle: Particle) -> None:

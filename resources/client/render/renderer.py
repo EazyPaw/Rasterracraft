@@ -23,12 +23,13 @@ from .block import BlockRenderMixin
 from .constants import BLOCK_TINT_COLOR_STEP
 from .math_utils import cyclic_lerp_color, lerp_color, quantize_color
 from .sky import SkyMixin
+from .weather import WeatherMixin
 
 if TYPE_CHECKING:
     from resources.client.client_main import Client
 
 
-class Render(SkyMixin, BlockRenderMixin):
+class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     """PyCraft2D 主渲染器。
 
     负责：
@@ -108,6 +109,7 @@ class Render(SkyMixin, BlockRenderMixin):
             "assets\\minecraft\\textures\\environment\\sun.png"
         )
         self.moon_phase_textures: list[pygame.Surface] = self.load_moon_phase_textures()
+        self.init_weather_rendering()
 
         # ---- GUI 叠加层（半透明暗色背景） ----
         self.ig_gui_layer: pygame.Surface = pygame.Surface(
@@ -349,6 +351,9 @@ class Render(SkyMixin, BlockRenderMixin):
                     self.sky_cache_key = None
                     self.stars = self.generate_stars()
                     self.celestial_cache.clear()
+                    self._weather_texture_cache.clear()
+                    self._weather_lit_cache.clear()
+                    self._cloud_surface_cache.clear()
                     self.tinted_surface_cache.clear()
                     self.block_section_cache.clear()
                     self.block_section_surface_pool.clear()
@@ -376,8 +381,13 @@ class Render(SkyMixin, BlockRenderMixin):
                     self.draw_block()                        # 方块绘制（来自 BlockRenderMixin）
                     if self.debug:
                         self.draw_biome_debug_overlay()
+                    self.draw_precipitation()
                     self.draw_entities(z_filter=0)
-                    self.client.particle_manager.draw(self)
+                    # Keep particles in their world layer.  In particular,
+                    # rain splashes on z=0 must remain over the foreground,
+                    # while z=1 splashes are not accidentally mixed into it.
+                    self.client.particle_manager.draw(self, z_filter=1)
+                    self.client.particle_manager.draw(self, z_filter=0)
                     self.draw_hovered_block_outline()
                     self.draw_destroy_progress()
                     self.client.client_player.skeleton.update()
@@ -400,6 +410,7 @@ class Render(SkyMixin, BlockRenderMixin):
                     self.render_text(self._fps_display_text, (10, 10), (255, 255, 255), 36, True)
                 else:
                     # ---- 非游戏状态：黑屏 + GUI ----
+                    self.stop_weather_audio()
                     self.screen.fill((0, 0, 0))
                     self.draw_gui()
 

@@ -1,5 +1,6 @@
 import logging
 import math
+import random
 import threading
 import traceback
 from typing import Any
@@ -11,7 +12,7 @@ import resources.server.biome as biome
 
 from resources.server import save_manager
 from resources.server.block_class import Block
-from resources.server.blocks import AIR
+from resources.server.blocks import AIR, SNOW
 from resources.server.entity import Entity
 from resources.server.generator import Generator
 from resources.server.location import Location, decide_x_or_loc
@@ -167,11 +168,13 @@ class WorldAttribute:
         self.MAX_BUILD_HEIGHT = max_build_height
 
 class Weather(Enum):
-    CLEAR = None
-    RAIN = None
+    CLEAR = "clear"
+    RAIN = "rain"
 
 
 class World:
+    RANDOM_TICK_SPEED = 3
+
     def __init__(self,server, id_name, generator, attribute: WorldAttribute, seed):
         self.server = server
         self.id_name = id_name
@@ -191,8 +194,87 @@ class World:
         self._light_recalc_lock = threading.RLock()
         self._scheduled_fluid_ticks: set[tuple[int, int, int]] = set()
         self._fluid_lock = threading.RLock()
+        self.random_tick_speed = self.RANDOM_TICK_SPEED
         self.weather: Weather = Weather.CLEAR
-        self.weather_tick = 6000
+        self.weather_tick = self._random_weather_duration(self.weather)
+
+    @staticmethod
+    def _random_weather_duration(weather: Weather) -> int:
+        # Vanilla-like ranges: precipitation lasts 10-20 minutes, while clear
+        # intervals can last from 10 minutes to roughly 2.5 hours.
+        if weather is Weather.RAIN:
+            return random.randint(12000, 24000)
+        return random.randint(12000, 180000)
+
+    def get_weather_packet(self) -> dict:
+        return {
+            "__class__": "WeatherUpdate",
+            "weather": self.weather.value,
+            "remaining_ticks": int(self.weather_tick),
+        }
+
+    def set_weather(self, weather: Weather | str, duration_ticks: int | None = None) -> None:
+        if isinstance(weather, str):
+            weather = Weather(weather.lower())
+        self.weather = weather
+        self.weather_tick = (
+            max(1, int(duration_ticks))
+            if duration_ticks is not None
+            else self._random_weather_duration(weather)
+        )
+        packet = self.get_weather_packet()
+        for player in list(self.server.players):
+            if player.world is self:
+                self.server.send_client_socket(player, packet, "Forward")
+
+    def tick_weather(self) -> None:
+        self.weather_tick -= 1
+        if self.weather_tick <= 0:
+            next_weather = Weather.RAIN if self.weather is Weather.CLEAR else Weather.CLEAR
+            self.set_weather(next_weather)
+
+    def tick_random_blocks(self) -> None:
+        """Run three random block selections per loaded 16³ subchunk.
+
+        The selection is deliberately made even for ordinary blocks: a block
+        can opt into random ticks simply by overriding ``on_random_tick``.
+        Weather effects are checked for the selected top blocks as well, so
+        snow accumulation follows the same stochastic cadence as Minecraft.
+        """
+        section_count = (self.attribute.MAX_BUILD_HEIGHT + 15) // 16
+        for rx, chunk in list(self.regions.items()):
+            for section in range(section_count):
+                y_start = section * 16
+                y_end = min(self.attribute.MAX_BUILD_HEIGHT, y_start + 16)
+                if y_start >= y_end:
+                    continue
+                for _ in range(self.random_tick_speed):
+                    x = rx * 16 + random.randrange(16)
+                    y = random.randrange(y_start, y_end)
+                    # Preserve Java's 16x16x16 selection probability even
+                    # though PyCraft2D only materializes two Z layers.
+                    z = random.randrange(16)
+                    if z >= chunk.region_array.shape[2]:
+                        continue
+                    block = self.get_block(x, y, z)
+                    block.on_random_tick()
+                    if self.weather is Weather.RAIN and block.solid:
+                        self._try_accumulate_snow(x, y, z)
+
+    def _try_accumulate_snow(self, x: int, y: int, z: int) -> bool:
+        """Attempt one random-tick snow layer on an exposed solid block."""
+        if y + 1 >= self.attribute.MAX_BUILD_HEIGHT:
+            return False
+        above = self.get_block(x, y + 1, z)
+        if not isinstance(above, AIR):
+            return False
+        biome_id = self.get_biome(x, y + 1)
+        if biome.get_precipitation_type(biome_id, y + 1) != "snow":
+            return False
+        # Snowfall may create one thin layer, but random ticks never stack it
+        # into deeper snow.  Existing snow therefore makes this tick a no-op.
+        self.set_block(SNOW(layer=1), x, y + 1, z)
+        return True
 
 
     def mark_chunk_dirty(self, rx: int):

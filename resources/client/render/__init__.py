@@ -56,6 +56,7 @@ from .constants import (
 # ---- Mixin 类（供内部使用） ----
 from .block import BlockRenderMixin
 from .sky import SkyMixin
+from .weather import WeatherMixin
 
 __all__ = [
     # 主类
@@ -63,6 +64,7 @@ __all__ = [
     # Mixin
     "SkyMixin",
     "BlockRenderMixin",
+    "WeatherMixin",
     # 数学工具
     "clamp",
     "lerp",

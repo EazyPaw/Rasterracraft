@@ -1613,3 +1613,29 @@ def get_biome_by_id(biome_id: str) -> Biome:
 
     logging.warning(f"Unknown biome ID: {biome_id}, using plains.")
     return Plains()
+
+
+def get_effective_temperature(biome_id: str, y: int | float) -> float:
+    """Return Minecraft-style local temperature, including altitude cooling."""
+    global _BIOME_REGISTRY
+    if _BIOME_REGISTRY is None:
+        _BIOME_REGISTRY = _build_biome_id_cache()
+
+    biome_cls = _BIOME_REGISTRY.get(_normalize_biome_id(biome_id), Plains)
+    temperature = float(getattr(biome_cls, "temperature", Biome.temperature))
+    height = float(y)
+    if height > 80.0:
+        temperature -= (height - 80.0) / 600.0
+    return temperature
+
+
+def get_precipitation_type(biome_id: str, y: int | float) -> str:
+    """Return ``none``, ``rain`` or ``snow`` for a biome position."""
+    global _BIOME_REGISTRY
+    if _BIOME_REGISTRY is None:
+        _BIOME_REGISTRY = _build_biome_id_cache()
+
+    biome_cls = _BIOME_REGISTRY.get(_normalize_biome_id(biome_id), Plains)
+    if float(getattr(biome_cls, "downfall", Biome.downfall)) <= 0.0:
+        return "none"
+    return "snow" if get_effective_temperature(biome_id, y) <= 0.15 else "rain"

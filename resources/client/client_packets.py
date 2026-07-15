@@ -143,6 +143,10 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             client.client_world.unload_chunk(packet['rx'])
     elif packet['__class__'] == 'TimeUpdate':
         client.client_world.world_time = packet.get('time', 0) % 24000
+    elif packet['__class__'] == 'WeatherUpdate':
+        weather = str(packet.get('weather', 'clear')).lower()
+        client.client_world.weather = weather if weather in ('clear', 'rain') else 'clear'
+        client.client_world.weather_remaining_ticks = max(0, int(packet.get('remaining_ticks', 0)))
     elif packet['__class__'] == 'Particle':
         client.particle_manager.handle_packet(packet)
     elif packet['__class__'] == 'ItemPickup':

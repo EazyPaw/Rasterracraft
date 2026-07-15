@@ -56,6 +56,8 @@ class Particle:
     linear_drag: float = 0.0
     collision: CollisionSettings = CollisionSettings()
     rotation_speed_range: tuple[float, float] = (-8.0, 8.0)
+    animation_frame_ticks: int = 0
+    animation_loop: bool = False
 
     def __init__(
         self,
@@ -81,6 +83,7 @@ class Particle:
         self.actual_size = self.size[0]
         self.lifetime = self.lifetime_ticks[0]
         self.texture = None
+        self.texture_frames = ()
         self.age = 0
         self.rotation = 0.0
         self.rotation_speed = 0.0
@@ -162,7 +165,14 @@ class Particle:
         client=None,
     ) -> bool:
         """补齐客户端渲染和模拟所需的运行时状态。"""
-        if texture is None:
+        texture_paths = type(self).get_texture_paths()
+        if texture is None and self.animation_frame_ticks > 0 and texture_paths:
+            self.texture_frames = tuple(
+                client.resources_manager.get_texture_img(path)
+                for path in texture_paths
+            )
+            texture = self.texture_frames[0]
+        elif texture is None:
             texture = type(self).get_texture(client=client)
         if texture is None:
             return False
@@ -200,6 +210,14 @@ class Particle:
         self.age += 1
         if not self.alive:
             return
+
+        if self.texture_frames and self.animation_frame_ticks > 0:
+            frame = self.age // self.animation_frame_ticks
+            if self.animation_loop:
+                frame %= len(self.texture_frames)
+            else:
+                frame = min(frame, len(self.texture_frames) - 1)
+            self.texture = self.texture_frames[frame]
 
         self.motion_x += self.linear_acceleration[0]
         self.motion_y += self.linear_acceleration[1] - self.gravity
@@ -289,6 +307,8 @@ class SPLASH(TextureParticle):
     gravity = 0.03
     linear_drag = 0.03
     collision = CollisionSettings(enabled=True, radius=0.025, drag=0.45, restitution=0.05)
+    animation_frame_ticks = 2
+    animation_loop = False
 
 
 class BlockParticle(Particle):

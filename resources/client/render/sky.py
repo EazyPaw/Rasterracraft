@@ -79,6 +79,7 @@ class SkyMixin:
         天空图层包含：上下渐变背景 + 黄昏霞光 + 星星。
         """
         self.update_day_time()
+        self.update_weather()
         sky_state = self.get_sky_state()
         self.current_sky_state = sky_state
 
@@ -87,6 +88,9 @@ class SkyMixin:
             self.SCREEN_WIDTH,
             self.SCREEN_HEIGHT,
             int(self.day_time // SKY_CACHE_TICK_STEP),
+            # Coarse weather buckets avoid rebuilding the Python gradient on
+            # every small fade step (the particle/audio fade remains smooth).
+            int(self.weather_intensity * 4),
         )
         if cache_key != self.sky_cache_key or self.sky_layer is None:
             self.sky_layer = self.get_sky_layer(
@@ -100,6 +104,7 @@ class SkyMixin:
 
         self.screen.blit(self.sky_layer, (0, 0))
         self.draw_celestial_bodies(sky_state)
+        self.draw_clouds(sky_state)
 
     # ---------- 时间更新 ----------
 
@@ -145,6 +150,16 @@ class SkyMixin:
         upper = cyclic_lerp_color(self.SKY_UPPER_KEYFRAMES, time_value)
         lower = cyclic_lerp_color(self.SKY_LOWER_KEYFRAMES, time_value)
 
+        # Rain affects the whole sky, including arid biomes where it appears
+        # only as overcast weather. Preserve the day/night luminance while
+        # shifting the palette toward Minecraft's cool grey.
+        weather = self.weather_intensity
+        base_light = 0.25 + 0.75 * self.get_sky_light_weight(clear_only=True)
+        rainy_upper = tuple(int(channel * base_light) for channel in (96, 101, 110))
+        rainy_lower = tuple(int(channel * base_light) for channel in (126, 130, 137))
+        upper = lerp_color(upper, rainy_upper, weather)
+        lower = lerp_color(lower, rainy_lower, weather)
+
         # 太阳高度
         sun_lift = self.get_body_lift(time_value, self.SUN_RISE_TICK)
 
@@ -157,7 +172,7 @@ class SkyMixin:
         sunset = smoothstep(10500, 12200, time_value) * (1.0 - smoothstep(13800, 15500, time_value))
 
         # 霞光总强度
-        twilight = clamp(max(sunrise, sunset))
+        twilight = clamp(max(sunrise, sunset)) * (1.0 - weather)
 
         # 霞光颜色（从日出色平滑过渡到日暮色）
         if time_value >= self.DAWN_COLOR_START:
@@ -182,7 +197,10 @@ class SkyMixin:
 
         # 日光/月光强度
         daylight = smoothstep(0.0, 0.55, sun_lift)
-        night = smoothstep(0.02, 0.42, self.get_body_lift(time_value, self.MOON_RISE_TICK))
+        night = (
+            smoothstep(0.02, 0.42, self.get_body_lift(time_value, self.MOON_RISE_TICK))
+            * (1.0 - weather)
+        )
 
         return {
             "upper": upper,
@@ -265,7 +283,7 @@ class SkyMixin:
             "pos": sun_pos,
             "lift": sun_lift,
             "rising": self.is_body_rising(self.day_time, self.SUN_RISE_TICK),
-            "visibility": self.get_body_visibility(sun_lift),
+            "visibility": self.get_body_visibility(sun_lift) * (1.0 - self.weather_intensity),
             "texture": self.sun_texture,
             "tint": self.get_sun_color(sun_lift),
         }
@@ -275,7 +293,7 @@ class SkyMixin:
             "pos": moon_pos,
             "lift": moon_lift,
             "rising": self.is_body_rising(self.day_time, self.MOON_RISE_TICK),
-            "visibility": self.get_body_visibility(moon_lift) * 0.78,
+            "visibility": self.get_body_visibility(moon_lift) * 0.78 * (1.0 - self.weather_intensity),
             "texture": self.moon_phase_textures[self.get_moon_phase()],
             "tint": None,
         }
@@ -545,7 +563,7 @@ class SkyMixin:
 
     # ---------- 光照权重 ----------
 
-    def get_sky_light_weight(self) -> float:
+    def get_sky_light_weight(self, clear_only: bool = False) -> float:
         """计算当前天空光照权重（用于方块渲染时的环境光计算）。
 
         白天权重接近 1.0，夜晚降至 MIN_SKY_LIGHT_WEIGHT 以上。
@@ -556,7 +574,12 @@ class SkyMixin:
         sun_lift = self.get_body_lift(self.day_time, self.SUN_RISE_TICK)
         daylight = smoothstep(0.0, 0.7, sun_lift)
         horizon_floor = 0.62 * smoothstep(-0.08, 0.03, sun_lift)
-        return lerp(MIN_SKY_LIGHT_WEIGHT, 1.0, max(daylight, horizon_floor))
+        clear_weight = lerp(MIN_SKY_LIGHT_WEIGHT, 1.0, max(daylight, horizon_floor))
+        if clear_only:
+            return clear_weight
+        # Internal sky light cannot exceed level 12 while raining.
+        rain_cap = lerp(1.0, 12.0 / 15.0, self.weather_intensity)
+        return min(clear_weight, rain_cap)
 
     # ---------- 星星 ----------
 
