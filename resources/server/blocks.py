@@ -559,7 +559,7 @@ class ICE(Block):
     name = 'ice'
     _texture_path = 'blocks.ice'
     break_sound = 'dig.glass'
-    friction = 0.9
+    friction = 0.98
     hardness = 0.5
     preferred_tool = 'pickaxe'
 

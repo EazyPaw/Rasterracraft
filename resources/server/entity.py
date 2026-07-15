@@ -17,17 +17,27 @@ class Entity:
         self.motion = Vector(0, 0)
         self.width = 1
         self.height = 1
-        self.move_speed = 0.1
-        self.damping = 0.95
+        # Movement constants use Minecraft's block/tick units (the game runs
+        # at 20 ticks per second).  Keeping these on the base entity makes the
+        # same integration code usable by players, items and falling blocks.
+        self.move_speed = 0.1  # vanilla generic.movement_speed
+        self.movement_acceleration = 0.098  # 0.1 * 0.98, per tick
+        self.air_acceleration = 0.02
+        self.air_friction = 0.91
+        self.damping = self.air_friction
         self.gravity = 0.08
-        self.drag_vertical = 0.98  # 垂直方向阻力，每帧保留 98% 的速度
+        self.drag_vertical = 0.98  # v <- (v - gravity) * 0.98
         # Water has both slower input acceleration and stronger drag.  Keep
         # these separate from air/flying damping so movement can never build
         # up faster in water than it does while flying.
-        self.fluid_move_speed_multiplier = 0.35
+        # With the water drag below this gives the documented ~1.295 blocks/s
+        # swim speed (0.098 * 0.23 / (1 - 0.65) * 20).
+        self.fluid_move_speed_multiplier = 0.23
         self.fluid_horizontal_drag = 0.65
         self.fluid_vertical_drag = 0.65
-        self.jump_height = 1
+        self.jump_height = 0.42  # vanilla jump initial velocity
+        self.jump_factor = 1.0
+        self.speed_factor = 1.0
         self.max_health = 20
         self.health = self.max_health
         self.hurt_time = 0
@@ -41,6 +51,7 @@ class Entity:
         self.in_fluid = False
         self.in_water = False
         self.swimming_up = False
+        self._jumped_this_tick = False
 
     def teleport_to(self, x, y, world = None):
         self.x = x
@@ -160,14 +171,42 @@ class Entity:
     def _get_water_interaction(self) -> tuple[bool, float, float]:
         return self._get_fluid_interaction()
 
+    def get_ground_block(self):
+        """Return the block under the entity's feet, if any."""
+        return self._get_block_at(self.x + self.width * 0.5, self.y - 0.05)
+
+    def get_ground_friction(self) -> float:
+        """Vanilla horizontal multiplier for the current surface."""
+        block = self.get_ground_block()
+        return float(getattr(block, "friction", 0.6)) if block is not None else 1.0
+
+    def get_ground_speed_factor(self) -> float:
+        block = self.get_ground_block()
+        return float(getattr(block, "speed_factor", 1.0)) if block is not None else 1.0
+
+    def get_ground_jump_factor(self) -> float:
+        block = self.get_ground_block()
+        return float(getattr(block, "jump_factor", 1.0)) if block is not None else 1.0
+
     def _is_player_like(self) -> bool:
         return getattr(self, "entity_id", None) == "player" or hasattr(self, "client")
 
     def _check_collision_at(self, x: float, y: float) -> bool:
-        min_x = math.floor(x)
-        max_x = math.floor(x + self.width)
-        min_y = math.floor(y)
-        max_y = math.floor(y + self.height)
+        """Return whether the entity's *open* AABB overlaps a solid block.
+
+        The old inclusive ``floor(x + width)`` test treated an entity that was
+        merely touching a block face as already inside it.  That produced
+        sticky walls and, more importantly, made the ground test report true
+        when the player was touching a wall.
+        """
+        epsilon = 1.0e-9
+        min_x = math.floor(x + epsilon)
+        max_x = math.floor(x + self.width - epsilon)
+        min_y = math.floor(y + epsilon)
+        max_y = math.floor(y + self.height - epsilon)
+
+        if max_x < min_x or max_y < min_y:
+            return False
 
         for block_x in range(min_x, max_x + 1):
             for block_y in range(min_y, max_y + 1):
@@ -175,26 +214,41 @@ class Entity:
                     return True
         return False
 
+    def _check_support_at(self, x: float | None = None, y: float | None = None) -> bool:
+        """Check only the blocks immediately below the entity's feet."""
+        x = self.x if x is None else x
+        y = self.y if y is None else y
+        epsilon = 1.0e-7
+        min_x = math.floor(x + epsilon)
+        max_x = math.floor(x + self.width - epsilon)
+        # Collision resolution leaves a tiny 0.001 block gap to avoid
+        # re-entering a face, so probe just below that gap.
+        support_y = math.floor(y - 0.001 - epsilon)
+        for block_x in range(min_x, max_x + 1):
+            if self._is_block_solid(block_x, support_y):
+                return True
+        return False
+
     def _prevent_edge_fall(self, dx: float) -> float:
         if dx == 0 or not self.on_ground or not self.sneaking:
             return dx
 
-        foot_y = self.y - 0.05
-
-        if dx > 0:
-            check_x = self.x + dx + self.width
-            if self._check_collision_at(check_x, foot_y):
-                return dx
-            block_edge = math.floor(self.x + self.width) + 1.0
-            safe_dx = block_edge - self.width - self.x - 0.001
-            return max(0.0, safe_dx)
-
-        check_x = self.x + dx
-        if self._check_collision_at(check_x, foot_y):
+        candidate_x = self.x + dx
+        if self._check_support_at(candidate_x, self.y):
             return dx
-        block_edge = math.floor(self.x)
-        safe_dx = block_edge + 1.0 - self.x + 0.001
-        return min(0.0, safe_dx)
+
+        # Find the last point that still has a supporting block.  A binary
+        # search handles both directions and worlds with irregular block
+        # edges, without assuming that ``floor(self.x)`` is the supporting
+        # block (which fails for negative coordinates).
+        low, high = 0.0, 1.0
+        for _ in range(12):
+            fraction = (low + high) * 0.5
+            if self._check_support_at(self.x + dx * fraction, self.y):
+                low = fraction
+            else:
+                high = fraction
+        return dx * low
 
     def _sweep_x(self, dx: float):
         if dx == 0:
@@ -303,40 +357,48 @@ class Entity:
         if collided_x:
             self.motion.x = 0
 
-        actual_dy, collided_y = self._sweep_y(self.motion.y)
+        requested_dy = self.motion.y
+        actual_dy, collided_y = self._sweep_y(requested_dy)
         self.y += actual_dy
         if collided_y:
             self.motion.y = 0
 
-        foot_check_y = self.y - 0.05
-        self.on_ground = self._check_collision_at(self.x, foot_check_y)
+        self.on_ground = (collided_y and requested_dy < 0) or self._check_support_at()
+
+    def _movement_multiplier(self) -> float:
+        multiplier = 0.3 if self.sneaking else 1.0
+        if self.sprinting:
+            multiplier *= 2.0 if self.flying else 1.3
+        multiplier *= self.speed_factor
+        if self.in_fluid and not self.flying:
+            multiplier *= self.fluid_move_speed_multiplier
+        return multiplier
+
+    def get_move_acceleration(self) -> float:
+        """Horizontal input acceleration for this tick."""
+        # Creative flight uses 0.049 blocks/tick² (ten times the walking
+        # acceleration), yielding 10.889 blocks/s with 0.91 drag.
+        base = 0.049 if self.flying else (
+            self.movement_acceleration if self.on_ground else self.air_acceleration
+        )
+        block_factor = 1.0
+        if self.on_ground and not self.flying and not self.in_fluid:
+            block_factor = self.get_ground_speed_factor()
+        return base * self._movement_multiplier() * block_factor
 
     def move_right(self):
-        speed_mult = 0.3 if self.sneaking else 1.0
-        if self.sprinting:
-            speed_mult *= 1.3
-        if self.flying:
-            speed_mult *= 2
-        elif self.in_fluid:
-            speed_mult *= self.fluid_move_speed_multiplier
-        self.motion.x += self.move_speed * speed_mult
+        self.motion.x += self.get_move_acceleration()
 
     def move_left(self):
-        speed_mult = 0.3 if self.sneaking else 1.0
-        if self.sprinting:
-            speed_mult *= 1.3
-        if self.flying:
-            speed_mult *= 2
-        elif self.in_fluid:
-            speed_mult *= self.fluid_move_speed_multiplier
-        self.motion.x -= self.move_speed * speed_mult
+        self.motion.x -= self.get_move_acceleration()
 
     def handle_gravity(self):
         self.motion.y -= self.gravity
 
     def jump(self):
         if self.on_ground:
-            self.motion.y = self.jump_height
+            self.motion.y = self.jump_height * self.get_ground_jump_factor()
+            self._jumped_this_tick = True
         elif self.flying:
             self.motion += Vector(0, self.jump_height * 1.5)
         elif self._get_fluid_interaction()[0]:
@@ -354,21 +416,20 @@ class Entity:
             self.sprinting = not self.sprinting
         else:
             self.sprinting = mode
-        print(self.sprinting)
 
     def update_damping(self):
         if self.flying:
-            self.damping = 0.91 * 0.6
+            self.damping = self.air_friction
             return
         if self.in_fluid:
             self.damping = self.fluid_horizontal_drag
             return
 
-        block_below = self._get_block_at(self.x, self.y - 0.05)
-        if block_below is None or block_below.block_id == 'air':
-            self.damping = 0.91 * 0.6
+        block_below = self.get_ground_block()
+        if block_below is None or getattr(block_below, "block_id", "air") == 'air' or not self.on_ground:
+            self.damping = self.air_friction
         else:
-            self.damping = 0.91 * block_below.friction
+            self.damping = self.air_friction * self.get_ground_friction()
 
     def move_update(self):
         self.in_fluid, flow_x, flow_y = self._get_fluid_interaction()
@@ -389,18 +450,23 @@ class Entity:
                 self.motion.y -= self.gravity * 0.2
             if not self._is_player_like() and self.motion.y < 0.04:
                 self.motion.y += 0.025
-        else:
+        elif not self._jumped_this_tick:
             self.handle_gravity()
 
         if self.on_ground:
             self.flying = False
 
-        self.motion.y *= self.fluid_vertical_drag if self.in_fluid else self.drag_vertical
+        # Vanilla moves using the velocity for this tick, then applies drag to
+        # the velocity that will be used on the next tick.  Applying damping
+        # before collision makes the observed walking speed ~2.36 m/s instead
+        # of the documented 4.317 m/s.
+        self.collision_check(steps=4)
 
+        self.motion.y *= self.fluid_vertical_drag if self.in_fluid else self.drag_vertical
         self.update_damping()
         self.motion.x *= self.damping
         if abs(self.motion.x) < 0.001:
             self.motion.x = 0
 
-        self.collision_check(steps=4)
         self.swimming_up = False
+        self._jumped_this_tick = False

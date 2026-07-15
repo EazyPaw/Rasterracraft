@@ -15,7 +15,8 @@ class FallingBlock(Entity):
         self.z = z
         self.gravity = 0.04
         self.drag_vertical = 0.98
-        self.damping = 0.98
+        self.air_friction = 0.98
+        self.damping = self.air_friction
 
     def _is_block_solid(self, x: int, y: int, z: int = 0) -> bool:
         return super()._is_block_solid(x, y, self.z)
