@@ -40,8 +40,10 @@ class Button:
     @client_method
     def click(self, client = None):
         if self.enabled and self.callback is not None:
-            self.callback()
+            # 回调可能会调用 pygame.quit()（例如主菜单的“退出”），
+            # 因此先播放按键音效，避免在 pygame 关闭后访问混音器。
             client.resources_manager.play_sound("gui.button.press")
+            self.callback()
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if not self.visible:

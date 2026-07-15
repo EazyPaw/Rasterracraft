@@ -119,10 +119,27 @@ class Server:
                     if other is not player and other.is_loading_position(int(player.x), int(player.y), 0):
                         self.server.send_client_socket(other, player, "EntitySpawn")
                 self.server.broadcast_chat(f"{player.name} joined the game", (255, 255, 85))
+                initial_center = int(player.x // 16)
+                self.server.send_client_socket(
+                    player,
+                    {
+                        '__class__': 'WorldLoadStart',
+                        'regions': list(range(
+                            initial_center - self.server.view_distance,
+                            initial_center + self.server.view_distance + 1,
+                        )),
+                    },
+                    "Forward",
+                )
                 # Use Player.teleport_to even for the initial position so the
                 # first client movement cannot race ahead of its spawn packet.
                 player.teleport_to(player.x, player.y)
                 self.server.send_client_socket(player, player.world.get_weather_packet(), "Forward")
+                self.server.send_client_socket(
+                    player,
+                    {'__class__': 'TimeUpdate', 'time': int(player.world.world_time)},
+                    "Forward",
+                )
                 self.server.send_client_socket(player, player, "GamemodeUpdate")
                 client_thread = threading.Thread(target=self.handle_client, args=(client_sock, client_addr, player), name="SocketClientThread")
                 client_thread.daemon = True
@@ -502,6 +519,25 @@ class Server:
                                 'block_light_array': neighbor.get_full_block_light_dict(),
                             }
                             self.send_client_socket(player, light_update, "LightUpdate")
+
+        # Tell the client that the complete initial view-distance batch has
+        # been queued.  It still waits for every corresponding ChunkReady, so
+        # this packet cannot make the loading screen disappear early.
+        for player in self.players:
+            if player.initial_load_complete_sent:
+                continue
+            center_rx = int(player.x // 16)
+            initial_regions = set(range(
+                center_rx - self.view_distance,
+                center_rx + self.view_distance + 1,
+            ))
+            if initial_regions.issubset(set(player.loading_regions)):
+                self.send_client_socket(
+                    player,
+                    {'__class__': 'WorldLoadComplete', 'regions': sorted(initial_regions)},
+                    "Forward",
+                )
+                player.initial_load_complete_sent = True
 
     def unload_far_chunks(self):
         if not self.save_id:

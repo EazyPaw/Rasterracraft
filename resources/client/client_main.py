@@ -34,6 +34,8 @@ class Client:
         except Exception:
             pass
         self.is_shutting_down = False
+        self._shutdown_lock = threading.Lock()
+        self._shutdown_started = False
         self.version = "0.0.1 SNAPSHOT"
         self.language = "en_US"
         self.client_world = client_world.ClientWorld(self)
@@ -60,6 +62,8 @@ class Client:
         self.loaded_chunk_regions: set[int] = set()
         self.required_spawn_regions: set[int] = set()
         self.pending_teleport_id: int | None = None
+        self.initial_sync_received = False
+        self.initial_load_started = False
         self.game_started = False
         self.resources_manager = ResourcesManager(self)
         self.resources_manager.load_sounds_json('assets/minecraft/sounds.json')
@@ -213,18 +217,21 @@ class Client:
         self.loaded_chunk_regions.clear()
         self.required_spawn_regions.clear()
         self.pending_teleport_id = None
+        self.initial_sync_received = False
+        self.initial_load_started = False
         if hasattr(self, "main_menu") and self.main_menu in self.render.drawing_GUIs:
             self.render.close_gui(self.main_menu)
         if self.saves_menu is not None and self.saves_menu in self.render.drawing_GUIs:
             self.render.close_gui(self.saves_menu)
-        self.loading_screen = LoadingScreen(self.render)
-        self.render.show_gui(self.loading_screen)
-
         level = save_manager.load_level(save_id) or {}
         requested_mode = str(level.get("game_mode", "survival")).lower()
         self.current_game_mode = requested_mode if requested_mode in ("creative", "survival") else "survival"
         self.client_player = ClientPlayer(self, self.current_game_mode)
         self._install_game_controls()
+        # ClientPlayer's game-mode constructor rebuilds the in-game GUI list,
+        # so install the join screen after it has finished doing that.
+        self.loading_screen = LoadingScreen(self.render)
+        self.render.show_gui(self.loading_screen)
 
         if self.server_mode == "subprocess":
             self._start_server_subprocess()
@@ -239,27 +246,61 @@ class Client:
             self.sent_packet({'__class__': 'ChunkReady', 'rx': int(rx)})
         self._try_finish_world_loading()
 
+    def handle_initial_world_complete(self, regions) -> None:
+        """Arm the final join gate after the server queued the initial batch."""
+        try:
+            loaded_targets = {int(rx) for rx in regions}
+        except (TypeError, ValueError):
+            loaded_targets = set()
+        if not loaded_targets:
+            return
+        self.required_spawn_regions = loaded_targets
+        self.initial_sync_received = True
+        self._try_finish_world_loading()
+
+    def handle_initial_world_start(self, regions) -> None:
+        try:
+            targets = {int(rx) for rx in regions}
+        except (TypeError, ValueError):
+            targets = set()
+        if targets:
+            self.required_spawn_regions = targets
+            self.initial_load_started = True
+
     def handle_server_teleport(self, teleport_id: int | None) -> None:
         self.pending_teleport_id = int(teleport_id) if teleport_id is not None else None
         if self.client_player is None:
             return
         center = int(self.client_player.x // 16)
-        self.required_spawn_regions = {center - 1, center, center + 1}
+        if not self.initial_load_started or self.initial_sync_received:
+            self.required_spawn_regions = {center - 1, center, center + 1}
         self.world_loading = True
-        if self.loading_screen is None:
-            self.loading_screen = LoadingScreen(self.render)
-            self.render.show_gui(self.loading_screen)
         self._try_finish_world_loading()
 
     def _try_finish_world_loading(self) -> None:
         if not self.world_loading or self.client_player is None:
+            return
+        if not self.initial_sync_received:
             return
         if not self.required_spawn_regions.issubset(self.loaded_chunk_regions):
             return
         if self.pending_teleport_id is not None:
             self.sent_packet({'__class__': 'TeleportConfirm', 'teleport_id': self.pending_teleport_id})
             self.pending_teleport_id = None
+        # The first visible frame should already be at the authoritative
+        # position/time; do not expose camera or sky interpolation behind the
+        # loading screen.
+        player = self.client_player
+        visual_mid_y = player.y + player.skeleton.size * player.skeleton.AUTHORED_HEIGHT_BLOCKS / 2
+        self.render.camera.snap_to(
+            player.x + player.width / 2 - 0.5,
+            visual_mid_y + 0.5,
+        )
+        self.render.day_time = float(self.client_world.world_time)
+        self.render.total_day_ticks = float(self.client_world.world_time)
+        self.render._last_daytime_update = pygame.time.get_ticks()
         self.world_loading = False
+        self.initial_load_started = False
         self.in_game = True
         if self.loading_screen is not None:
             self.render.close_gui(self.loading_screen)
@@ -315,6 +356,8 @@ class Client:
         self.loaded_chunk_regions.clear()
         self.required_spawn_regions.clear()
         self.pending_teleport_id = None
+        self.initial_sync_received = False
+        self.initial_load_started = False
         self.server_player_uuid = None
         self.chat_gui = None
         self.chat_messages.clear()
@@ -419,31 +462,45 @@ class Client:
             self._shutdown_server_thread()
 
     def shutdown(self):
-        """优雅地关闭客户端"""
-        # 1. 先设置标志，让循环知道要退出
-        self.is_shutting_down = True
+        """优雅地关闭客户端。
+
+        保存、关闭 socket 和线程池都可能阻塞一段时间，
+        因此统一交给独立清理线程执行。pygame 的关闭由渲染
+        主线程在离开渲染循环时完成。
+        """
+        with self._shutdown_lock:
+            if self._shutdown_started:
+                return
+            self._shutdown_started = True
+            # 先设置标志，让渲染和游戏循环尽快停止接收新事件。
+            self.is_shutting_down = True
+            self.game_manager.running = False
+
+        # 无论调用来自 GUI 游戏线程还是渲染主线程，都不在原线程阻塞。
+        threading.Thread(
+            target=self._finish_shutdown,
+            name="ShutdownThread",
+            daemon=False,
+        ).start()
+
+    def _finish_shutdown(self):
+        """执行可能阻塞的关闭清理；由 shutdown() 选择合适的线程调用。"""
         self._request_server_save()
         self._close_current_game_transport()
 
-        # 4. 停止游戏循环
-        self.game_manager.running = False
-
-        # 5. 等待游戏线程
+        # 清理始终在独立线程中，可以安全等待游戏线程。
         if self.game_thread.is_alive():
             self.game_thread.join(timeout=2.0)
 
-        # 6. 关闭区块加载线程池
+        # 关闭区块加载线程池
         self.chunk_load_pool.shutdown(wait=True)
 
-        # 8. 清理音频设备
+        # 清理音频设备
         if hasattr(self, 'audio_device'):
             try:
                 self.audio_device.stop()
             except Exception:
                 pass
-
-        # 9. 退出 pygame
-        pygame.quit()
 
     def _shutdown_server_subprocess(self):
         """终止服务端子进程。"""

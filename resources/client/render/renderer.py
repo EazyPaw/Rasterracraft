@@ -421,6 +421,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 logging.debug(f"Pygame error during shutdown: {e}")
                 break
 
+        # 退出按钮会在后台继续完成存档和线程清理。pygame
+        # 由创建并驱动窗口的渲染主线程关闭，避免跨线程退出死锁。
+        if self.client.is_shutting_down:
+            pygame.quit()
+
     # ===================== GUI 管理 =====================
 
     def draw_gui(self) -> None:

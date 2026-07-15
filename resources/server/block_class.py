@@ -27,16 +27,26 @@ class Block(ABC):
     _last_scaled = -1
     _last_tex_id = -1    # 用于检测动画帧变化（id(tex)）
     solid = True
-    friction = 0.6
-    # Used by the survival client to calculate vanilla-like hand mining time.
-    # Subclasses may override this with their Minecraft hardness value.
+
+    # 方块属性
     hardness = 1.5
+    blast_resistance = 0.5
+    friction = 0.6
+    speed_factor = 1.0
+    jump_factor = 1.0
+    bounce_restitution = 0
+    replaceable = False
+    flame_odds = 0
+    burn_odds = 0
+    lava_flammable = False
+    suffocating = True
+    redstone_conducting = True
+
     preferred_tool = None
     requires_correct_tool = False
     required_tool_tier = "wood"
     break_sound = 'dig.stone'
     place_sound = None    # 放置时播放的音效，默认 None 与 break_sound 一样
-    replaceable = False
     breakable = True
     light_attenuation = 5
     light_source = 0

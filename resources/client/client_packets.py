@@ -128,6 +128,10 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             client.client_world.unload_chunk(packet['rx'])
     elif packet['__class__'] == 'TimeUpdate':
         client.client_world.world_time = packet.get('time', 0) % 24000
+    elif packet['__class__'] == 'WorldLoadStart':
+        client.handle_initial_world_start(packet.get('regions', []))
+    elif packet['__class__'] == 'WorldLoadComplete':
+        client.handle_initial_world_complete(packet.get('regions', []))
     elif packet['__class__'] == 'WeatherUpdate':
         weather = str(packet.get('weather', 'clear')).lower()
         client.client_world.weather = weather if weather in ('clear', 'rain') else 'clear'
@@ -171,6 +175,10 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         # Mouse and keyboard callbacks store bound methods, so changing only
         # game_mode would leave them pointing at the old SurvivalMode object.
         client._install_game_controls()
+        # GameMode.update_gui rebuilds the GUI list.  During the initial join it
+        # must not accidentally discard the still-active loading screen.
+        if client.loading_screen is not None:
+            client.render.show_gui(client.loading_screen)
     # logging.debug(f"Received {packet['__class__']} packet.")
 
 def encode_packet(obj, obj_type = None, args = None) -> dict:

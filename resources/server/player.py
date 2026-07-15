@@ -17,6 +17,7 @@ class Player(Entity):
         # Regions whose payload has been atomically installed by the client.
         # ``loading_regions`` only means that the server sent the packet.
         self.client_loaded_regions: set[int] = set()
+        self.initial_load_complete_sent = False
         self.name = "Player_" + self.uuid.hex[:8]
         self.width = 0.3
         self.height = 1.8

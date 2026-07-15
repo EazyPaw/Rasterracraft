@@ -21,6 +21,16 @@ class Camera:
         self._start_time = time.perf_counter()
         self._duration = duration
 
+    def snap_to(self, target_x: float, target_y: float) -> None:
+        """Set the camera immediately, without showing a teleport animation."""
+        self.x = target_x
+        self.y = target_y
+        self._target_x = None
+        self._target_y = None
+        self._start_x = None
+        self._start_y = None
+        self._start_time = None
+
     def update(self):
         """更新相机位置（每帧调用）"""
         if self._target_x is None:
