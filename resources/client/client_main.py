@@ -19,6 +19,7 @@ from resources.client.client_player import ClientPlayer
 from resources.client.GUI.main_menu import MainMenu
 from resources.client.GUI.pause_menu import PauseMenu
 from resources.client.GUI.saves_menu import SavesMenu
+from resources.client.GUI.loading_screen import LoadingScreen
 from resources.client.particles import ParticleManager
 from resources.client.resources_manager import ResourcesManager
 from resources.server import save_manager
@@ -49,9 +50,16 @@ class Client:
         self._prepare_server_thread()
         self.server: Server | None = None
         self.server_process: subprocess.Popen | None = None
-        self.chunk_load_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkLoader")
+        # One persistent decoder avoids several Python workers contending with
+        # pygame for the GIL.  zlib/msgpack/numpy still do their bulk work in C.
+        self.chunk_load_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ChunkLoader")
         self.save_complete_event = threading.Event()
         self.in_game = False
+        self.world_loading = False
+        self.loading_screen: LoadingScreen | None = None
+        self.loaded_chunk_regions: set[int] = set()
+        self.required_spawn_regions: set[int] = set()
+        self.pending_teleport_id: int | None = None
         self.game_started = False
         self.resources_manager = ResourcesManager(self)
         self.resources_manager.load_sounds_json('assets/minecraft/sounds.json')
@@ -83,6 +91,7 @@ class Client:
 
     def _prepare_socket_transport(self):
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._send_lock = threading.Lock()
         self.socket_connected = threading.Event()
         self.socket_thread_running = True
         self.socket_thread = threading.Thread(target=self.start_socket, name="SocketThread")
@@ -163,17 +172,15 @@ class Client:
                 logging.warning(f"Failed to encode packet: obj={type(obj)}, type={obj_type}")
                 return False
 
-            packet_data = msgpack.packb(packet_dict)
+            packet_data = msgpack.packb(packet_dict, use_bin_type=True)
             length = len(packet_data)
             packet = struct.pack('>I', length) + packet_data
 
-            # 确保发送所有数据（TCP send 可能只发送部分数据）
-            total_sent = 0
-            while total_sent < len(packet):
-                sent = self.client_sock.send(packet[total_sent:])
-                if sent == 0:
-                    raise ConnectionError("Socket connection broken")
-                total_sent += sent
+            # Movement, chunk acknowledgements and GUI actions originate on
+            # different threads.  Serialize whole frames so TCP packets cannot
+            # interleave at byte level.
+            with self._send_lock:
+                self.client_sock.sendall(packet)
 
             # logging.debug(f"Sent {obj_type} packet ({length} bytes)")
             return True
@@ -201,10 +208,17 @@ class Client:
         self.current_save_id = save_id
         self.save_complete_event.clear()
         self.game_started = True
+        self.in_game = False
+        self.world_loading = True
+        self.loaded_chunk_regions.clear()
+        self.required_spawn_regions.clear()
+        self.pending_teleport_id = None
         if hasattr(self, "main_menu") and self.main_menu in self.render.drawing_GUIs:
             self.render.close_gui(self.main_menu)
         if self.saves_menu is not None and self.saves_menu in self.render.drawing_GUIs:
             self.render.close_gui(self.saves_menu)
+        self.loading_screen = LoadingScreen(self.render)
+        self.render.show_gui(self.loading_screen)
 
         level = save_manager.load_level(save_id) or {}
         requested_mode = str(level.get("game_mode", "survival")).lower()
@@ -217,7 +231,48 @@ class Client:
         else:
             self._start_server_thread()
         self.socket_thread.start()
+
+    def on_chunk_loaded(self, rx: int) -> None:
+        """Called after the decoder atomically installed a chunk."""
+        self.loaded_chunk_regions.add(int(rx))
+        if self.client_player is not None:
+            self.sent_packet({'__class__': 'ChunkReady', 'rx': int(rx)})
+        self._try_finish_world_loading()
+
+    def handle_server_teleport(self, teleport_id: int | None) -> None:
+        self.pending_teleport_id = int(teleport_id) if teleport_id is not None else None
+        if self.client_player is None:
+            return
+        center = int(self.client_player.x // 16)
+        self.required_spawn_regions = {center - 1, center, center + 1}
+        self.world_loading = True
+        if self.loading_screen is None:
+            self.loading_screen = LoadingScreen(self.render)
+            self.render.show_gui(self.loading_screen)
+        self._try_finish_world_loading()
+
+    def _try_finish_world_loading(self) -> None:
+        if not self.world_loading or self.client_player is None:
+            return
+        if not self.required_spawn_regions.issubset(self.loaded_chunk_regions):
+            return
+        if self.pending_teleport_id is not None:
+            self.sent_packet({'__class__': 'TeleportConfirm', 'teleport_id': self.pending_teleport_id})
+            self.pending_teleport_id = None
+        self.world_loading = False
         self.in_game = True
+        if self.loading_screen is not None:
+            self.render.close_gui(self.loading_screen)
+            self.loading_screen = None
+
+    def can_simulate_player(self, player: ClientPlayer) -> bool:
+        """Collision queries must never treat an unreceived chunk as air."""
+        if self.world_loading:
+            return False
+        x_values = (player.x, player.x + player.width - 1e-6,
+                    player.x + player.motion.x,
+                    player.x + player.motion.x + player.width - 1e-6)
+        return all(int(x // 16) in self.loaded_chunk_regions for x in x_values)
 
     def open_pause_menu(self):
         if not self.in_game:
@@ -251,10 +306,15 @@ class Client:
         self._request_server_save(timeout=8.0)
         self._close_current_game_transport()
         self.chunk_load_pool.shutdown(wait=True)
-        self.chunk_load_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ChunkLoader")
+        self.chunk_load_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ChunkLoader")
         self.client_world = client_world.ClientWorld(self)
         self.render.client_world = self.client_world
         self.client_player = None
+        self.world_loading = False
+        self.loading_screen = None
+        self.loaded_chunk_regions.clear()
+        self.required_spawn_regions.clear()
+        self.pending_teleport_id = None
         self.server_player_uuid = None
         self.chat_gui = None
         self.chat_messages.clear()

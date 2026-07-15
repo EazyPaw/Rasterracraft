@@ -14,6 +14,9 @@ class Player(Entity):
         self.world: World = world
         self.entity_id = "player"
         self.loading_regions = []
+        # Regions whose payload has been atomically installed by the client.
+        # ``loading_regions`` only means that the server sent the packet.
+        self.client_loaded_regions: set[int] = set()
         self.name = "Player_" + self.uuid.hex[:8]
         self.width = 0.3
         self.height = 1.8

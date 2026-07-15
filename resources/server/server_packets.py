@@ -102,7 +102,11 @@ def decode_packet(packet: dict, player: Player):
         # packets the client had already sent before it received Teleport.
         if player.is_awaiting_teleport_confirmation:
             return
-        if not player.world.is_chunk_loaded(packet['x']//16):
+        destination_rx = int(float(packet['x']) // 16)
+        if (
+            not player.world.is_chunk_loaded(destination_rx)
+            or destination_rx not in player.client_loaded_regions
+        ):
             player.teleport_to(player.x, player.y)
             return
         player.x = packet['x']
@@ -120,6 +124,13 @@ def decode_packet(packet: dict, player: Player):
         forward_packet_to_others(player, player, mode="entity_update")
     elif packet['__class__'] == 'TeleportConfirm':
         player.confirm_teleport(packet.get('teleport_id'))
+    elif packet['__class__'] == 'ChunkReady':
+        try:
+            rx = int(packet.get('rx'))
+        except (TypeError, ValueError):
+            return
+        if rx in player.loading_regions and rx in player.world.regions:
+            player.client_loaded_regions.add(rx)
     elif packet['__class__'] == 'BreakBlock':
         # {
         #     '__class__': 'BreakBlock',

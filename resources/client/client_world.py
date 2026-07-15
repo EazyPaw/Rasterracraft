@@ -1,9 +1,11 @@
 import logging
 import math
 import threading
-from typing import Any, Optional, cast
 import time
+import zlib
+from typing import Any, Optional, cast
 
+import msgpack
 import numpy as np
 
 from resources.client.client_entity import ClientEntity
@@ -49,6 +51,101 @@ class ClientWorld:
             self._loading_chunks.add(rx)
             return load_version
 
+    def is_chunk_loaded(self, rx: int) -> bool:
+        with self._chunk_state_lock:
+            return rx in self._regions and rx not in self._loading_chunks
+
+    def load_chunk_packet(self, packet: dict, load_version: int) -> None:
+        """Decode and atomically install every part of one chunk.
+
+        Keeping this as one worker task avoids the old race where blocks became
+        visible to physics before lighting/biomes finished, and avoids four Python
+        workers competing with the renderer for the GIL.
+        """
+        rx = int(packet["x"])
+        try:
+            if int(packet.get("format", 1)) == 2:
+                self._load_compact_chunk(rx, packet["payload"], load_version)
+            else:
+                self.load_chunk(rx, packet["region_array"], load_version)
+                if "light_array" in packet:
+                    self.load_lights(
+                        rx,
+                        packet["light_array"],
+                        packet.get("sky_light_array"),
+                        packet.get("block_light_array"),
+                        load_version,
+                    )
+                if "biome_array" in packet:
+                    self.load_biomes(rx, packet["biome_array"], load_version)
+            callback = getattr(self.client, "on_chunk_loaded", None)
+            if self.is_chunk_loaded(rx) and callable(callback):
+                callback(rx)
+        except Exception:
+            logging.exception("Failed to decode chunk %s", rx)
+
+    def _load_compact_chunk(self, rx: int, compressed: bytes, load_version: int) -> None:
+        data = msgpack.unpackb(zlib.decompress(compressed), raw=False)
+        height = int(data["height"])
+        depth = int(data["depth"])
+        if height != self.y_max or depth != 2:
+            raise ValueError(f"Unsupported chunk dimensions 16x{height}x{depth}")
+
+        block_width = int(data.get("block_index_width", 1))
+        block_dtype = np.uint8 if block_width == 1 else np.dtype("<u2")
+        indices = np.frombuffer(data["block_indices"], dtype=block_dtype)
+        expected_blocks = 16 * height * depth
+        if indices.size != expected_blocks:
+            raise ValueError(f"Invalid block index count: {indices.size}")
+
+        palette = data["block_palette"]
+        if indices.size and int(indices.max()) >= len(palette):
+            raise ValueError("Chunk block palette index is out of range")
+        chunk_array = np.full((16, height, depth), AIR(), dtype=Block)
+        stride = height * depth
+        for flat_index, palette_index in enumerate(indices):
+            # Eight coarse yields per chunk preserve render responsiveness
+            # without the 8,192 scheduler round-trips of the old decoder.
+            if flat_index and flat_index % 1024 == 0:
+                time.sleep(0)
+            block_data = palette[int(palette_index)]
+            if block_data.get("id") == "air" and not block_data.get("nbt"):
+                continue
+            x, remainder = divmod(flat_index, stride)
+            y, z = divmod(remainder, depth)
+            block = get_block_by_id(block_data["id"])
+            block.write_nbt(block_data.get("nbt", {}))
+            block.location = Location(self, rx * 16 + x, y, z)
+            chunk_array[x, y, z] = block
+
+        sky = np.frombuffer(data["sky_light"], dtype=np.uint8).reshape(16, height).copy()
+        block_light = np.frombuffer(data["block_light"], dtype=np.uint8).reshape(16, height).copy()
+        light = np.maximum(sky, block_light)
+
+        biome_width = int(data.get("biome_index_width", 1))
+        biome_dtype = np.uint8 if biome_width == 1 else np.dtype("<u2")
+        biome_indices = np.frombuffer(data["biome_indices"], dtype=biome_dtype)
+        if biome_indices.size != 16 * height:
+            raise ValueError(f"Invalid biome index count: {biome_indices.size}")
+        biome_palette = np.asarray(data["biome_palette"], dtype="<U32")
+        if biome_indices.size and int(biome_indices.max()) >= len(biome_palette):
+            raise ValueError("Chunk biome palette index is out of range")
+        biomes = biome_palette[biome_indices].reshape(16, height)
+
+        with self._chunk_state_lock:
+            if self._chunk_load_versions.get(rx) != load_version:
+                return
+            for (world_x, y, z), block in self._pending_chunk_block_updates.pop(rx, {}).items():
+                block.location = Location(self, world_x, y, z)
+                chunk_array[world_x % 16, y, z] = block
+            self._regions[rx] = chunk_array
+            self.light_map[rx] = light
+            self.sky_light_map[rx] = sky
+            self.block_light_map[rx] = block_light
+            self.biome_map[rx] = biomes
+            self._loading_chunks.discard(rx)
+            self._mark_render_chunk_dirty(rx)
+
     def load_chunk(self, rx: int, chunk: dict[str, dict], load_version: int | None = None):
         if load_version is None:
             load_version = self.begin_chunk_load(rx)
@@ -61,7 +158,6 @@ class ClientWorld:
             block.write_nbt(value.get('nbt', {}))
             block.location = Location(self, world_x, y, z)  # 使用绝对坐标
             chunk_array[x][y][z] = block
-            time.sleep(0)  # 释放GIL，让出CPU，不然会导致渲染卡顿
         with self._chunk_state_lock:
             if self._chunk_load_versions.get(rx) != load_version:
                 return
@@ -82,7 +178,6 @@ class ClientWorld:
             x, y = key.split(",")
             x, y = int(x), int(y)
             light_array[x][y] = value
-            time.sleep(0) # 同理
         sky_array = self._dict_to_light_array(sky_light_map) if sky_light_map is not None else None
         block_array = self._dict_to_light_array(block_light_map) if block_light_map is not None else None
         with self._chunk_state_lock:
@@ -191,6 +286,9 @@ class ClientWorld:
 
     def unload_chunk(self, x: int):
         """卸载区块，同时清理方塊、光照和生物群系数据"""
+        loaded_regions = getattr(self.client, "loaded_chunk_regions", None)
+        if loaded_regions is not None:
+            loaded_regions.discard(int(x))
         with self._chunk_state_lock:
             self._regions.pop(x, None)
             self.light_map.pop(x, None)

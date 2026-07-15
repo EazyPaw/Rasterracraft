@@ -89,6 +89,7 @@ class Server:
             self.server_sock.bind(("0.0.0.0", 14525))
             self.server_sock.listen(5)
             self.connections: dict[Player, tuple[socket.socket, Any]] = {}
+            self.send_locks: dict[Player, threading.Lock] = {}
             self.thread = threading.Thread(target=self.run, name="SocketServerThread")
             self.thread.daemon = True
             self.thread.start()
@@ -111,6 +112,7 @@ class Server:
                 player = Player(spawn_x, spawn_y, self.server.worlds["overworld"])
                 self.server.restore_player_state(player)
                 self.connections[player] = (client_sock, client_addr)
+                self.send_locks[player] = threading.Lock()
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
                 for other in self.server.players:
@@ -426,12 +428,12 @@ class Server:
                 return o
 
             clean_obj = convert_numpy_types(encoded_obj)
-            packet_data = msgpack.packb(clean_obj)
+            packet_data = msgpack.packb(clean_obj, use_bin_type=True)
             
             length = len(packet_data)
-            self.socket_server.connections[player][0].send(
-                struct.pack('>I', length) + packet_data
-            )
+            connection = self.socket_server.connections[player][0]
+            with self.socket_server.send_locks.setdefault(player, threading.Lock()):
+                connection.sendall(struct.pack('>I', length) + packet_data)
             # logging.debug(f"Sent {length} data to client {self.socket_server.connections[player][1]}")
             return True
         except KeyError:
@@ -454,7 +456,13 @@ class Server:
 
         for player in self.players:
             rx = int(player.x // 16)
-            for x in range(rx - self.view_distance, rx + self.view_distance + 1):
+            # Send the spawn column first.  The old left-to-right order waited
+            # for several distant chunks before the client received ground.
+            region_order = sorted(
+                range(rx - self.view_distance, rx + self.view_distance + 1),
+                key=lambda value: (abs(value - rx), value),
+            )
+            for x in region_order:
                 if x not in player.loading_regions:
                     if x not in player.world.regions:
                         # 避免对同一区块重复提交生成任务（多个玩家共享同一 World）
@@ -465,18 +473,20 @@ class Server:
                             )
                     new_chunks.append((player, x))
 
-        # 阶段二：等待所有生成任务完成
-        for (rx, world), future in gen_futures.items():
-            try:
-                future.result(timeout=30)
-            except Exception as e:
-                logging.error(f"Chunk generation failed for region {rx}: {e}")
-
-        # 阶段三：发送新区块给客户端，并标记为已加载
+        # 阶段二：按距离逐个等待并发送。远处区块继续在后台生成，不会
+        # 阻塞出生区块到达客户端。
         for player, x in new_chunks:
+            future = gen_futures.get((x, player.world))
+            if future is not None:
+                try:
+                    future.result(timeout=30)
+                except Exception as e:
+                    logging.error(f"Chunk generation failed for region {x}: {e}")
             if x in player.world.regions:
-                self.send_client_socket(player, player.world.regions[x])
+                # Mark it as sent before writing the frame: the client can
+                # decode and acknowledge a small compact packet immediately.
                 player.loading_regions.append(x)
+                self.send_client_socket(player, player.world.regions[x])
                 player.world.mark_chunk_dirty(x)
                 player.world.send_entities_in_chunk_to_player(player, x)
                 self._send_players_in_chunk_to_player(player, x)
@@ -505,6 +515,7 @@ class Server:
                 if rx < keep_min or rx > keep_max:
                     self.send_client_socket(player, {"rx": rx}, "UnloadChunk")
                     player.loading_regions.remove(rx)
+                    player.client_loaded_regions.discard(rx)
 
         for world in self.worlds.values():
             protected: set[int] = set()
@@ -546,3 +557,4 @@ class Server:
         if player in self.players:
             self.players.remove(player)
         self.socket_server.connections.pop(player, None)
+        self.socket_server.send_locks.pop(player, None)

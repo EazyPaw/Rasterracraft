@@ -3,11 +3,13 @@ import math
 import random
 import threading
 import traceback
+import zlib
 from typing import Any
 from typing import cast
 from enum import Enum
 
 import numpy as np
+import msgpack
 import resources.server.biome as biome
 
 from resources.server import save_manager
@@ -31,34 +33,74 @@ class Chunk:
         self._recalculate_internal()   # 初始化时先进行区块内部光照计算
 
     def to_dict(self) -> dict:
+        """Serialize a chunk as a compressed palette packet.
 
-        # Blocks to dict
-        result_dict = {}
-        for x in range(self.region_array.shape[0]):
-            for y in range(self.region_array.shape[1]):
-                for z in range(self.region_array.shape[2]):
-                    block: Block = cast(Block, self.region_array[x, y, z])
-                    result_dict[f"{x},{y},{z}"] = block.to_dict()
-        light_dict = {}
-        # Block light
-        for x in range(self.region_array.shape[0]):
-            for y in range(self.region_array.shape[1]):
-                sky_light = cast(int, self.sky_light_array[x, y])
-                block_light = cast(int, self.block_light_array[x, y])
-                light_dict[f"{x},{y}"] = max(sky_light, block_light)
-        biome_dict = {}
-        for x in range(self.biome_array.shape[0]):
-            for y in range(self.biome_array.shape[1]):
-                biome_id = str(self.biome_array[x, y])
-                biome_dict[f"{x},{y}"] = biome_id
+        The old wire format repeated a coordinate string and a nested dict for
+        every cell.  Palette indices preserve the exact block/NBT data while
+        reducing both transfer size and client-side parsing work by an order of
+        magnitude.  The client keeps a legacy decoder for older servers/tests.
+        """
+        block_palette: list[dict] = []
+        block_lookup: dict[tuple, int] = {}
+        block_indices: list[int] = []
+
+        def freeze(value):
+            if isinstance(value, dict):
+                return tuple((key, freeze(item)) for key, item in sorted(value.items()))
+            if isinstance(value, list):
+                return tuple(freeze(item) for item in value)
+            return value
+
+        for value in self.region_array.flat:
+            block = cast(Block, value)
+            nbt = block.parse_nbt()
+            key = (block.block_id, freeze(nbt))
+            index = block_lookup.get(key)
+            if index is None:
+                index = len(block_palette)
+                block_lookup[key] = index
+                block_data = {"id": block.block_id}
+                if nbt:
+                    block_data["nbt"] = nbt
+                block_palette.append(block_data)
+            block_indices.append(index)
+
+        biome_palette: list[str] = []
+        biome_lookup: dict[str, int] = {}
+        biome_indices: list[int] = []
+        for value in self.biome_array.flat:
+            biome = str(value)
+            index = biome_lookup.get(biome)
+            if index is None:
+                index = len(biome_palette)
+                biome_lookup[biome] = index
+                biome_palette.append(biome)
+            biome_indices.append(index)
+
+        def pack_indices(indices: list[int]) -> tuple[int, bytes]:
+            width = 1 if max(indices, default=0) < 256 else 2
+            dtype = np.uint8 if width == 1 else "<u2"
+            return width, np.asarray(indices, dtype=dtype).tobytes()
+
+        block_width, packed_blocks = pack_indices(block_indices)
+        biome_width, packed_biomes = pack_indices(biome_indices)
+        payload = {
+            "height": int(self.region_array.shape[1]),
+            "depth": int(self.region_array.shape[2]),
+            "block_palette": block_palette,
+            "block_indices": packed_blocks,
+            "block_index_width": block_width,
+            "biome_palette": biome_palette,
+            "biome_indices": packed_biomes,
+            "biome_index_width": biome_width,
+            "sky_light": self.sky_light_array.tobytes(),
+            "block_light": self.block_light_array.tobytes(),
+        }
         return {
             "__class__": "Chunk",
-            "x": self.x,
-            "region_array": result_dict,
-            "light_array": light_dict,
-            "sky_light_array": self.get_full_sky_light_dict(),
-            "block_light_array": self.get_full_block_light_dict(),
-            "biome_array": biome_dict
+            "format": 2,
+            "x": int(self.x),
+            "payload": zlib.compress(msgpack.packb(payload, use_bin_type=True), level=1),
         }
 
     def get_full_light_dict(self) -> dict:

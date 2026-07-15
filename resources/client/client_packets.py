@@ -36,18 +36,7 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         # 通过线程池异步加载，避免频繁创建/销毁线程，同时限制并发数
         pool = client.chunk_load_pool
         load_version = client.client_world.begin_chunk_load(packet['x'])
-        pool.submit(client.client_world.load_chunk, packet['x'], packet['region_array'], load_version)
-        if 'light_array' in packet:
-            pool.submit(
-                client.client_world.load_lights,
-                packet['x'],
-                packet['light_array'],
-                packet.get('sky_light_array'),
-                packet.get('block_light_array'),
-                load_version,
-            )
-        if 'biome_array' in packet:
-            pool.submit(client.client_world.load_biomes, packet['x'], packet['biome_array'], load_version)
+        pool.submit(client.client_world.load_chunk_packet, packet, load_version)
 
     elif packet['__class__'] == 'Teleport':
         # {
@@ -71,15 +60,11 @@ def decode_packet(packet: dict, client: 'Client') -> None:
                 if key in packet:
                     setattr(client.client_player, key, packet[key])
             client.client_player.dead = False
-        # Acknowledge immediately.  The server ignores queued PlayerMove
-        # packets until this acknowledgement arrives, preventing an old local
-        # position from undoing a command teleport or respawn.
+        # Do not acknowledge until the destination and its immediate neighbours
+        # are fully installed.  This is the actual client-ready handshake; a
+        # received TCP packet alone does not mean collision data is usable yet.
         teleport_id = packet.get('teleport_id')
-        if teleport_id is not None:
-            client.sent_packet({
-                '__class__': 'TeleportConfirm',
-                'teleport_id': teleport_id,
-            })
+        client.handle_server_teleport(teleport_id)
     elif packet['__class__'] == 'BreakBlock':
         # {
         #     '__class__': 'BreakBlock',

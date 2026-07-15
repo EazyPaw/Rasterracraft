@@ -63,6 +63,11 @@ class ClientPlayer(Entity):
     def move_update(self):
         if self.dead:
             return
+        if not self.client.can_simulate_player(self):
+            self.motion.x = 0
+            self.motion.y = 0
+            self.fall_distance = 0.0
+            return
         keys = pygame.key.get_pressed()
         self.sneaking = (keys[pygame.K_LSHIFT] or keys[pygame.K_s]) and not self.flying
         self.swimming_up = keys[pygame.K_SPACE] and not self.flying
