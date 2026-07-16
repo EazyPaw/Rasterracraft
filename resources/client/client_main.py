@@ -399,17 +399,45 @@ class Client:
                 pygame.K_LCTRL: self.client_player.switch_sprint,
             }
 
+    @staticmethod
+    def _get_resource_path(relative_path):
+        """
+        获取资源文件的绝对路径，兼容开发环境和 Nuitka 打包环境。
+        """
+        # Nuitka 打包后会将资源解压到 sys._MEIPASS（如果有）
+        if getattr(sys, '_MEIPASS', False):
+            base_path = sys._MEIPASS
+        else:
+            # 开发环境下，根据当前文件位置推算（这里根据你的目录结构）
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return os.path.join(base_path, relative_path)
+
     def _start_server_subprocess(self):
         """以子进程方式启动服务端，绕过 GIL，客户端不受服务端运算影响。"""
         logging.info("Server is running on subprocess mode.")
         try:
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            server_script = os.path.join(project_root, "start_server.py")
+            # 1. 获取正确的脚本路径（兼容打包）
+            server_script = self._get_resource_path("start_server.py")
+
+            # 2. 构建启动参数
+            # 开发环境：sys.executable 是 Python 解释器，可直接运行脚本
+            # 打包后：sys.executable 是主程序 .exe，无法直接运行 .py 文件。
+            # 因此，你需要额外处理（见下方注意事项）。
             args = [sys.executable, server_script, "--integrated"]
             if self.current_save_id:
                 args.extend(["--save-id", self.current_save_id])
+
+            # 3. 启动子进程（建议传递干净的环境副本，避免 Nuitka 注入变量干扰）
+            clean_env = os.environ.copy()
+            # 移除可能引起冲突的环境变量（可选）
+            keys_to_remove = ['PYTHONPATH', 'PYTHONHOME', 'NUITKA_ONEFILE_PARENT',
+                              'NUITKA_RESUME_FILENAME', 'TCL_LIBRARY', 'TK_LIBRARY']
+            for key in keys_to_remove:
+                clean_env.pop(key, None)
+
             self.server_process = subprocess.Popen(
                 args,
+                env=clean_env,
             )
             logging.info(f"Server subprocess started (PID: {self.server_process.pid})")
         except FileNotFoundError:
@@ -430,7 +458,7 @@ class Client:
     def start_server(self):
         self.server.init()
 
-    def add_chat_message(self, text: str, color=(255, 255, 255)):
+    def add_chat_message(self, text, color=(255, 255, 255)):
         """添加聊天消息到历史记录"""
         self.chat_messages.append({
             'text': text,

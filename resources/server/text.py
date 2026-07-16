@@ -35,10 +35,10 @@ class TextColor(Enum):
     PARTY_BLUE_COLOR = (140, 179, 255)
 
 class Text:
-    def __init__(self, text: str | list, color: TextColor = TextColor.WHITE):
+    def __init__(self, text: str | list, color: TextColor = TextColor.WHITE, bold: bool = False):
         self.text: list[dict] = []
         if isinstance(text, str):
-            self.text = [{"text": text, "color": color}]
+            self.text = [{"text": text, "color": color, "bold": bold}]
         elif isinstance(text, list):
             self.text = text
 
@@ -47,7 +47,7 @@ class Text:
             return Text(self.text + other.text)
         elif isinstance(other, str):
             text_list = self.text.copy()
-            text_list.append({"text": other, "color": self.text[-1]["color"]})
+            text_list.append({"text": other, "color": self.text[-1]["color"], "bold": self.text[-1].get("bold", False)})
             return Text(text_list)
         raise TypeError
 
@@ -55,7 +55,7 @@ class Text:
         if isinstance(other, Text):
             self.text.extend(other.text)
         elif isinstance(other, str):
-            self.text.append({"text": other, "color": self.text[-1]["color"]})
+            self.text.append({"text": other, "color": self.text[-1]["color"], "bold": self.text[-1].get("bold", False)})
             return
         else:
             raise TypeError
@@ -64,7 +64,7 @@ class Text:
         if isinstance(other, Text):
             self.text.extend(other.text)
         elif isinstance(other, str):
-            self.text.append({"text": other, "color": self.text[-1]["color"]})
+            self.text.append({"text": other, "color": self.text[-1]["color"], "bold": self.text[-1].get("bold", False)})
         return self
 
     def join(self, *args, delimiter=""):
@@ -80,11 +80,11 @@ class Text:
         result = []
         for i, t in enumerate(args):
             if i > 0 and delimiter:
-                result.append({"text": delimiter, "color": TextColor.WHITE})
+                result.append({"text": delimiter, "color": TextColor.WHITE, "bold": False})
             if isinstance(t, Text):
                 result.extend(t.text)
             elif isinstance(t, str):
-                result.append({"text": t, "color": TextColor.WHITE})
+                result.append({"text": t, "color": TextColor.WHITE, "bold": False})
         self.text = result
 
     def to_plain_string(self) -> str:
@@ -95,7 +95,7 @@ class Text:
         """序列化为 msgpack-safe 字典（color 用枚举名存储）。"""
         return {
             "text": [
-                {"text": seg["text"], "color": seg["color"].name}
+                {"text": seg["text"], "color": seg["color"].name, "bold": seg.get("bold", False)}
                 for seg in self.text
             ]
         }
@@ -106,5 +106,6 @@ class Text:
         segments = []
         for seg in data.get("text", []):
             color = TextColor[seg["color"]]
-            segments.append({"text": seg["text"], "color": color})
+            bold = seg.get("bold", False)
+            segments.append({"text": seg["text"], "color": color, 'bold': bold})
         return cls(segments)

@@ -11,6 +11,7 @@ import time
 import pygame
 
 from resources.client.GUI.gui import GUI
+from resources.server.text import Text
 
 MAX_INPUT_LENGTH = 128
 MESSAGE_DISPLAY_WIDTH_RATIO = 0.55
@@ -423,7 +424,39 @@ class ChatGUI(GUI):
     # 消息渲染
     # ------------------------------------------------------------------
 
-    def _wrap_text(self, text, font, max_width):
+    def _wrap_text(self, text, font_size, max_width):
+        font = self.render.get_font(font_size)
+        if isinstance(text, Text):
+            lines = []
+            current_segments = []
+            current_width = 0
+            for segment in text.text:
+                segment_color = segment.get('color')
+                segment_bold = bool(segment.get('bold', False))
+                segment_font = self.render.get_font(font_size, segment_bold)
+                for ch in str(segment.get('text', '')):
+                    char_width = segment_font.size(ch)[0]
+                    if current_segments and current_width + char_width > max_width:
+                        lines.append(Text(current_segments))
+                        current_segments = []
+                        current_width = 0
+                    if (
+                        current_segments
+                        and current_segments[-1]['color'] == segment_color
+                        and current_segments[-1]['bold'] == segment_bold
+                    ):
+                        current_segments[-1]['text'] += ch
+                    else:
+                        current_segments.append({
+                            'text': ch,
+                            'color': segment_color,
+                            'bold': segment_bold,
+                        })
+                    current_width += char_width
+            if current_segments:
+                lines.append(Text(current_segments))
+            return lines
+
         lines = []
         current_line = ""
         for ch in text:
@@ -437,20 +470,38 @@ class ChatGUI(GUI):
             lines.append(current_line)
         return lines
 
-    def _render_row(self, text, x, y, color, alpha, font):
+    def _render_row(self, text, x, y, color, alpha, font_size):
         """渲染单行（带阴影）。"""
+        font = self.render.get_font(font_size)
         shadow_off = max(1, font.get_height() // 12)
-        shadow_col = tuple(max(0, int(c * 0.25)) for c in color)
 
         if alpha < 255:
-            s = font.render(text, True, shadow_col)
-            s.set_alpha(alpha)
-            self.render.blit(s, (x + shadow_off, y + shadow_off))
-            s2 = font.render(text, True, color)
-            s2.set_alpha(alpha)
-            self.render.blit(s2, (x, y))
+            if isinstance(text, Text):
+                segments = text.text
+            else:
+                segments = ({'text': text, 'color': color, 'bold': False},)
+            cursor_x = x
+            for segment in segments:
+                segment_color = segment.get('color', color)
+                if hasattr(segment_color, 'value'):
+                    segment_color = segment_color.value
+                segment_color = tuple(segment_color)
+                segment_font = self.render.get_font(
+                    font_size, bool(segment.get('bold', False))
+                )
+                segment_text = str(segment.get('text', ''))
+                shadow_col = tuple(max(0, int(c * 0.25)) for c in segment_color)
+                shadow_surface = segment_font.render(segment_text, True, shadow_col)
+                shadow_surface.set_alpha(alpha)
+                self.render.blit(
+                    shadow_surface, (cursor_x + shadow_off, y + shadow_off)
+                )
+                text_surface = segment_font.render(segment_text, True, segment_color)
+                text_surface.set_alpha(alpha)
+                self.render.blit(text_surface, (cursor_x, y))
+                cursor_x += text_surface.get_width()
         else:
-            self.render.render_text(text, (x, y), color, font.get_height(), shadow=True)
+            self.render.render_text(text, (x, y), color, font_size, shadow=True)
 
     def _draw_messages(self):
         """渲染消息历史。
@@ -490,7 +541,7 @@ class ChatGUI(GUI):
                     if alpha <= 0:
                         continue
             color = msg.get('color', (255, 255, 255))
-            wrapped = self._wrap_text(msg['text'], font, text_max_w)
+            wrapped = self._wrap_text(msg['text'], lay['msg_font_size'], text_max_w)
             for line in wrapped:
                 all_rows.append((line, color, alpha))
 
@@ -533,7 +584,9 @@ class ChatGUI(GUI):
             bg_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
             bg_surf.fill((0, 0, 0, int(alpha * 0.45)))
             self.render.blit(bg_surf, (bg_rect.x, bg_rect.y))
-            self._render_row(line, x + 2, draw_y + 2, color, alpha, font)
+            self._render_row(
+                line, x + 2, draw_y + 2, color, alpha, lay['msg_font_size']
+            )
 
     # ------------------------------------------------------------------
     # 输入栏

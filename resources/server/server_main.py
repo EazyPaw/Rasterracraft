@@ -401,10 +401,10 @@ class Server:
     def _resolve_chat_msg(self, msg, color=None):
         """解析聊天消息参数，统一处理 str 和 Text 对象。
 
-        Returns (text: str, color: tuple).
+        Returns (text: str | dict, color: tuple). Text 会保留逐段样式。
         """
         if isinstance(msg, Text):
-            text = msg.to_plain_string()
+            text = msg.to_dict()
             if color is None and msg.text:
                 color = msg.text[0]['color'].value
         else:

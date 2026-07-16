@@ -18,6 +18,7 @@ import pygame
 from resources.client.GUI.gui import GUI
 from resources.client.camera import Camera
 from resources.server.biome import get_biome_by_id
+from resources.server.text import Text
 
 from .block import BlockRenderMixin
 from .constants import BLOCK_TINT_COLOR_STEP
@@ -82,7 +83,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         # ---- 字体 ----
         self.font_path: str = "assets\\minecraft\\font\\Minecraft_AE.ttf"
         self.default_font: pygame.font.Font = pygame.font.Font(self.font_path, 36)
-        self.font_cache: dict[int, pygame.font.Font] = {}
+        self.font_cache: dict[int | tuple[int, bool], pygame.font.Font] = {}
 
         # ---- 事件队列 ----
         self.events: list[pygame.event.Event] = []
@@ -663,24 +664,27 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
 
     # ===================== 文本与字体 =====================
 
-    def get_font(self, size: int) -> pygame.font.Font:
+    def get_font(self, size: int, bold: bool = False) -> pygame.font.Font:
         """获取指定大小的字体（带缓存）。
 
         参数:
             size: 字体大小（像素）
+            bold: 是否使用粗体
 
         返回:
             pygame.font.Font 实例
         """
-        if size in self.font_cache:
-            return self.font_cache[size]
+        cache_key = (size, True) if bold else size
+        if cache_key in self.font_cache:
+            return self.font_cache[cache_key]
         font = pygame.font.Font(self.font_path, size)
-        self.font_cache[size] = font
+        font.set_bold(bold)
+        self.font_cache[cache_key] = font
         return font
 
     def render_text(
         self,
-        text: str,
+        text: str | Text,
         pos: tuple[float, float],
         color: tuple[int, int, int] = (255, 255, 255),
         font_size: int = 36,
@@ -688,30 +692,53 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         shadow_strength = 0.4,
         glow: bool = False,
         clip_rect=None,
+        bold: bool = False,
     ) -> None:
         """在屏幕上渲染文本。
 
         参数:
-            text: 文本内容
+            text: 文本内容；传入 Text 时会逐段应用颜色和粗体样式
             pos: 位置 (x, y)
             color: 文本颜色 RGB
             font_size: 字体大小
             shadow: 是否绘制阴影
             shadow_strength: 阴影亮度
             glow: 是否添加发光效果
+            bold: 普通字符串是否使用粗体；传入 Text 时作为全局粗体开关
         """
         old_clip = None
         if clip_rect is not None:
             old_clip = self.screen.get_clip()
             self.screen.set_clip(clip_rect)
 
-        text_surface = self.get_font(font_size).render(text, True, color)
-        if shadow:
-            # 阴影：深色版本偏移绘制在文本下方
-            shadow_color = tuple(int(x * shadow_strength) for x in color)
-            shadow_surface = self.get_font(font_size).render(text, True, shadow_color)
-            self.screen.blit(shadow_surface, (pos[0] + font_size / 8, pos[1] + font_size / 8))
-        self.screen.blit(text_surface, pos)
+        if isinstance(text, Text):
+            segments = text.text
+        else:
+            segments = ({"text": str(text), "color": color, "bold": bold},)
+
+        cursor_x = pos[0]
+        for segment in segments:
+            segment_text = str(segment.get("text", ""))
+            segment_color = segment.get("color", color)
+            if hasattr(segment_color, "value"):
+                segment_color = segment_color.value
+            if not isinstance(segment_color, (tuple, list)) or len(segment_color) < 3:
+                segment_color = color
+            segment_color = tuple(segment_color[:3])
+            segment_bold = bold or bool(segment.get("bold", False))
+            font = self.get_font(font_size, segment_bold)
+            text_surface = font.render(segment_text, True, segment_color)
+
+            if shadow:
+                # 阴影：深色版本偏移绘制在文本下方
+                shadow_color = tuple(int(x * shadow_strength) for x in segment_color)
+                shadow_surface = font.render(segment_text, True, shadow_color)
+                self.screen.blit(
+                    shadow_surface,
+                    (cursor_x + font_size / 8, pos[1] + font_size / 8),
+                )
+            self.screen.blit(text_surface, (cursor_x, pos[1]))
+            cursor_x += text_surface.get_width()
 
         if old_clip is not None:
             self.screen.set_clip(old_clip)

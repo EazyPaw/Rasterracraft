@@ -7,6 +7,7 @@ from resources.server.block_class import Block
 from resources.server.blocks import get_block_by_id
 from resources.server.inventory import payload_to_stack, restore_inventory
 from resources.server.location import Location
+from resources.server.text import Text
 
 if TYPE_CHECKING:
     from resources.client.client_main import Client
@@ -224,9 +225,23 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         #     'text': 'formatted message text',
         #     'color': [r, g, b],  # 可选颜色
         # }
+        text_payload = packet.get('text', '')
+        if isinstance(text_payload, dict):
+            try:
+                text_payload = Text.from_dict(text_payload)
+            except (KeyError, TypeError, ValueError):
+                logging.warning("Received malformed formatted chat message")
+                text_payload = ''
+        elif isinstance(text_payload, list):
+            try:
+                text_payload = Text.from_dict({'text': text_payload})
+            except (KeyError, TypeError, ValueError):
+                logging.warning("Received malformed formatted chat message")
+                text_payload = ''
+
         color_raw = packet.get('color', [255, 255, 255])
         color = tuple(color_raw) if isinstance(color_raw, list) else color_raw
-        client.add_chat_message(packet.get('text', ''), color)
+        client.add_chat_message(text_payload, color)
     elif packet['__class__'] == 'SaveComplete':
         if hasattr(client, "save_complete_event"):
             client.save_complete_event.set()
