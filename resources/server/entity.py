@@ -105,6 +105,22 @@ class Entity:
                 'amount': item.amount,
                 'nbt': item.nbt,
             }
+        # Players do not expose their inventory wholesale in entity packets,
+        # but other clients still need the currently selected stack to render
+        # the hand-held item.  Keep this small payload on normal spawn/update
+        # packets so it also changes when the hotbar selection changes.
+        if self.entity_id == 'player' and hasattr(self, 'inventory'):
+            try:
+                selected = int(getattr(self, 'selected_slot', 0))
+                selected = max(0, min(len(self.inventory) - 1, selected))
+                held = self.inventory[selected]
+                data['held_item_data'] = {
+                    'id': held.material.name_id,
+                    'amount': int(getattr(held, 'amount', 0)),
+                    'nbt': getattr(held, 'nbt', {}),
+                }
+            except (AttributeError, TypeError, ValueError, IndexError):
+                pass
         return data
 
     def write_nbt(self, nbt: str):

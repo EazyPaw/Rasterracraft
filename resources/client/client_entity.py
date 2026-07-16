@@ -96,6 +96,13 @@ class ClientEntity:
                 int(item_data.get('amount', 1)),
                 item_data.get('nbt', {}),
             )
+        held_item_data = packet.get('held_item_data')
+        if held_item_data is not None:
+            self.held_item = ItemStack(
+                get_material_by_id(held_item_data.get('id', 'air')),
+                int(held_item_data.get('amount', 0)),
+                held_item_data.get('nbt', {}),
+            )
         self._ensure_skeleton()
 
     def _ensure_skeleton(self):

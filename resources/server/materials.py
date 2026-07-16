@@ -1,5 +1,6 @@
 from resources.server.material_class import Material, BlockItem
 import resources.server.blocks as blocks
+from resources.server.utils import client_method
 
 
 class DIRT(BlockItem):
@@ -66,6 +67,14 @@ class Tool(Material):
     tool_type = None
     tier = "wood"
     mining_speed = 1.0
+
+    @client_method
+    def get_anchor(self, client = None):
+        """
+        用于获取渲染时客户端的手持点位，第三个值为缩放倍率，第四个参数为旋转度数（角度制）
+        :return:
+        """
+        return {'anchor':(0.3,0.7),'offset':(0, 0),'scale':1,'rotation':-45}
 
 
 class WOODEN_PICKAXE(Tool):

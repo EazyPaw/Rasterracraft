@@ -65,6 +65,9 @@ class BodyPart:
         self.target_show = show
         self.flip_x = False
         self.target_flip_x = False
+        # Additional per-part scale, used by hand-held item materials without
+        # changing the authored source texture itself.
+        self.render_scale = 1.0
 
         # base_texture 是缩放后的贴图；texture 是在 base_texture 基础上旋转后的贴图。
         self.base_texture = self.original_texture
@@ -105,9 +108,21 @@ class BodyPart:
 
     def rebuild_texture(self, scale: float):
         """按当前渲染缩放和实体大小生成最终贴图。"""
-        width = max(1, round(self.original_texture.get_width() * scale))
-        height = max(1, round(self.original_texture.get_height() * scale))
-        key = (width, height, round(self.angle, 2), self.flip_x)
+        effective_scale = scale * self.render_scale
+        width = max(1, round(self.original_texture.get_width() * effective_scale))
+        height = max(1, round(self.original_texture.get_height() * effective_scale))
+        key = (
+            width,
+            height,
+            round(self.angle, 2),
+            self.flip_x,
+            round(self.render_scale, 4),
+            # The pivot is part of the transform.  Without it, changing an
+            # item's normalized anchor could leave the old rendered pivot in
+            # the cache until some unrelated angle/scale change occurred.
+            round(self.pivot[0], 4),
+            round(self.pivot[1], 4),
+        )
         if key == self._last_transform_key:
             return
 
@@ -120,8 +135,8 @@ class BodyPart:
         self.size = self.texture.get_size()
         # 如果贴图被水平翻转，pivot 的 x 坐标也要镜像，否则关节会错位。
         self._render_pivot = (
-            base.get_width() - self.pivot[0] * scale if self.flip_x else self.pivot[0] * scale,
-            self.pivot[1] * scale,
+            base.get_width() - self.pivot[0] * effective_scale if self.flip_x else self.pivot[0] * effective_scale,
+            self.pivot[1] * effective_scale,
         )
         self._last_transform_key = key
 
@@ -135,14 +150,23 @@ class BodyPart:
         anchor_world = (entity_pos[0] + self.anchor[0], entity_pos[1] + self.anchor[1])
         anchor_screen = pygame.Vector2(render.trans_world_location(anchor_world))
         pivot = pygame.Vector2(self._render_pivot)
-        source_center = pygame.Vector2(self.base_texture.get_rect().center)
+        # Use the geometric (floating-point) center instead of Rect.center,
+        # which truncates odd-sized scaled textures and shifts a 0.5 anchor
+        # when the sprite is rotated.
+        source_center = pygame.Vector2(
+            self.base_texture.get_width() * 0.5,
+            self.base_texture.get_height() * 0.5,
+        )
 
         # pygame.transform.rotate 会围绕贴图中心旋转，但我们需要围绕关节 pivot 旋转。
         # 这里先算出"pivot 相对贴图中心"的向量，旋转后再反推出整张贴图的左上角。
         # 注意：Pygame 的屏幕 y 轴向下，所以这里用 -self.angle 来匹配世界坐标的视觉方向。
         pivot_from_center = pivot - source_center
         rotated_pivot_from_center = pivot_from_center.rotate(-self.angle)
-        rotated_center = pygame.Vector2(self.texture.get_rect().center)
+        rotated_center = pygame.Vector2(
+            self.texture.get_width() * 0.5,
+            self.texture.get_height() * 0.5,
+        )
         top_left = anchor_screen - rotated_center - rotated_pivot_from_center
 
         texture = render.get_tinted_surface(self.texture, tint)
@@ -238,13 +262,17 @@ class EntitySkeleton(ABC):
             part.rebuild_texture(scale)
         self.last_size = self.client.render.trans_scale
 
+    def _part_smoothness(self, part: BodyPart) -> float:
+        """Return the pose interpolation strength for one body part."""
+        return 0.28
+
     def update(self):
         """每帧更新骨架位置、缩放缓存和各部件姿态。"""
         self._update_interpolation()
         if self.last_size != self.client.render.trans_scale:
             self.conv_size()
         for part in self.body.values():
-            part.tick(0.28)
+            part.tick(self._part_smoothness(part))
 
     # ---------- 绘制 ----------
 
@@ -254,10 +282,16 @@ class EntitySkeleton(ABC):
             return
         anchor = pygame.Vector2(anchor_screen)
         pivot = pygame.Vector2(part._render_pivot)
-        source_center = pygame.Vector2(part.base_texture.get_rect().center)
+        source_center = pygame.Vector2(
+            part.base_texture.get_width() * 0.5,
+            part.base_texture.get_height() * 0.5,
+        )
         pivot_from_center = pivot - source_center
         rotated_pivot_from_center = pivot_from_center.rotate(-part.angle)
-        rotated_center = pygame.Vector2(part.texture.get_rect().center)
+        rotated_center = pygame.Vector2(
+            part.texture.get_width() * 0.5,
+            part.texture.get_height() * 0.5,
+        )
         top_left = anchor - rotated_center - rotated_pivot_from_center
         texture = self.client.render.get_tinted_surface(part.texture, tint)
         self.client.render.blit(texture, (round(top_left.x), round(top_left.y)))
@@ -354,6 +388,17 @@ class PlayerSkeleton(EntitySkeleton):
         self._last_x = player.x
         self._last_y = player.y
         self._current_texture_side = None
+        self._held_item_key = None
+        self._held_item_pivot = (0.0, 0.0)
+        self._held_item_anchor = (0.5, 0.5)
+        self._held_item_offset = (0.0, 0.0)
+        self._held_item_scale = 0.7
+        self._held_item_rotation = 0.0
+        # Held items use explicitly cached right/left source textures.  This
+        # keeps facing mirroring independent from the arm rotation math.
+        self._held_item_textures: dict[int, pygame.Surface] = {}
+        self._held_item_pivots: dict[int, tuple[float, float]] = {}
+        self._held_item_texture_side = None
         self._build_player_body()
         self._apply_pose(instant=True)
         self.conv_size()
@@ -386,6 +431,7 @@ class PlayerSkeleton(EntitySkeleton):
             },
         }
         textures = self._part_textures[self.RIGHT]
+        empty_item = pygame.Surface((1, 1), pygame.SRCALPHA)
         self.body = {
             # anchor 只是初始化值，真正姿态会在 _apply_pose() 中按玩家高度重算。
             # pivot 的单位是皮肤像素：手脚 pivot=(2,0) 表示从顶部中点挂在肩膀/髋部。
@@ -394,6 +440,9 @@ class PlayerSkeleton(EntitySkeleton):
             "body": BodyPart("body", textures["body"], (0.50, 1.50), (2, 0), layer=2),
             "front_leg": BodyPart("front_leg", textures["front_leg"], (0.50, 0.75), (2, 0), layer=3),
             "front_arm": BodyPart("front_arm", textures["front_arm"], (0.50, 1.50), (2, 0), layer=4),
+            # The item sits between the torso and the front arm, so the hand
+            # remains visibly in front of it while the item follows the arm.
+            "held_item": BodyPart("held_item", empty_item, (0.50, 1.05), (0.5, 0.5), layer=3, show=False),
             "head": BodyPart("head", textures["head"], (0.50, 1.50), (4, 8), layer=5),
             "head_overlay": BodyPart("head_overlay", textures["head_overlay"], (0.50, 1.50), (4, 8), layer=6),
         }
@@ -405,6 +454,86 @@ class PlayerSkeleton(EntitySkeleton):
         for name, texture in self._part_textures[self.facing].items():
             self.body[name].set_source_texture(texture)
         self._current_texture_side = self.facing
+
+    def _update_held_item_texture(self):
+        """Build and select an explicitly mirrored held-item source texture."""
+        stack = None
+        # The local player owns a full inventory; remote entities receive the
+        # compact held_item payload from Entity.to_entity_data().
+        if hasattr(self.entity, "inventory"):
+            try:
+                slot = max(0, min(8, int(getattr(self.entity, "selected_slot", 0))))
+                stack = self.entity.inventory[slot]
+            except (AttributeError, TypeError, ValueError, IndexError):
+                stack = None
+        if stack is None:
+            stack = getattr(self.entity, "held_item", None)
+
+        item_id = getattr(getattr(stack, "material", None), "name_id", "air")
+        key = (item_id, bool(stack and not stack.is_empty()))
+        part = self.body["held_item"]
+        if key != self._held_item_key:
+            texture = None
+            anchor = (0.5, 0.5)
+            offset = (0.0, 0.0)
+            item_scale = 0.7
+            item_rotation = 0.0
+            if stack is not None and not stack.is_empty():
+                # Keep the authored item size.  BodyPart only applies the
+                # normal world/player render scale afterward.
+                texture = stack.get_texture(1.0, shadow=False)
+                try:
+                    raw_pose = stack.material.get_anchor()
+                    if isinstance(raw_pose, dict):
+                        raw_item_anchor = raw_pose.get("anchor", anchor)
+                        raw_offset = raw_pose.get("offset", offset)
+                        if raw_item_anchor is not None and len(raw_item_anchor) >= 2:
+                            anchor = (float(raw_item_anchor[0]), float(raw_item_anchor[1]))
+                        if raw_offset is not None and len(raw_offset) >= 2:
+                            offset = (float(raw_offset[0]), float(raw_offset[1]))
+                        item_scale = max(0.1, float(raw_pose.get("scale", item_scale)))
+                        item_rotation = float(raw_pose.get("rotation", item_rotation))
+                    elif raw_pose is not None:
+                        # Keep compatibility with the old tuple format while
+                        # materials migrate to the named pose dictionary.
+                        if len(raw_pose) >= 2:
+                            anchor = (float(raw_pose[0]), float(raw_pose[1]))
+                        if len(raw_pose) >= 3:
+                            item_scale = max(0.1, float(raw_pose[2]))
+                        if len(raw_pose) >= 4:
+                            item_rotation = float(raw_pose[3])
+                except (AttributeError, TypeError, ValueError):
+                    pass
+            if texture is None:
+                texture = pygame.Surface((1, 1), pygame.SRCALPHA)
+
+            self._held_item_anchor = anchor
+            self._held_item_offset = offset
+            self._held_item_scale = item_scale
+            self._held_item_rotation = item_rotation
+            part.render_scale = item_scale
+            right_pivot = (
+                texture.get_width() * anchor[0],
+                texture.get_height() * anchor[1],
+            )
+            # RIGHT is the authored item sprite.  LEFT is generated exactly
+            # once when the selected stack changes; no runtime flip is mixed
+            # into BodyPart's rotation pipeline.
+            self._held_item_textures = {
+                self.RIGHT: texture,
+                self.LEFT: pygame.transform.flip(texture, True, False),
+            }
+            self._held_item_pivots = {
+                self.RIGHT: right_pivot,
+                self.LEFT: (texture.get_width() - right_pivot[0], right_pivot[1]),
+            }
+            self._held_item_texture_side = None
+            self._held_item_key = key
+
+        if self._held_item_texture_side != self.facing:
+            part.set_source_texture(self._held_item_textures[self.facing])
+            self._held_item_pivot = self._held_item_pivots[self.facing]
+            self._held_item_texture_side = self.facing
 
     def _update_facing(self):
         """先由基类根据水平速度决定朝向，站立不动时再根据鼠标指向调整。"""
@@ -470,6 +599,13 @@ class PlayerSkeleton(EntitySkeleton):
         self._apply_pose(instant=sneaking_changed)
         super().update()
 
+    def _part_smoothness(self, part: BodyPart) -> float:
+        """Let legs settle naturally after walking instead of snapping upright."""
+        motion_x = getattr(getattr(self.entity, "motion", None), "x", 0.0)
+        if part.name in ("front_leg", "back_leg") and abs(motion_x) <= 0.025:
+            return 0.12
+        return 0.28
+
     def _pose_part(
         self,
         name: str,
@@ -489,6 +625,7 @@ class PlayerSkeleton(EntitySkeleton):
         """编排各子方法，按优先级叠加：行走 → 飞行 → 攻击混合 → 写入部件。"""
         direction = self._facing_sign()
         self._set_facing_textures()
+        self._update_held_item_texture()
 
         # 1. 行走/站立基础姿态
         angles = self._calc_walk_angles(direction)
@@ -513,7 +650,7 @@ class PlayerSkeleton(EntitySkeleton):
             self._blend_attack_pose(direction, angles)
 
         # 4. 计算锚点并写入全部部件
-        self._write_pose(angles, instant)
+        self._write_pose(angles, instant, facing_changed)
 
     # ---------- 姿态计算子方法 ----------
 
@@ -524,21 +661,27 @@ class PlayerSkeleton(EntitySkeleton):
 
         cycle = math.sin(self.walk_time)
         counter_cycle = math.sin(self.walk_time + math.pi)
-        walk_power = min(abs(motion_x) / max(getattr(self.entity, "speed", 0.6), 0.01), 1.0)
+        # Animation amplitude is deliberately independent of horizontal
+        # velocity; only the phase/frequency changes as the player moves.
+        walk_power = 1.0
 
         idle = math.sin(time.perf_counter() * 2.4)
 
         # 静止时极小幅度自然摆动，行走时大幅摆动
         if moving:
-            front_arm = direction * (counter_cycle * 28.0 * walk_power)
-            back_arm = direction * (cycle * 28.0 * walk_power)
+            # Amplitude is a property of the walk cycle, not the current
+            # velocity.  Velocity only changes the cycle frequency above.
+            front_arm = direction * (counter_cycle * 28.0)
+            back_arm = direction * (cycle * 28.0)
         else:
             front_arm = direction * idle * 2.5
             back_arm = direction * (-idle * 2.5)
 
         return {
             'bob': 0.0,
-            'body_lean': direction * motion_x * -4.0,
+            # Keep the torso upright at every horizontal speed.  A velocity
+            # based angle made extreme speeds visibly tip the whole player.
+            'body_lean': 0.0,
             'head_angle': self._calc_head_angle(direction),
             'front_arm_angle': front_arm,
             'back_arm_angle': back_arm,
@@ -559,10 +702,11 @@ class PlayerSkeleton(EntitySkeleton):
 
         dx = mouse_wx - head_wx
         dy = mouse_wy - head_wy
-        raw = math.degrees(math.atan2(dy, dx * direction))
-        angle = raw
-        if self.entity.facing == 0:
-            angle = -raw
+        # Mirror the vertical look angle once, according to the facing side.
+        # The old implementation negated atan2 a second time for LEFT, which
+        # caused the head to reverse when the cursor crossed back to the front.
+        raw = math.degrees(math.atan2(dy, max(abs(dx), 1e-4)))
+        angle = raw * direction
         return max(-45.0, min(80.0, angle))
 
     def _calc_head_motion_angle(self, direction: int) -> float:
@@ -612,7 +756,7 @@ class PlayerSkeleton(EntitySkeleton):
     def _calc_sneak_angles(self, direction: int, base: dict) -> dict:
         """潜行姿态覆盖：身体压低、前倾，手脚在潜行基础角度上叠加减弱版行走摆动。"""
         # 身体前倾
-        base['body_lean'] = direction * -30.0
+        base['body_lean'] = direction * -36.0
         # 头部微微抬起看向前方
         base['head_angle'] = direction * -10.0
 
@@ -620,22 +764,25 @@ class PlayerSkeleton(EntitySkeleton):
         moving = abs(motion_x) > 0.025
         cycle = math.sin(self.walk_time)
         counter_cycle = math.sin(self.walk_time + math.pi)
-        walk_power = min(abs(motion_x) / max(getattr(self.entity, "speed", 0.6), 0.01), 1.0)
+        # Keep crouch swing amplitude independent of movement speed.
+        walk_power = 1.0
 
         # 潜行基础角度
-        sneak_arm_base = 10.0
-        sneak_leg_base = 0
-        swing_scale = 3.30
+        sneak_leg_base = 0.0
+        swing_scale = 0.75
 
         if moving:
             arm_swing = swing_scale * 28.0 * walk_power
-            leg_swing = swing_scale * 24.0 * walk_power
+            leg_swing = swing_scale * 24.0
         else:
             arm_swing = 0.0
             leg_swing = 0.0
 
-        base['front_arm_angle'] = direction * (sneak_arm_base + counter_cycle * arm_swing)
-        base['back_arm_angle'] = direction * (-sneak_arm_base + cycle * arm_swing)
+        # At rest both arms follow the torso's slope and sit against its two
+        # ends; walking adds only a small swing around that baseline.
+        arm_base = base['body_lean']
+        base['front_arm_angle'] = arm_base + direction * (counter_cycle * arm_swing)
+        base['back_arm_angle'] = arm_base + direction * (cycle * arm_swing)
         base['front_leg_angle'] = direction * (sneak_leg_base + cycle * leg_swing)
         base['back_leg_angle'] = direction * (sneak_leg_base + counter_cycle * leg_swing)
         return base
@@ -649,7 +796,7 @@ class PlayerSkeleton(EntitySkeleton):
             angles['front_arm_angle'] * (1.0 - swing) + 70.0 * swing
         )
 
-    def _write_pose(self, angles: dict, instant: bool):
+    def _write_pose(self, angles: dict, instant: bool, facing_changed: bool):
         """计算锚点坐标并写入全部身体部件。"""
         visual_scale = self.size
         center_x = getattr(self.entity, "width", 1.0) * 0.5
@@ -657,14 +804,22 @@ class PlayerSkeleton(EntitySkeleton):
         bob = angles.get('bob', 0.0)
 
         center_y = bob * visual_scale
-        hip_y = center_y + 0.75 * visual_scale
-        shoulder_y = center_y + 1.50 * visual_scale
-        head_y = shoulder_y
+        sneaking = getattr(self.entity, "sneaking", False)
+        # Lower the hips/shoulders and shorten the silhouette while crouching;
+        # the rotated limbs then create a readable 2D bent-knee pose.
+        crouch_y = -0.16 * visual_scale if sneaking else 0.0
+        crouch_forward = direction * 0.10 * visual_scale if sneaking else 0.0
+        upper_center_x = center_x + crouch_forward
+        hip_y = center_y + (0.67 * visual_scale if sneaking else 0.75 * visual_scale) + crouch_y
+        shoulder_y = center_y + (1.35 * visual_scale if sneaking else 1.50 * visual_scale) + crouch_y
+        head_y = shoulder_y + (0.05 * visual_scale if sneaking else 0.0)
 
-        shoulder_spread = 0.04 * visual_scale
+        # In a crouch the arms attach at the two outer edges of the tilted
+        # torso, rather than bunching near its center.
+        shoulder_spread = (0.10 if sneaking else 0.04) * visual_scale
         hip_spread = 0.035 * visual_scale
-        front_x = center_x + direction * shoulder_spread
-        back_x = center_x - direction * shoulder_spread
+        front_x = upper_center_x + direction * shoulder_spread
+        back_x = upper_center_x - direction * shoulder_spread
         front_leg_x = center_x + direction * hip_spread
         back_leg_x = center_x - direction * hip_spread
 
@@ -677,11 +832,50 @@ class PlayerSkeleton(EntitySkeleton):
 
         self._pose_part("back_arm", (back_x, shoulder_y), (2, 0), angles['back_arm_angle'], flip_x=False)
         self._pose_part("back_leg", (back_leg_x, hip_y), (2, 0), angles['back_leg_angle'], flip_x=False)
-        self._pose_part("body", (center_x, shoulder_y), (2, 0), angles['body_lean'], flip_x=False)
+        self._pose_part("body", (upper_center_x, shoulder_y), (2, 0), angles['body_lean'], flip_x=False)
         self._pose_part("front_leg", (front_leg_x, hip_y), (2, 0), angles['front_leg_angle'], flip_x=False)
         self._pose_part("front_arm", (front_x, shoulder_y), (2, 0), angles['front_arm_angle'], flip_x=False)
-        self._pose_part("head", (center_x, head_y), (4, 8), angles['head_angle'], flip_x=False)
-        self._pose_part("head_overlay", (center_x, head_y), (4, 8), angles['head_angle'], flip_x=False)
+        # Approximate the hand endpoint in world units.  This keeps the held
+        # item between the body and hand while the arm swings.
+        hand_len = 0.68 * visual_scale
+        arm_angle = math.radians(angles['front_arm_angle'])
+        # The signed arm angle already mirrors with facing.  Multiplying by
+        # direction again inverted the endpoint and put left-hand swings on
+        # the player's right side.
+        hand_x = front_x + math.sin(arm_angle) * hand_len
+        hand_y = shoulder_y - math.cos(arm_angle) * hand_len
+        # offset is authored in player/model coordinates, so mirror only its
+        # horizontal component when the player turns.  anchor is deliberately
+        # not used here: it belongs to the item texture and defines where the
+        # hand grips that texture.
+        offset_x, offset_y = self._held_item_offset
+        hand_x += direction * offset_x
+        hand_y += offset_y
+        # Item sprites are authored upright already.  Rotate only by the arm
+        # angle; adding a facing-dependent 90-degree offset couples horizontal
+        # mirroring to vertical orientation and makes one of them look wrong.
+        # get_anchor()[3] is an authored clockwise/counter-clockwise offset in
+        # degrees.  Mirror its sign with the facing direction so the cached
+        # LEFT source remains the exact horizontal mirror of RIGHT.
+        item_angle = angles['front_arm_angle'] + direction * self._held_item_rotation
+        item_visible = self._held_item_key is not None and self._held_item_key[1]
+        self._pose_part(
+            "held_item", (hand_x, hand_y), self._held_item_pivot, item_angle,
+            # The selected source texture was pre-mirrored above.  Keep the
+            # generic BodyPart flip disabled so it cannot mirror it twice.
+            visible=item_visible, flip_x=False,
+        )
+        # Turning should mirror the held item immediately instead of letting
+        # its anchor and rotation interpolate through the opposite side.
+        if facing_changed:
+            part = self.body["held_item"]
+            part.anchor = part.target_anchor
+            part.pivot = part.target_pivot
+            part.angle = part.target_angle
+            part.show = part.target_show
+            part.flip_x = part.target_flip_x
+        self._pose_part("head", (upper_center_x, head_y), (4, 8), angles['head_angle'], flip_x=False)
+        self._pose_part("head_overlay", (upper_center_x, head_y), (4, 8), angles['head_angle'], flip_x=False)
 
         if instant:
             for part in self.body.values():

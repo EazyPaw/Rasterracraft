@@ -87,6 +87,14 @@ class Material:
         """返回用于 HUD、背包等界面的可读物品名称。"""
         return transkey(self.name)
 
+    @client_method
+    def get_anchor(self):
+        """
+        用于获取渲染时客户端的手持点位，最后一个值为缩放倍率
+        :return:
+        """
+        return {'anchor':(0.5,0.5),'offset':(0, 0),'scale':0.7,'rotation':0}
+
 
 class BlockItem(Material):
     target_block = None
