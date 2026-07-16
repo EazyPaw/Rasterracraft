@@ -1,5 +1,6 @@
 import os
 
+from resources.client.resources_manager import transkey
 from resources.server.biome import get_biome_by_id
 
 if os.environ.get('PYCRAFT_CLIENT') == '1':
@@ -34,6 +35,23 @@ class STONE(Block):
     _texture_path = 'blocks.stone'
     preferred_tool = 'pickaxe'
     requires_correct_tool = True
+
+class COBBLESTONE(Block):
+    block_id = 'cobblestone'
+    name = 'cobblestone'
+    _texture_path = 'blocks.cobblestone'
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
+
+class OBSIDIAN(Block):
+    block_id = 'obsidian'
+    name = 'obsidian'
+    _texture_path = 'blocks.obsidian'
+    hardness = 50.0
+    blast_resistance = 1200.0
+    preferred_tool = 'pickaxe'
+    requires_correct_tool = True
+    required_tool_tier = 'diamond'
 
 class GRANITE(Block):
     block_id = 'granite'
@@ -569,6 +587,27 @@ class WATER(FluidBlock):
     _texture_path = 'blocks.water_still'
     _flow_texture_path = 'blocks.water_flow'
     _texture_cache = {}
+    horizontal_flow_range = 4
+    flowing_sound = 'liquid.water'
+    source_sound = 'liquid.water'
+
+class LAVA(FluidBlock):
+    block_id = 'lava'
+    name = 'lava'
+    _texture_path = 'blocks.lava_still'
+    _flow_texture_path = 'blocks.lava_flow'
+    # LEVEL remains the vanilla 0..7 range; the two-level drop-off means
+    # normal horizontal spreading uses 0, 2, 4, 6, then stops.
+    max_level = 7
+    # Vanilla lava drops two legacy levels per horizontal spread and searches
+    # only two cells for a lower slope in the normal dimension.
+    flow_level_step = 2
+    horizontal_flow_range = 2
+    light_source = 15
+    can_create_source = False
+    flow_speed_ticks = 30
+    flowing_sound = 'liquid.lava'
+    source_sound = 'liquid.lavapop'
 
 class SUGAR_CANE(Plant):
     block_id = 'sugar_cane'

@@ -52,6 +52,7 @@ class Entity:
         self.in_water = False
         self.swimming_up = False
         self._jumped_this_tick = False
+        self.fire_ticks = 0
 
     def teleport_to(self, x, y, world = None):
         self.x = x

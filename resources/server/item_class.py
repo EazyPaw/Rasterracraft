@@ -5,7 +5,7 @@ from resources.server.utils import client_method
 
 
 class ItemStack:
-    def __init__(self, material: 'Material', amount: int = 1, nbt = None):
+    def __init__(self, material, amount: int = 1, nbt = None):
         if nbt is None:
             nbt = {}
         self.nbt = nbt
@@ -66,7 +66,7 @@ class ItemStack:
         if cache_key in self.material.texture_cache:
             return self.material.texture_cache[cache_key]
 
-        px_scale = client.render.gui_scale
+        px_scale = max(1, int(round(client.render.gui_scale)))
 
         res = self.material.get_texture(scale)
         if shadow and res is not None:

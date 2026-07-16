@@ -27,6 +27,10 @@ class WATER(BlockItem):
     name = "water"
     target_block = blocks.WATER
 
+class LAVA(BlockItem):
+    name_id = "lava"
+    name = "lava"
+    target_block = blocks.LAVA
 
 class APPLE(Material):
     name_id = "apple"
@@ -94,6 +98,9 @@ class DIAMOND_PICKAXE(WOODEN_PICKAXE):
     _texture_path = "items.diamond_pickaxe"
     tier = "diamond"
     mining_speed = 8.0
+
+class SNOWBALL(Material):
+    ...
 
 
 _block_item_types: dict[str, type[BlockItem]] = {}

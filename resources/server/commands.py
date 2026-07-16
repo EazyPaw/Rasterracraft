@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING, Callable, List, Dict
 from resources.client.game_mode import get_gamemode_by_id
 from resources.server.blocks import get_block_by_id
 from resources.server.entity import Entity
+from resources.server.item_class import ItemStack
 from resources.server.location import Location
+from resources.server.materials import get_material_by_id
 from resources.server.player import Player
 
 if TYPE_CHECKING:
@@ -27,6 +29,7 @@ class CommandExecutor:
         "time": self.time,
         "weather": self.weather,
         "gamemode": self.switch_gamemode,
+        "give": self.give_command,
     }
 
     def python_execute(self, args, executor: Player | str):
@@ -51,6 +54,64 @@ class CommandExecutor:
         self.server.send_client_socket(executor, executor, "GamemodeUpdate")
         return f"Gamemode is set to {gamemode.name_id}"
 
+
+    def give_command(self, args, executor: Player | str):
+        """
+        /give <target> <item> [<count>]
+
+        模仿 Minecraft 的 give 指令，给予目标玩家指定物品。
+        - <target>: 目标选择器 (@s, @a, @p, @r) 或玩家名称
+        - <item>: 物品 ID（如 "dirt", "apple", "stone_pickaxe"）
+        - [<count>]: 可选数量，默认 1，最大为一组堆叠上限
+        """
+        if len(args) < 2:
+            raise ValueError("Usage: /give <target> <item> [<count>]")
+
+        # ---- 1. 解析目标 ----
+        targets = self.target_selector(args[0], executor)
+        if targets is None:
+            raise ValueError(f"No targets matched: {args[0]}")
+        if len(targets) == 0:
+            raise ValueError(f"No targets matched: {args[0]}")
+
+        # ---- 2. 解析物品 ----
+        item_id = args[1].removeprefix("minecraft:")
+        material = get_material_by_id(item_id)
+        if material.name_id == "air" and item_id != "air":
+            raise ValueError(f"Unknown item: {args[1]}")
+
+        # ---- 3. 解析数量 ----
+        count = 1
+        if len(args) >= 3:
+            try:
+                count = int(args[2])
+            except ValueError:
+                raise ValueError(f"Invalid count: {args[2]}")
+
+        if count < 1:
+            raise ValueError("Count must be at least 1")
+        if count > material.max_stack_size:
+            count = material.max_stack_size
+
+        # ---- 4. 分发物品 ----
+        given_count = 0
+        for target in targets:
+            if not isinstance(target, Player):
+                continue
+            item_stack = ItemStack(material.__class__(), count)
+            self.server.send_client_socket(
+                target,
+                {"__class__": "ItemPickup", "item": {
+                    "id": item_stack.material.name_id,
+                    "amount": item_stack.amount,
+                    "nbt": item_stack.nbt,
+                }},
+                "Forward",
+            )
+            given_count += 1
+
+        item_name = getattr(material, "name", item_id)
+        return f"Gave {count}x {item_name} to {given_count} player(s)"
 
     def time(self, args, executor: Player | str):
         if args[0] == "add" and isinstance(executor, Player):

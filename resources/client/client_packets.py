@@ -98,11 +98,17 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         world = client.client_world
         x, y, z = packet['x'], packet['y'], packet['z']
         if 0 <= y < world.y_max:
+            previous = world.get_block(x, y, z)
             block_data = packet['block_data']
             block = get_block_by_id(block_data['id'])
             if 'nbt' in block_data:
                 block.write_nbt(block_data['nbt'])
             world.set_block(block, x, y, z)
+            if (
+                getattr(previous, 'block_id', None) == 'lava'
+                and getattr(block, 'block_id', None) in {'stone', 'cobblestone', 'obsidian'}
+            ):
+                world.play_sound('random.fizz', x + 0.5, y + 0.5, z, volume=0.8)
     elif packet['__class__'] == 'LightUpdate':
         # {
         #     '__class__': 'LightUpdate',

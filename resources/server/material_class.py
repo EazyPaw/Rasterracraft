@@ -12,6 +12,7 @@ class Material:
     _texture_path = None
     _original_texture = None
     _last_scaled = None
+    _scaled_texture_cache = {}
 
     def __init__(self):
         self.texture_cache = {}
@@ -36,27 +37,29 @@ class Material:
         if cls._original_texture is None:
             return None
 
-        # 使用容差比较，避免浮点精度导致无意义重缩放
-        need_rescale = (
-                cls._last_scaled is None or
-                abs(size - cls._last_scaled) > 1e-6
-        )
+        # 缩放结果必须按尺寸缓存。旧实现只记录最后一次尺寸，但命中时
+        # 返回了未缩放原图，导致热栏/背包或全屏切换后苹果、面包等忽然变小。
+        key = round(float(size), 4)
+        # 每种 Material 必须拥有独立缓存；直接使用继承来的类属性会让
+        # 苹果与面包在相同 GUI 缩放下互相复用错误纹理。
+        cache = cls.__dict__.get("_scaled_texture_cache")
+        if cache is None:
+            cache = {}
+            cls._scaled_texture_cache = cache
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
 
-        if need_rescale:
-            original_width = cls._original_texture.get_width()
-            original_height = cls._original_texture.get_height()
-
-            # 计算新尺寸（至少为 1，防止缩放为 0 导致错误）
-            new_width = max(1, int(original_width * size))
-            new_height = max(1, int(original_height * size))
-
-            # 缩放
-            texture = pygame.transform.scale(cls._original_texture, (new_width, new_height))
-            cls._last_scaled = size
-
-            return texture
-        
-        return cls._original_texture
+        original_width = cls._original_texture.get_width()
+        original_height = cls._original_texture.get_height()
+        new_width = max(1, int(round(original_width * size)))
+        new_height = max(1, int(round(original_height * size)))
+        texture = pygame.transform.scale(cls._original_texture, (new_width, new_height))
+        cls._last_scaled = key
+        cache[key] = texture
+        if len(cache) > 16:
+            cache.pop(next(iter(cache)))
+        return texture
 
     def __eq__(self, other):
         """
@@ -98,3 +101,6 @@ class BlockItem(Material):
             0,
         )
         return block.get_texture(block_size, client=client)
+
+class Projectile(Material):
+    ...

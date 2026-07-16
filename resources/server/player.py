@@ -62,7 +62,18 @@ class Player(Entity):
         self._last_sprint_particle_x = self.x
         if last_x is None:
             return
-        if abs(self.x - last_x) < 0.001:
+        # 粒子只应出现在真正高速疾跑时；按本 tick 的水平位移和状态
+        # 过滤掉原地切换疾跑、缓慢起步以及飞行/流体中的移动。
+        speed = abs(self.x - last_x)
+        if (
+            speed < 0.001
+            or not self.on_ground
+            or self.in_fluid
+            or self.flying
+            # 客户端移动包只携带位置，不保证服务端 motion 已同步；用相邻
+            # 包的位移作为每 tick 速度。0.22 可过滤普通行走的低速阶段。
+            or speed < 0.22
+        ):
             return
 
         self._sprint_particle_timer += 1

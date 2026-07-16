@@ -303,10 +303,15 @@ class SPLASH(TextureParticle):
     name = "splash"
     _texture_paths = tuple(f"particle.splash_{i}" for i in range(4))
     lifetime_ticks = (8, 14)
-    size = (0.06, 0.11)
-    gravity = 0.03
-    linear_drag = 0.03
-    collision = CollisionSettings(enabled=True, radius=0.025, drag=0.45, restitution=0.05)
+    # 旧尺寸在 64px 方块下只有 4~7px，且 splash 贴图本身透明像素较多，
+    # 雨天几乎不可见。保持轻量的同时放大到可辨识的水花尺寸。
+    size = (0.11, 0.20)
+    # A light gravity and drag turn the rain impact motion into a short arc.
+    # Weather spawning gives it enough upward speed to remain above the
+    # surface for the whole animation.
+    gravity = 0.01
+    linear_drag = 0.025
+    collision = CollisionSettings(enabled=False)
     animation_frame_ticks = 2
     animation_loop = False
 
@@ -356,7 +361,8 @@ class SPRINT_STEP(BlockParticle):
     _texture_paths = None
     lifetime_ticks = (6, 14)
     size = (0.04, 0.09)
-    gravity = -0.002
+    gravity = 0.02
+    collision = CollisionSettings(enabled=True, radius=0.025, drag=0.45, restitution=0.05)
     linear_drag = 0.025
 
     def __init__(
@@ -396,6 +402,14 @@ class SPRINT_STEP(BlockParticle):
         except ValueError:
             return
 
+        # 草方块等需要世界/生物群系信息的纹理必须拥有位置，否则
+        # get_texture 会在访问 location.x 时失败，导致疾跑粒子整批消失。
+        block.location = Location(
+            client.client_world,
+            math.floor(self.x),
+            math.floor(self.y),
+            int(self.z),
+        )
         fragments = manager._get_block_fragments(block)
         if not fragments:
             return

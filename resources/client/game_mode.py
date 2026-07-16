@@ -85,11 +85,11 @@ class CreativeMode(GameMode):
             return
         location = self.player.choosing_block.location
         item = self.player.inventory[self.player.selected_slot]
-        if hasattr(item.material, 'target_block'):
-            new_block = item.material.target_block()
-        else:
-            new_block = AIR()
-            print(type(item.material))
+        # 空手、食物或其它非方块物品对着空气右键不应伪造 AIR 放置包。
+        target_block = getattr(item.material, 'target_block', None)
+        if item.is_empty() or not callable(target_block):
+            return
+        new_block = target_block()
         logging.debug(f"Placing block {new_block.name} at {location}")
         if not self.player.choosing_block.on_right_click():
             place_location = None

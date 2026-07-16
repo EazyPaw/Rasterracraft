@@ -16,7 +16,7 @@ from resources.server.biome import get_precipitation_type
 
 
 class ClientWorld:
-    def __init__(self, client: 'Client'):
+    def __init__(self, client):
         self.id_name = "null"
         self._regions: dict[int, np.ndarray[Any, np.dtype[Block]]] = {}
         self.light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
@@ -37,7 +37,10 @@ class ClientWorld:
         self._pending_chunk_block_updates: dict[int, dict[tuple[int, int, int], Block]] = {}
         self.entities: dict[str, ClientEntity] = {}
         self._entities_lock = threading.RLock()
-        self._precipitation_height_cache: dict[tuple[int, int], tuple[int, int]] = {}
+        self._last_fluid_sound_tick = -10_000
+        # (chunk version, surface height, is_water).  Surface height is a float
+        # because a flowing water block can expose a partial-height surface.
+        self._precipitation_height_cache: dict[tuple[int, int], tuple[int, float, bool]] = {}
 
     def _mark_render_chunk_dirty(self, rx: int) -> None:
         self._render_revision += 1
@@ -262,8 +265,15 @@ class ClientWorld:
             return "none"
         return get_precipitation_type(biome_id, y)
 
-    def get_precipitation_height(self, x: int, z: int = 0) -> int | None:
-        """Return the first open Y above the highest solid block in one layer."""
+    def get_precipitation_surface(self, x: int, z: int = 0) -> tuple[float, bool] | None:
+        """Return the first precipitation impact surface in one layer.
+
+        Solid blocks stop rain at their top face.  Fluids are non-solid for
+        movement, but rain must stop at their visible surface; otherwise the
+        weather pass continues through the water and the splash is spawned
+        below it.  The fluid height is allowed to be fractional for flowing
+        water.
+        """
         rx = int(x) // 16
         chunk = self._regions.get(rx)
         if chunk is None:
@@ -273,16 +283,31 @@ class ClientWorld:
         cache_key = (int(x), z)
         cached = self._precipitation_height_cache.get(cache_key)
         if cached is not None and cached[0] == chunk_version:
-            return cached[1]
+            return cached[1], cached[2]
 
         local_x = int(x) % 16
-        height = 0
+        height = 0.0
+        is_water = False
         for y in range(self.y_max - 1, -1, -1):
-            if chunk[local_x, y, z].solid:
-                height = y + 1
+            block = chunk[local_x, y, z]
+            if block.solid:
+                height = float(y + 1)
                 break
-        self._precipitation_height_cache[cache_key] = (chunk_version, height)
-        return height
+            if getattr(block, "is_fluid", False):
+                try:
+                    fluid_ratio = float(block.fluid_height_ratio())
+                except (AttributeError, TypeError, ValueError):
+                    fluid_ratio = 1.0
+                height = float(y) + max(0.0, min(1.0, fluid_ratio))
+                is_water = getattr(block, "block_id", None) == "water"
+                break
+        self._precipitation_height_cache[cache_key] = (chunk_version, height, is_water)
+        return height, is_water
+
+    def get_precipitation_height(self, x: int, z: int = 0) -> float | None:
+        """Return the first open Y above the highest solid block or water surface."""
+        surface = self.get_precipitation_surface(x, z)
+        return None if surface is None else surface[0]
 
     def unload_chunk(self, x: int):
         """卸载区块，同时清理方塊、光照和生物群系数据"""
@@ -421,3 +446,42 @@ class ClientWorld:
             sound_id,
             stereo_balance=(left_vol * volume, right_vol * volume)
         )
+
+    def tick_fluid_sounds(self) -> None:
+        """Play a throttled ambient sound for the nearest loaded fluid cell."""
+        player = getattr(self.client, "client_player", None) or getattr(self.client, "player", None)
+        if player is None:
+            return
+        tick = int(getattr(self.client, "client_ticks", 0))
+        # One sound every ~1.5 seconds is enough to make flowing fluids
+        # audible without starting a channel for every visible block.
+        if tick - self._last_fluid_sound_tick < 30:
+            return
+
+        from resources.server.block_class import FluidBlock
+
+        px, py = float(player.x), float(player.y)
+        pz = int(getattr(player, "z", 0))
+        best = None
+        for x in range(int(px) - 8, int(px) + 9):
+            for y in range(max(0, int(py) - 6), min(self.y_max, int(py) + 8)):
+                for z in (0, 1):
+                    block = self.get_block(x, y, z)
+                    if not isinstance(block, FluidBlock):
+                        continue
+                    sound_id = (
+                        getattr(block, "source_sound", None)
+                        if block.is_source
+                        else getattr(block, "flowing_sound", None)
+                    )
+                    if not sound_id:
+                        continue
+                    distance = (x + 0.5 - px) ** 2 + (y + 0.5 - py) ** 2 + (z - pz) ** 2
+                    if best is None or distance < best[0]:
+                        best = (distance, sound_id, x + 0.5, y + 0.5, z)
+
+        if best is None:
+            return
+        _, sound_id, x, y, z = best
+        self.play_sound(sound_id, x, y, z, volume=0.65)
+        self._last_fluid_sound_tick = tick

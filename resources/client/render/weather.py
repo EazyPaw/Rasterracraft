@@ -72,6 +72,8 @@ class WeatherMixin:
     _last_impact_tick: int
     # 每层（z=0 前景, z=1 后景）上次播放雨声的 tick 编号
     _last_rain_sound_tick: dict[int, int]
+    # 上次播放水面溅落音效的 tick 编号
+    _last_water_splash_sound_tick: int
     # 天气纹理图集：{"rain": 雨纹理, "snow": 雪纹理}
     _weather_atlases: dict[str, pygame.Surface]
 
@@ -134,6 +136,7 @@ class WeatherMixin:
         self._last_impact_tick = -1
         # 雨声音效节流：{z_layer: last_tick}，防止同一层频繁播放
         self._last_rain_sound_tick = {0: -10_000, 1: -10_000}
+        self._last_water_splash_sound_tick = -10_000
         # 加载天气纹理图集
         self._weather_atlases = {
             "rain": pygame.image.load(
@@ -418,13 +421,17 @@ class WeatherMixin:
 
         player = getattr(self.client, "client_player", None)
 
-        # 候选音效位置：{z: (距离, x, y, z)}
-        sound_candidates: dict[int, tuple[float, float, int, int]] = {}
+        # 只保留一个最近落点，避免 z=0/1 同时播放造成音量忽大忽小。
+        sound_candidate: tuple[float, float, float, int] | None = None
+        water_sound_candidate: tuple[float, float, float, int] | None = None
 
         for world_x in range(x_min, x_max + 1):
             for z in (0, 1):
-                height = self.client_world.get_precipitation_height(world_x, z)
-                if height is None or height <= 0:
+                surface = self.client_world.get_precipitation_surface(world_x, z)
+                if surface is None:
+                    continue
+                height, is_water = surface
+                if height <= 0:
                     continue
                 if self.client_world.get_precipitation_type(world_x, height) != "rain":
                     continue
@@ -435,36 +442,65 @@ class WeatherMixin:
                     continue
 
                 # 生成溅落粒子
-                manager.spawn(
-                    "minecraft:splash",
-                    world_x + 0.5 + random.uniform(-0.28, 0.28),
-                    height + 0.02,
-                    z=z,
-                    size_=random.uniform(0.07, 0.11),
-                    lifetime=random.randint(8, 14),
+                # 粒子以中心点绘制；将中心抬到“半个粒子高度”后，底边才会
+                # 贴在水面/方块表面，而不是陷入方块内部。横向位置也在
+                # 方块范围内随机取样，避免所有水花排成整齐的中心线。
+                splash_size = random.uniform(0.14, 0.24)
+                if random.random() > min(0.75, 0.24 + self.weather_intensity * 0.20):
+                    continue
+                # 从向上的扇形范围内随机选择发射方向和速度。相比独立随机
+                # X/Y 分量，这样能保持自然的弹起力度，同时仍会向左右散开。
+                launch_angle = math.radians(random.uniform(60.0, 120.0))
+                launch_speed = random.uniform(0.075, 0.12)
+                splash_motion = (
+                    math.cos(launch_angle) * launch_speed,
+                    math.sin(launch_angle) * launch_speed,
                 )
+                spawned = manager.spawn(
+                    "minecraft:splash",
+                    world_x + random.uniform(0.12, 0.88),
+                    height + splash_size * 0.5,
+                    z=z,
+                    motion=splash_motion,
+                    size_=splash_size,
+                    lifetime=random.randint(10, 18),
+                )
+                if spawned is None:
+                    continue
 
                 # 计算溅落点到玩家/相机的距离（用于最近点选取）
                 distance = math.hypot(
                     (player.x if player is not None else self.camera.x) - (world_x + 0.5),
                     (player.y if player is not None else self.camera.y) - height,
                 )
-                # 每层只保留最近的溅落点作为音效候选
-                candidate = sound_candidates.get(z)
-                if candidate is None or distance < candidate[0]:
-                    sound_candidates[z] = (distance, world_x + 0.5, height, z)
+                if sound_candidate is None or distance < sound_candidate[0]:
+                    sound_candidate = (distance, world_x + 0.5, height, z)
+                if is_water and (
+                    water_sound_candidate is None or distance < water_sound_candidate[0]
+                ):
+                    water_sound_candidate = (distance, world_x + 0.5, height, z)
 
-        # 每层播放一个最近溅落点的雨声。
+        # 播放一个最近溅落点对应的环境雨声。
         # 不使用全局循环声道，而是通过 client_world.play_sound
         # 进行距离衰减和立体声平移，营造空间感。
-        # 每层至少间隔 30 ticks 防止频繁播放。
-        for _, x, y, z in sound_candidates.values():
-            if ticks - self._last_rain_sound_tick[z] < 30:
-                continue
-            self._last_rain_sound_tick[z] = ticks
-            self.client_world.play_sound(
-                "ambient.weather.rain", x, y, z, volume=self.weather_intensity * 0.7
-            )
+        # 至少间隔 30 ticks，防止频繁播放。
+        if sound_candidate is not None:
+            _, x, y, z = sound_candidate
+            last_sound_tick = max(self._last_rain_sound_tick.values())
+            if ticks - last_sound_tick >= 30:
+                self._last_rain_sound_tick[0] = ticks
+                self._last_rain_sound_tick[1] = ticks
+                # 以玩家位置为声源，避免最近落点变化带来的距离衰减抖动；
+                # 雨声本身保持低且稳定的环境音量。
+                if player is not None:
+                    x, y, z = player.x, player.y, getattr(player, "z", 0)
+                self.client_world.play_sound(
+                    "ambient.weather.rain", x, y, z,
+                    # Rain is ambient background audio; keep it quiet and stable.
+                    volume=min(0.22, self.weather_intensity * 0.22),
+                )
+
+
 
     # =========================================================================
     # 云层渲染

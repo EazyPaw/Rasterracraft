@@ -32,6 +32,7 @@ class GameManager:
             self.client.client_player.move_update()
             self.client.client_player.game_mode.get_choosing_block()
             self.client.particle_manager.update()
+            self.client.client_world.tick_fluid_sounds()
         except AttributeError:
             pass
 

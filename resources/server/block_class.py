@@ -4,6 +4,7 @@ import os
 import ast
 import logging
 
+from resources.client.resources_manager import transkey
 from resources.server.utils import is_safe_value, client_method, server_method
 
 if os.environ.get('PYCRAFT_CLIENT') == '1':
@@ -52,6 +53,7 @@ class Block(ABC):
     light_source = 0
     Tags = []
     has_transparent_pixels = None  # None = 自动从纹理检测，也可手动覆盖为 True/False
+    drops = None
 
     def __init__(self, nbt = None):
         # 方块应该带有的属性
@@ -60,6 +62,9 @@ class Block(ABC):
             self.place_sound = self.break_sound
         if nbt:
             self.write_nbt(nbt)
+
+    def get_name(self):
+        return transkey(f"tile.{self.block_id}.name")
 
     @classmethod
     @client_method
@@ -150,12 +155,14 @@ class Block(ABC):
         )
 
     def get_drops(self, material):
-        """Base loot until specialised loot tables/functions are implemented."""
+        """Base loot until specialized loot tables/functions are implemented."""
         if not self.can_harvest(material):
             return []
         from resources.server.item_class import ItemStack
         from resources.server.materials import get_block_item
-        return [ItemStack(get_block_item(self), 1)]
+        if self.drops is None:
+            return [ItemStack(get_block_item(self), 1)]
+        return self.drops
 
     def get_experience(self, material) -> int:
         if not self.can_harvest(material):
@@ -204,9 +211,20 @@ class FluidBlock(Block):
     source_level = 0
     flow_speed_ticks = 5
     can_create_source = True
-    source_surface_pixels = 14
-    flowing_surface_step_pixels = 2
+    # 8/9 of a block is the vanilla source/falling height.  Keep pixel
+    # equivalents for callers that use the legacy rendering parameters.
+    source_surface_pixels = 128.0 / 9.0
+    flowing_surface_step_pixels = 16.0 / 9.0
+    # Legacy LEVEL is source=0 and flowing=1..7.  Lava consumes two levels
+    # per horizontal spread while water consumes one.
+    flow_level_step = 1
     horizontal_flow_range = 5
+    # When a fluid cell is supported by the same fluid below, its horizontal
+    # search must stop at the adjacent cell.  Otherwise a filled column is
+    # incorrectly treated as an open drop and spreads the full range.
+    supported_horizontal_flow_range = 1
+    flowing_sound = None
+    source_sound = None
 
     def __init__(self, level: int = 0, falling: bool = False, flow_direction: int = 0, nbt=None):
         self.level = max(0, min(self.max_level, int(level)))
@@ -242,10 +260,12 @@ class FluidBlock(Block):
     def fluid_height_ratio(self) -> float:
         if self.location is None:
             return 1.0
-        if self._has_same_fluid_above() or self.falling:
+        # This follows FlowingFluid.getOwnHeight(): source and falling states
+        # carry amount 8, while a horizontal state carries amount 8 - LEVEL.
+        if self._has_same_fluid_above():
             return 1.0
-        pixels = self.source_surface_pixels - self.level * self.flowing_surface_step_pixels
-        return max(1.0 / 16.0, min(1.0, pixels / 16.0))
+        amount = 8 if self.is_source or self.falling else max(1, 8 - self.level)
+        return max(1.0 / 16.0, min(1.0, amount / 9.0))
 
     def water_height_ratio(self) -> float:
         return self.fluid_height_ratio()
@@ -263,7 +283,13 @@ class FluidBlock(Block):
         for direction in (-1, 1):
             neighbor = world.get_block(x + direction, y, z)
             if self.is_same_fluid(neighbor):
-                edges.append((own + neighbor.fluid_height_ratio()) * 0.5)
+                neighbor_height = neighbor.fluid_height_ratio()
+                own_weight = 10.0 if own >= 0.8 else 1.0
+                neighbor_weight = 10.0 if neighbor_height >= 0.8 else 1.0
+                edges.append(
+                    (own * own_weight + neighbor_height * neighbor_weight)
+                    / (own_weight + neighbor_weight)
+                )
             else:
                 edges.append(own)
         return edges[0], edges[1]
@@ -337,8 +363,38 @@ class FluidBlock(Block):
         return texture
 
     def on_update(self):
-        if self.location is not None and hasattr(self.location.world, "schedule_fluid_tick"):
-            self.location.world.schedule_fluid_tick(self.location)
+        if self.location is None:
+            return
+
+        world = self.location.world
+        x = int(self.location.x)
+        y = int(self.location.y)
+        z = int(self.location.z)
+
+        # LiquidBlock.shouldSpreadLiquid is an on-place/neighbor callback in
+        # vanilla, not something that waits for the normal lava tick.  The
+        # world calls on_update for the neighbors of a changed block, so a
+        # water neighbor must also be able to wake the lava cell that was just
+        # placed beside it.  The lava helper itself still owns the direction
+        # rules (above + horizontal only; never the block below).
+        if getattr(self, "block_id", None) == "lava":
+            if self._react_with_adjacent_fluid(world, x, y, z):
+                return
+        elif getattr(self, "block_id", None) == "water":
+            lava_positions = [(x, y - 1, z)]
+            lava_positions.extend(
+                (x + dx, y, z + dz)
+                for dx, dz, _ in self._iter_horizontal_neighbors(z)
+            )
+            for lx, ly, lz in lava_positions:
+                lava = world.get_block(lx, ly, lz)
+                if getattr(lava, "block_id", None) != "lava":
+                    continue
+                if lava._react_with_adjacent_fluid(world, lx, ly, lz):
+                    return
+
+        if hasattr(world, "schedule_fluid_tick"):
+            world.schedule_fluid_tick(self.location)
 
     def tick_fluid(self):
         if self.location is None:
@@ -349,10 +405,21 @@ class FluidBlock(Block):
         y = int(self.location.y)
         z = int(self.location.z)
 
+        # Lava/water interaction is resolved on the lava side, matching the
+        # vanilla rule: contact from above or horizontally converts lava,
+        # while a downward flow converts the water it enters to stone.
+        if self._react_with_adjacent_fluid(world, x, y, z):
+            return
+
         if not self.is_source:
             source_level = self._get_new_source_level(world, x, y, z)
             if source_level is not None:
-                self._replace_self(self.make_fluid(source_level, False, 0))
+                updated = self.make_fluid(source_level, False, 0)
+                self._replace_self(updated)
+                # FlowingFluid.tick spreads with the newly calculated state
+                # in the same tick.  Do not postpone the downward interaction
+                # until the next lava tick after changing this cell.
+                updated.tick_fluid()
                 return
 
             support = self._get_supporting_flow(world, x, y, z)
@@ -367,7 +434,11 @@ class FluidBlock(Block):
                 or target_falling != self.falling
                 or target_direction != self.flow_direction
             ):
-                self._replace_self(self.make_fluid(target_level, target_falling, target_direction))
+                updated = self.make_fluid(target_level, target_falling, target_direction)
+                self._replace_self(updated)
+                # Match FlowingFluid.tick: a recalculated flowing state still
+                # executes its spread pass immediately.
+                updated.tick_fluid()
                 return
 
         flowed_down = self._try_flow_to(world, x, y - 1, z, self.source_level, True, 0)
@@ -391,11 +462,13 @@ class FluidBlock(Block):
         if self.level >= self.max_level:
             return
 
-        flow_dirs = self._get_horizontal_flow_directions(world, x, y, z)
+        flow_step = max(1, int(getattr(self, "flow_level_step", 1)))
+        next_level = self.level + flow_step
+        flow_dirs = self._get_horizontal_flow_directions(world, x, y, z, next_level)
         visible_dirs = [direction for _, _, direction in flow_dirs if direction != 0]
         self._set_own_direction(visible_dirs[0] if len(visible_dirs) == 1 and len(flow_dirs) == 1 else 0)
         for dx, dz, direction in flow_dirs:
-            self._try_flow_to(world, x + dx, y, z + dz, self.level + 1, False, direction)
+            self._try_flow_to(world, x + dx, y, z + dz, next_level, False, direction)
 
     def get_flow_vector(self) -> tuple[float, float]:
         horizontal = float(self.flow_direction)
@@ -451,7 +524,8 @@ class FluidBlock(Block):
             or self._can_destroy_with_fluid(block)
         )
 
-    def _iter_horizontal_neighbors(self, z: int):
+    @staticmethod
+    def _iter_horizontal_neighbors(z: int):
         for dx, dz, direction in ((-1, 0, -1), (1, 0, 1), (0, -1, 0), (0, 1, 0)):
             nz = z + dz
             if nz in (0, 1):
@@ -472,8 +546,31 @@ class FluidBlock(Block):
         if not world.is_position_loaded(x, y, z):
             return False
 
-        level = max(self.source_level, min(self.max_level, int(level)))
+        level = int(level)
+        if level > self.max_level:
+            return False
+        level = max(self.source_level, level)
         target = world.get_block(x, y, z)
+        # A horizontal/source lava cell merely touching water below does not
+        # react.  It is only a falling lava cell (created after passing
+        # through an empty cell) that can enter water and turn that water cell
+        # into stone.
+        if (
+            getattr(self, "block_id", None) == "lava"
+            and getattr(target, "block_id", None) == "water"
+            and not falling
+        ):
+            return False
+        interaction_result = self._interaction_result_for_target(target, falling)
+        if interaction_result is not None:
+            # A downward lava flow converts the water cell it enters.  Keep
+            # the lava cell above it intact so the resulting stone is located
+            # in the water plane (rather than floating one block overhead).
+            # Water flowing downward into lava still changes the target lava
+            # cell and never occupies it.
+            world.set_block(interaction_result, x, y, z, send_packet=True, block_update=True)
+            self._emit_lava_fizz(world, x, y, z)
+            return True
         if self.is_same_fluid(target):
             should_replace = False
             if falling and not target.falling:
@@ -517,7 +614,7 @@ class FluidBlock(Block):
             neighbor = world.get_block(x + dx, y, z + dz)
             if not self.is_same_fluid(neighbor):
                 continue
-            candidate_level = neighbor.level + 1
+            candidate_level = neighbor.level + max(1, int(getattr(self, "flow_level_step", 1)))
             if candidate_level > self.max_level:
                 continue
             candidate_direction = -dx if dx != 0 else 0
@@ -526,11 +623,15 @@ class FluidBlock(Block):
                 best = candidate
         return best
 
-    def _get_horizontal_flow_directions(self, world, x: int, y: int, z: int) -> list[tuple[int, int, int]]:
+    def _get_horizontal_flow_directions(
+        self, world, x: int, y: int, z: int, next_level: int | None = None
+    ) -> list[tuple[int, int, int]]:
+        if next_level is None:
+            next_level = self.level + max(1, int(getattr(self, "flow_level_step", 1)))
         candidates = [
             (dx, dz, direction)
             for dx, dz, direction in self._iter_horizontal_neighbors(z)
-            if self._can_flow_horizontally(world, x + dx, y, z + dz, self.level + 1)
+            if self._can_flow_horizontally(world, x + dx, y, z + dz, next_level)
         ]
         if len(candidates) <= 1:
             return candidates
@@ -544,7 +645,63 @@ class FluidBlock(Block):
             return [candidate for candidate in candidates if drop_distances[candidate] == best_distance]
         return candidates
 
+    def _react_with_adjacent_fluid(self, world, x: int, y: int, z: int) -> bool:
+        """Apply LiquidBlock.shouldSpreadLiquid for an existing lava cell."""
+        block_id = getattr(self, "block_id", None)
+        if block_id != "lava":
+            return False
+
+        from resources.server.blocks import COBBLESTONE, OBSIDIAN
+
+        # POSSIBLE_FLOW_DIRECTIONS is DOWN,SOUTH,NORTH,EAST,WEST and the
+        # vanilla code checks direction.getOpposite(), i.e. above + four
+        # horizontal neighbors.  DOWN is deliberately not checked here;
+        # LavaFluid.spreadTo owns the downward water -> stone conversion.
+        neighbors = [(x, y + 1, z)]
+        neighbors.extend((x + dx, y, z + dz) for dx, dz, _ in self._iter_horizontal_neighbors(z))
+        for nx, ny, nz in neighbors:
+            neighbor = world.get_block(nx, ny, nz)
+            if getattr(neighbor, "block_id", None) != "water":
+                continue
+            result_type = OBSIDIAN if self.is_source else COBBLESTONE
+            world.set_block(result_type(), self.location, send_packet=True, block_update=True)
+            self._emit_lava_fizz(world, x, y, z)
+            return True
+        return False
+
+    @staticmethod
+    def _emit_lava_fizz(world, x: int, y: int, z: int) -> None:
+        """Mirror LavaFluid's level event with the existing smoke particle API."""
+        play_particle = getattr(world, "play_particle", None)
+        if callable(play_particle):
+            play_particle(
+                "minecraft:smoke",
+                x + 0.5,
+                y + 0.5,
+                z,
+                count=1,
+                motion=(0.0, 0.01),
+            )
+
+    def _interaction_result_for_target(self, target: Block, falling: bool):
+        """Return a replacement block when this flow enters the opposite fluid."""
+        block_id = getattr(self, "block_id", None)
+        target_id = getattr(target, "block_id", None)
+        if {block_id, target_id} != {"water", "lava"}:
+            return None
+        # Water never occupies a lava cell.  Existing lava is converted by
+        # its own LiquidBlock neighbor check (above/horizontal), while only a
+        # downward lava spread converts the water cell it enters to stone.
+        if block_id == "water":
+            return None
+        if not falling:
+            return None
+        from resources.server.blocks import STONE
+        return STONE()
+
     def _can_flow_horizontally(self, world, x: int, y: int, z: int, level: int) -> bool:
+        if level > self.max_level:
+            return False
         if z not in (0, 1):
             return False
         if not world.is_position_loaded(x, y, z):
@@ -555,7 +712,13 @@ class FluidBlock(Block):
         return self._can_flow_into(target)
 
     def _distance_to_drop(self, world, x: int, y: int, z: int, dx: int, dz: int) -> int:
-        for distance in range(1, self.horizontal_flow_range + 1):
+        below = world.get_block(x, y - 1, z)
+        flow_range = (
+            self.supported_horizontal_flow_range
+            if self.is_same_fluid(below)
+            else self.horizontal_flow_range
+        )
+        for distance in range(1, flow_range + 1):
             nx = x + dx * distance
             nz = z + dz * distance
             if nz not in (0, 1):
@@ -587,7 +750,7 @@ class GrassStain(Plant):
     _texture_cache = {}  # key: (size, biome_id)
 
     @client_method
-    def get_texture(self, size, client: 'Client'):
+    def get_texture(self, size, client):
         # 获取 biome_id 用于缓存键（不同群系染色不同）
         if self.location is not None and self.location.world is not None:
             biome_id = self.location.world.get_biome(
@@ -630,7 +793,7 @@ class Leaves(Block):
     preferred_tool = "hoe"
 
     @client_method
-    def get_texture(self, size, client: 'Client'):
+    def get_texture(self, size, client):
         # 获取 biome_id 用于缓存键（不同群系染色不同）
         if self.location is not None and self.location.world is not None:
             biome_id = self.location.world.get_biome(
@@ -711,8 +874,6 @@ class Log(Block):
     break_sound = "dig.wood"
     hardness = 2.0
     preferred_tool = "axe"
-    hardness = 2.0
-    preferred_tool = 'axe'
 
 
 class GravityBlock(Block):
