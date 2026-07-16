@@ -1,6 +1,7 @@
 import ast
 import logging
 import traceback
+import time
 from typing import TYPE_CHECKING, Callable, List, Dict
 
 from resources.client.game_mode import get_gamemode_by_id
@@ -38,9 +39,11 @@ class CommandExecutor:
         if not self.allow_python_execute or (isinstance(executor, Player) and not executor.is_operator):
             return "python execute is not enabled for this player!"
         code = " ".join(args)
+        start_time = time.time()
         exec(code)
-
-        return f"Done"
+        end_time = time.time()
+        execution_time = end_time - start_time
+        return f"Done in {execution_time*1000} ms."
 
     def switch_gamemode(self, args, executor: Player | str):
         if not isinstance(executor, Player) or len(args) != 1:

@@ -32,7 +32,9 @@ class Material:
             return None
 
         # 加载原始纹理（如果还未加载）
-        if cls._original_texture is None:
+        # 必须检查 cls.__dict__ 而非 cls._original_texture，否则
+        # STONE_PICKAXE(WOODEN_PICKAXE) 会沿 MRO 找到木镐已缓存的纹理。
+        if cls.__dict__.get("_original_texture") is None:
             cls._original_texture = client.resources_manager.get_texture_img(cls._texture_path)
 
         if cls._original_texture is None:

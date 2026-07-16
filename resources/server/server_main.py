@@ -208,9 +208,21 @@ class Server:
                 e["func"](*e["args"])  # 解包参数
                 del self.registered_events[i]
 
+    def integrated_check(self):
+        """
+        检测 subprocess 模式下否因为客户端意外结束导致服务端持续运行，成为僵尸线程
+        :return:
+        """
+        if not self.players: # 无玩家
+            self.close_server()
+            self.register_event(self.integrated_check, ticks=20)
+
     def run(self):
 
         logging.info(f"Server initialized")
+
+        if self.integrated and self.client is None:
+            self.register_event(self.integrated_check, ticks=200)
 
         next_time = time.perf_counter()
         over_ticks = 0
@@ -371,23 +383,18 @@ class Server:
         if player is None and self.players:
             player = self.players[0]
         if player is not None:
-            player_data = {
-                "x": float(player.x), "y": float(player.y),
-                "health": float(player.health),
-                "food_level": int(getattr(player, "food_level", 20)),
-                "saturation": float(getattr(player, "saturation", 5.0)),
-                "experience": int(getattr(player, "experience", 0)),
-                "experience_level": int(getattr(player, "experience_level", 0)),
-                "gamemode": player.gamemode.name_id if hasattr(player.gamemode, "name_id") else "survival",
-                "selected_slot": max(0, min(8, int(getattr(player, "selected_slot", 0)))),
-                "cursor": stack_to_payload(player.cursor_stack),
-            }
-            player_data["inventory"] = normalize_inventory_payload(
-                serialize_inventory(player.inventory)
-            )
-            player_data["crafting"] = normalize_inventory_payload(
-                serialize_inventory(player.crafting_grid), 9
-            )
+            player_data = {"x": float(player.x), "y": float(player.y), "health": float(player.health),
+                           "food_level": int(getattr(player, "food_level", 20)),
+                           "saturation": float(getattr(player, "saturation", 5.0)),
+                           "experience": int(getattr(player, "experience", 0)),
+                           "experience_level": int(getattr(player, "experience_level", 0)),
+                           "gamemode": player.gamemode.name_id if hasattr(player.gamemode, "name_id") else "survival",
+                           "selected_slot": max(0, min(8, int(getattr(player, "selected_slot", 0)))),
+                           "cursor": stack_to_payload(player.cursor_stack), "inventory": normalize_inventory_payload(
+                    serialize_inventory(player.inventory)
+                ), "crafting": normalize_inventory_payload(
+                    serialize_inventory(player.crafting_grid), 9
+                )}
             self.level_data["player"] = player_data
         save_manager.save_level(self.save_id, self.level_data)
 

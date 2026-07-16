@@ -757,6 +757,20 @@ class DIAMOND_BLOCK(Block):
     requires_correct_tool = True
     required_tool_tier = 'iron'
 
+class TORCH(Block):
+    block_id = 'torch'
+    name = 'tile.torch.name'
+    hardness = 0
+    solid = False
+    _texture_path = 'blocks.torch_on'
+    light_source = 15
+    break_sound = "dig.wood"
+
+class OAK_SLAB(SLABS):
+    block_id = 'oak_slab'
+    name = 'tile.oak_slab.name'
+    _texture_path = 'blocks.planks_oak'
+
 
 
 

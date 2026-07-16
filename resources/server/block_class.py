@@ -4,6 +4,8 @@ import os
 import ast
 import logging
 
+from pygame import Surface
+
 from resources.client.resources_manager import transkey
 from resources.server.utils import is_safe_value, client_method, server_method
 
@@ -220,7 +222,7 @@ class FluidBlock(Block):
     flow_level_step = 1
     horizontal_flow_range = 5
     # When a fluid cell is supported by the same fluid below, its horizontal
-    # search must stop at the adjacent cell.  Otherwise a filled column is
+    # search must stop at the adjacent cell.  Otherwise, a filled column is
     # incorrectly treated as an open drop and spreads the full range.
     supported_horizontal_flow_range = 1
     flowing_sound = None
@@ -926,3 +928,46 @@ class GravityBlock(Block):
         world.set_block(AIR(), self.location, send_packet=True, block_update=True)
         falling = FallingBlock(x + 0.01, y, z, world, self)
         world.spawn_entity(falling)
+
+class SLABS(Block):
+    _texture_cache = {}
+    has_transparent_pixels = True
+
+    def __init__(self, _type = "bottom"):
+        super().__init__()
+        self._type = _type
+
+    @client_method
+    def get_texture(self, size, client=None):
+        size = max(1, int(round(size)))
+        full: Surface = client.resources_manager.get_texture_img(self._texture_path)
+        if full is None:
+            return None
+
+        # get_texture_img 返回的是原始资源尺寸（通常为 16×16），而渲染器传入的
+        # size 是屏幕上的方块尺寸。先缩放，否则在 size 大于原图时 subsurface 会越界。
+        cache_key = (self._texture_path, full, self._type, size)
+        if cache_key in self._texture_cache:
+            return self._texture_cache[cache_key]
+
+        scaled = pygame.transform.scale(full, (size, size)).convert_alpha()
+        if self._type == "double":
+            texture = scaled
+        elif self._type in ("bottom", "top"):
+            # 保持与普通方块相同的 size×size 画布，以便渲染器正确处理顶部、
+            # 底部半砖的位置；未占用的半边保持透明。
+            texture = pygame.Surface((size, size), pygame.SRCALPHA)
+            half = size // 2
+            if self._type == "bottom":
+                source = scaled.subsurface((0, half, size, size - half))
+                texture.blit(source, (0, half))
+            else:
+                source = scaled.subsurface((0, 0, size, half))
+                texture.blit(source, (0, 0))
+        else:
+            raise ValueError(f"Unknown slabs type {self._type}")
+
+        self._texture_cache[cache_key] = texture
+        if len(self._texture_cache) > 512:
+            self._texture_cache.pop(next(iter(self._texture_cache)))
+        return texture

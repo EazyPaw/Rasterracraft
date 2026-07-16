@@ -99,6 +99,12 @@ class DIAMOND_PICKAXE(WOODEN_PICKAXE):
     tier = "diamond"
     mining_speed = 8.0
 
+class TORCH(BlockItem):
+    name_id = "torch"
+    name = "tile.torch.name"
+    target_block = blocks.TORCH
+
+
 class SNOWBALL(Material):
     ...
 

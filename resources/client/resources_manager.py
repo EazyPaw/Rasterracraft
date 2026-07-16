@@ -6,6 +6,9 @@ import random
 import os
 import numpy as np
 from collections import OrderedDict
+
+from pygame import Surface
+
 from resources.server.location import Location
 from resources.server.biome import get_biome_by_id
 from resources.server.utils import client_method
@@ -124,7 +127,7 @@ class ResourcesManager:
 
         return "".join(result)
 
-    def get_texture_img(self, key: str, cft=False):
+    def get_texture_img(self, key: str, cft=False) -> Surface:
         """
         获取指定纹理的 Surface 对象。自带缓存，可直接调用
         :param cft: 是否切除材质中完全透明的多余边缘
