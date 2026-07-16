@@ -4,37 +4,37 @@ import resources.server.blocks as blocks
 
 class DIRT(BlockItem):
     name_id = "dirt"
-    name = "dirt"
+    name = "tile.dirt.name"
     target_block = blocks.DIRT
 
 class AIR(BlockItem):
     name_id = "air"
-    name = "air"
+    name = "tile.air.name"
     target_block = blocks.AIR
 
 class GLOWSTONE(BlockItem):
     name_id = "glowstone"
-    name = "glowstone"
+    name = "tile.lightgem.name"
     target_block = blocks.GLOWSTONE
 
 class SAND(BlockItem):
     name_id = "sand"
-    name = "sand"
+    name = "tile.sand.name"
     target_block = blocks.SAND
 
 class WATER(BlockItem):
     name_id = "water"
-    name = "water"
+    name = "tile.water.name"
     target_block = blocks.WATER
 
 class LAVA(BlockItem):
     name_id = "lava"
-    name = "lava"
+    name = "tile.lava.name"
     target_block = blocks.LAVA
 
 class APPLE(Material):
     name_id = "apple"
-    name = "Apple"
+    name = "item.apple.name"
     _texture_path = "items.apple"
     food_value = 4
     saturation_modifier = 0.3
@@ -42,7 +42,7 @@ class APPLE(Material):
 
 class BREAD(Material):
     name_id = "bread"
-    name = "Bread"
+    name = "item.bread.name"
     _texture_path = "items.bread"
     food_value = 5
     saturation_modifier = 0.6
@@ -50,7 +50,7 @@ class BREAD(Material):
 
 class COOKED_BEEF(Material):
     name_id = "cooked_beef"
-    name = "Cooked Beef"
+    name = "item.beefCooked.name"
     _texture_path = "items.beef_cooked"
     food_value = 8
     saturation_modifier = 0.8
@@ -58,7 +58,7 @@ class COOKED_BEEF(Material):
 
 class STICK(Material):
     name_id = "stick"
-    name = "Stick"
+    name = "item.stick.name"
     _texture_path = "items.stick"
 
 
@@ -70,7 +70,7 @@ class Tool(Material):
 
 class WOODEN_PICKAXE(Tool):
     name_id = "wooden_pickaxe"
-    name = "Wooden Pickaxe"
+    name = "item.pickaxeWood.name"
     _texture_path = "items.wood_pickaxe"
     tool_type = "pickaxe"
     mining_speed = 2.0
@@ -78,7 +78,7 @@ class WOODEN_PICKAXE(Tool):
 
 class STONE_PICKAXE(WOODEN_PICKAXE):
     name_id = "stone_pickaxe"
-    name = "Stone Pickaxe"
+    name = "item.pickaxeStone.name"
     _texture_path = "items.stone_pickaxe"
     tier = "stone"
     mining_speed = 4.0
@@ -86,7 +86,7 @@ class STONE_PICKAXE(WOODEN_PICKAXE):
 
 class IRON_PICKAXE(WOODEN_PICKAXE):
     name_id = "iron_pickaxe"
-    name = "Iron Pickaxe"
+    name = "item.pickaxeIron.name"
     _texture_path = "items.iron_pickaxe"
     tier = "iron"
     mining_speed = 6.0
@@ -94,7 +94,7 @@ class IRON_PICKAXE(WOODEN_PICKAXE):
 
 class DIAMOND_PICKAXE(WOODEN_PICKAXE):
     name_id = "diamond_pickaxe"
-    name = "Diamond Pickaxe"
+    name = "item.pickaxeDiamond.name"
     _texture_path = "items.diamond_pickaxe"
     tier = "diamond"
     mining_speed = 8.0

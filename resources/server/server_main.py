@@ -14,6 +14,10 @@ import numpy as np
 import resources.server.generator as generator
 from resources.server import save_manager
 from resources.server.commands import CommandExecutor
+from resources.server.inventory import (
+    Inventory, normalize_inventory_payload, payload_to_stack,
+    restore_inventory, serialize_inventory, stack_to_payload,
+)
 from resources.server.player import Player
 from resources.server.server_packets import encode_packet, decode_packet
 from resources.server.text import Text
@@ -110,6 +114,10 @@ class Server:
 
                 spawn_x, spawn_y = self.server.get_player_spawn()
                 player = Player(spawn_x, spawn_y, self.server.worlds["overworld"])
+                # The first local integrated player is the only implicit
+                # operator. Standalone/network players require an explicit
+                # server-side permission assignment.
+                player.is_operator = bool(self.server.integrated and not self.server.players)
                 self.server.restore_player_state(player)
                 self.connections[player] = (client_sock, client_addr)
                 self.send_locks[player] = threading.Lock()
@@ -301,6 +309,18 @@ class Server:
         if saved_gamemode:
             from resources.client.game_mode import get_gamemode_by_id
             player.gamemode = get_gamemode_by_id(saved_gamemode)
+        saved_inventory = data.get("inventory")
+        if isinstance(saved_inventory, list):
+            restore_inventory(player.inventory, saved_inventory)
+        else:
+            player.inventory = Inventory(36)
+            player._initialize_inventory()
+        restore_inventory(player.crafting_grid, data.get("crafting", []))
+        player.cursor_stack = payload_to_stack(data.get("cursor", {}))
+        try:
+            player.selected_slot = max(0, min(8, int(data.get("selected_slot", 0))))
+        except (TypeError, ValueError):
+            player.selected_slot = 0
 
     def save_all(self, last_player: Player | None = None, *, force: bool = False):
         if not self.save_id:
@@ -351,7 +371,7 @@ class Server:
         if player is None and self.players:
             player = self.players[0]
         if player is not None:
-            self.level_data["player"] = {
+            player_data = {
                 "x": float(player.x), "y": float(player.y),
                 "health": float(player.health),
                 "food_level": int(getattr(player, "food_level", 20)),
@@ -359,7 +379,16 @@ class Server:
                 "experience": int(getattr(player, "experience", 0)),
                 "experience_level": int(getattr(player, "experience_level", 0)),
                 "gamemode": player.gamemode.name_id if hasattr(player.gamemode, "name_id") else "survival",
+                "selected_slot": max(0, min(8, int(getattr(player, "selected_slot", 0)))),
+                "cursor": stack_to_payload(player.cursor_stack),
             }
+            player_data["inventory"] = normalize_inventory_payload(
+                serialize_inventory(player.inventory)
+            )
+            player_data["crafting"] = normalize_inventory_payload(
+                serialize_inventory(player.crafting_grid), 9
+            )
+            self.level_data["player"] = player_data
         save_manager.save_level(self.save_id, self.level_data)
 
     def _resolve_chat_msg(self, msg, color=None):
@@ -394,6 +423,18 @@ class Server:
         text, color = self._resolve_chat_msg(msg, color)
         packet = {'__class__': 'ChatMessage', 'text': text, 'color': list(color)}
         self.send_client_socket(player, packet, "Forward")
+
+    def broadcast_sound(self, sound_id: str, x: float, y: float, z: float = 0.0, *, volume: float = 1.0) -> None:
+        """Broadcast a server-authoritative sound event to every player."""
+        packet = {
+            "__class__": "SoundEffect",
+            "sound_id": str(sound_id),
+            "x": float(x), "y": float(y), "z": float(z),
+            "volume": float(volume),
+            "global": True,
+        }
+        for player in tuple(self.players):
+            self.send_client_socket(player, packet, "Forward")
 
     def broadcast_chat(self, msg, color=None, exclude=None):
         """向所有玩家广播聊天消息。

@@ -1,9 +1,9 @@
 import logging
 
-from resources.server.blocks import get_block_by_id
 from resources.server.entity import Entity
 from resources.server.location import Location
-from resources.server.materials import get_material_by_id
+from resources.server.inventory import payload_to_stack, serialize_inventory, stack_to_payload
+from resources.server.item_class import EmptyItemStack
 from resources.server.particles import ParticleEffect
 from resources.server.player import Player
 from resources.server.world_class import Chunk
@@ -15,7 +15,7 @@ def encode_packet(obj, obj_type, args) -> dict:
     if type(obj) == Chunk:
         return obj.to_dict()
     elif isinstance(obj, Player) and obj_type == "Teleport":
-        return {
+        packet = {
             '__class__': 'Teleport',
             'x': obj.x,
             'y': obj.y,
@@ -26,8 +26,12 @@ def encode_packet(obj, obj_type, args) -> dict:
             'saturation': getattr(obj, 'saturation', 5.0),
             'experience': getattr(obj, 'experience', 0),
             'experience_level': getattr(obj, 'experience_level', 0),
+            'selected_slot': getattr(obj, 'selected_slot', 0),
             'teleport_id': getattr(obj, '_pending_teleport_id', None),
         }
+        packet['inventory'] = serialize_inventory(obj.inventory)
+        packet['cursor'] = stack_to_payload(obj.cursor_stack)
+        return packet
     elif isinstance(obj, Entity) and obj_type in ("EntitySpawn", "EntityUpdate"):
         packet = obj.to_entity_data()
         packet['__class__'] = obj_type
@@ -140,7 +144,7 @@ def decode_packet(packet: dict, player: Player):
         # }
         world = player.world
         if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT:
-            tool = get_material_by_id(packet.get('held_item', 'air'))
+            tool = player.inventory[player.selected_slot].material
             experience = world.break_block(packet['x'], packet['y'], packet['z'], tool=tool)
             if experience:
                 player.experience += experience
@@ -163,9 +167,16 @@ def decode_packet(packet: dict, player: Player):
         #     'block_id': obj.block_id,
         # }
         world = player.world
-        if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT:
-            block = get_block_by_id(packet['block_id'])
-            block.place_at(Location(world, packet['x'], packet['y'], packet['z']))
+        held = player.inventory[player.selected_slot]
+        target_block = getattr(held.material, 'target_block', None)
+        if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT and not held.is_empty() and callable(target_block):
+            block = target_block()
+            # Ignore the client-provided block id; the selected server slot is
+            # the only authority for what can be placed.
+            if block.place_at(Location(world, packet['x'], packet['y'], packet['z'])) is not False:
+                if getattr(player.gamemode, 'name_id', 'survival') != 'creative':
+                    held.reduce_amount(1)
+                player.sync_inventory()
 
     elif packet['__class__'] == 'ChatMessage':
         # 客户端发送的聊天消息
@@ -198,6 +209,79 @@ def decode_packet(packet: dict, player: Player):
     elif packet['__class__'] == 'ClientShutdown':
         player.world.server.save_all(player, force=True)
         player.world.server.send_client_socket(player, {'__class__': 'SaveComplete'}, "Forward")
+    elif packet['__class__'] == 'InventoryClick':
+        try:
+            player.inventory_click(int(packet.get('slot')), int(packet.get('button')))
+        except (TypeError, ValueError):
+            player.sync_inventory()
+    elif packet['__class__'] == 'CreativeSetSlot':
+        if getattr(player.gamemode, 'name_id', 'survival') != 'creative':
+            player.sync_inventory()
+            return
+        try:
+            slot = int(packet.get('slot'))
+            if not 0 <= slot < len(player.inventory):
+                raise ValueError
+            item_payload = packet.get('item', packet)
+            item = payload_to_stack(item_payload)
+            player.inventory[slot] = EmptyItemStack() if item.is_empty() else item
+        except (TypeError, ValueError):
+            pass
+        player.sync_inventory()
+    elif packet['__class__'] == 'InventoryDrag':
+        try:
+            button = int(packet.get('button'))
+        except (TypeError, ValueError):
+            button = 0
+        player.inventory_drag(packet.get('slots', []), button)
+    elif packet['__class__'] == 'CraftingDrag':
+        try:
+            button = int(packet.get('button'))
+        except (TypeError, ValueError):
+            button = 0
+        player.crafting_drag(packet.get('slots', []), button)
+    elif packet['__class__'] == 'InventoryDrop':
+        cursor = bool(packet.get('cursor', True))
+        slot = packet.get('slot')
+        try:
+            if not cursor:
+                slot = int(slot)
+                if not 0 <= slot < len(player.inventory):
+                    raise ValueError
+            amount = packet.get('amount')
+            player.drop_inventory(cursor=cursor, slot=slot, amount=amount)
+        except (TypeError, ValueError, IndexError):
+            player.sync_inventory()
+    elif packet['__class__'] == 'InventoryResyncRequest':
+        player.sync_inventory()
+    elif packet['__class__'] == 'CraftingClick':
+        try:
+            player.crafting_click(int(packet.get('slot')), int(packet.get('button')))
+        except (TypeError, ValueError):
+            player.sync_inventory()
+    elif packet['__class__'] == 'CraftingTake':
+        try:
+            width, height = int(packet.get('width', 2)), int(packet.get('height', 2))
+        except (TypeError, ValueError):
+            width, height = 2, 2
+        player.crafting_take(width, height)
+    elif packet['__class__'] == 'CraftingClose':
+        player.crafting_close()
+    elif packet['__class__'] == 'SelectHotbarSlot':
+        try:
+            player.selected_slot = max(0, min(8, int(packet.get('slot'))))
+        except (TypeError, ValueError):
+            pass
+        player.sync_inventory()
+    elif packet['__class__'] == 'ConsumeItem':
+        held = player.inventory[player.selected_slot]
+        food = int(getattr(held.material, 'food_value', 0))
+        if food > 0 and player.food_level < 20 and not held.is_empty():
+            saturation = float(getattr(held.material, 'saturation_modifier', 0.0))
+            player.food_level = min(20, player.food_level + food)
+            player.saturation = min(float(player.food_level), player.saturation + food * saturation * 2)
+            held.reduce_amount(1)
+        player.sync_inventory()
     elif packet['__class__'] == 'RequestRespawn':
         player.health = player.max_health
         player.food_level = 20

@@ -13,7 +13,7 @@ from resources.server.utils import client_method
 
 class AIR(Block):
     block_id = 'air'
-    name = 'air'
+    name = 'tile.air.name'
     _texture_path = None
     solid = False
     replaceable = True
@@ -31,21 +31,21 @@ class AIR(Block):
 
 class STONE(Block):
     block_id = 'stone'
-    name = 'stone'
+    name = 'tile.stone.stone.name'
     _texture_path = 'blocks.stone'
     preferred_tool = 'pickaxe'
     requires_correct_tool = True
 
 class COBBLESTONE(Block):
     block_id = 'cobblestone'
-    name = 'cobblestone'
+    name = 'tile.stonebrick.name'
     _texture_path = 'blocks.cobblestone'
     preferred_tool = 'pickaxe'
     requires_correct_tool = True
 
 class OBSIDIAN(Block):
     block_id = 'obsidian'
-    name = 'obsidian'
+    name = 'tile.obsidian.name'
     _texture_path = 'blocks.obsidian'
     hardness = 50.0
     blast_resistance = 1200.0
@@ -55,35 +55,35 @@ class OBSIDIAN(Block):
 
 class GRANITE(Block):
     block_id = 'granite'
-    name = 'granite'
+    name = 'tile.stone.granite.name'
     _texture_path = 'blocks.stone_granite'
     preferred_tool = 'pickaxe'
     requires_correct_tool = True
 
 class DIORITE(Block):
     block_id = 'diorite'
-    name = 'diorite'
+    name = 'tile.stone.diorite.name'
     _texture_path = 'blocks.stone_diorite'
     preferred_tool = 'pickaxe'
     requires_correct_tool = True
 
 class ANDESITE(Block):
     block_id = 'andesite'
-    name = 'andesite'
+    name = 'tile.stone.andesite.name'
     _texture_path = 'blocks.stone_andesite'
     preferred_tool = 'pickaxe'
     requires_correct_tool = True
 
 class BEDROCK(Block):
     block_id = 'bedrock'
-    name = 'bedrock'
+    name = 'tile.bedrock.name'
     _texture_path = 'blocks.bedrock'
     breakable = False
     hardness = -1
 
 class DIRT(Block):
     block_id = 'dirt'
-    name = 'dirt'
+    name = 'tile.dirt.name'
     _texture_path = 'blocks.dirt'
     break_sound = 'dig.gravel'
     hardness = 0.5
@@ -91,7 +91,7 @@ class DIRT(Block):
 
 class COARSE_DIRT(Block):
     block_id = 'coarse_dirt'
-    name = 'coarse dirt'
+    name = 'tile.dirt.coarse.name'
     _texture_path = 'blocks.coarse_dirt'
     break_sound = 'dig.gravel'
     hardness = 0.5
@@ -99,7 +99,7 @@ class COARSE_DIRT(Block):
 
 class PODZOL(Block):
     block_id = 'podzol'
-    name = 'podzol'
+    name = 'tile.dirt.podzol.name'
     _texture_path = 'blocks.dirt_podzol_side'
     break_sound = 'dig.gravel'
     hardness = 0.5
@@ -108,7 +108,7 @@ class PODZOL(Block):
 
 class GRASS_BLOCK(Block):
     block_id = 'grass_block'
-    name = 'grass block'
+    name = 'tile.grass.name'
     light_attenuation = 5
     break_sound = 'dig.gravel'
     hardness = 0.6
@@ -174,7 +174,7 @@ class GRASS_BLOCK(Block):
 
 class SHORT_GRASS(GrassStain):
     block_id = 'short_grass'
-    name = 'short grass'
+    name = 'tile.tallgrass.grass.name'
     _texture_path = 'blocks.tallgrass'
     hardness = 0.0
 
@@ -227,42 +227,42 @@ class DoublePlantTopMixin:
 
 class TALL_GRASS(DoublePlantBottomMixin, GrassStain):
     block_id = 'tall_grass'
-    name = 'tall grass'
+    name = 'tile.doublePlant.grass.name'
     _texture_path = 'blocks.double_plant_grass_bottom'
     top_block_id = 'tall_grass_top'
 
 
 class TALL_GRASS_TOP(DoublePlantTopMixin, GrassStain):
     block_id = 'tall_grass_top'
-    name = 'tall grass top'
+    name = 'tile.doublePlant.grass.name'
     _texture_path = 'blocks.double_plant_grass_top'
     bottom_block_id = 'tall_grass'
 
 
 class LARGE_FERN(DoublePlantBottomMixin, GrassStain):
     block_id = 'large_fern'
-    name = 'large fern'
+    name = 'tile.doublePlant.fern.name'
     _texture_path = 'blocks.double_plant_fern_bottom'
     top_block_id = 'large_fern_top'
 
 
 class LARGE_FERN_TOP(DoublePlantTopMixin, GrassStain):
     block_id = 'large_fern_top'
-    name = 'large fern top'
+    name = 'tile.doublePlant.fern.name'
     _texture_path = 'blocks.double_plant_fern_top'
     bottom_block_id = 'large_fern'
 
 
 class SUNFLOWER(DoublePlantBottomMixin, Plant):
     block_id = 'sunflower'
-    name = 'sunflower'
+    name = 'tile.doublePlant.sunflower.name'
     _texture_path = 'blocks.double_plant_sunflower_bottom'
     top_block_id = 'sunflower_top'
 
 
 class SUNFLOWER_TOP(DoublePlantTopMixin, Plant):
     block_id = 'sunflower_top'
-    name = 'sunflower top'
+    name = 'tile.doublePlant.sunflower.name'
     _texture_path = 'blocks.double_plant_sunflower_top'
     _front_texture_path = 'blocks.double_plant_sunflower_front'
     bottom_block_id = 'sunflower'
@@ -293,48 +293,48 @@ class SUNFLOWER_TOP(DoublePlantTopMixin, Plant):
 
 class ROSE_BUSH(DoublePlantBottomMixin, Plant):
     block_id = 'rose_bush'
-    name = 'rose bush'
+    name = 'tile.doublePlant.rose.name'
     _texture_path = 'blocks.double_plant_rose_bottom'
     top_block_id = 'rose_bush_top'
 
 
 class ROSE_BUSH_TOP(DoublePlantTopMixin, Plant):
     block_id = 'rose_bush_top'
-    name = 'rose bush top'
+    name = 'tile.doublePlant.rose.name'
     _texture_path = 'blocks.double_plant_rose_top'
     bottom_block_id = 'rose_bush'
 
 
 class PEONY(DoublePlantBottomMixin, Plant):
     block_id = 'peony'
-    name = 'peony'
+    name = 'tile.doublePlant.paeonia.name'
     _texture_path = 'blocks.double_plant_paeonia_bottom'
     top_block_id = 'peony_top'
 
 
 class PEONY_TOP(DoublePlantTopMixin, Plant):
     block_id = 'peony_top'
-    name = 'peony top'
+    name = 'tile.doublePlant.paeonia.name'
     _texture_path = 'blocks.double_plant_paeonia_top'
     bottom_block_id = 'peony'
 
 
 class LILAC(DoublePlantBottomMixin, Plant):
     block_id = 'lilac'
-    name = 'lilac'
+    name = 'tile.doublePlant.syringa.name'
     _texture_path = 'blocks.double_plant_syringa_bottom'
     top_block_id = 'lilac_top'
 
 
 class LILAC_TOP(DoublePlantTopMixin, Plant):
     block_id = 'lilac_top'
-    name = 'lilac top'
+    name = 'tile.doublePlant.syringa.name'
     _texture_path = 'blocks.double_plant_syringa_top'
     bottom_block_id = 'lilac'
 
 class OAK_PLANK(Block):
     block_id = 'oak_plank'
-    name = 'oak plank'
+    name = 'tile.wood.oak.name'
     _texture_path = 'blocks.planks_oak'
     break_sound = 'dig.wood'
     hardness = 2.0
@@ -342,7 +342,7 @@ class OAK_PLANK(Block):
 
 class BIRCH_PLANK(Block):
     block_id = 'birch_plank'
-    name = 'birch plank'
+    name = 'tile.wood.birch.name'
     _texture_path = 'blocks.planks_birch'
     break_sound = 'dig.wood'
     hardness = 2.0
@@ -350,7 +350,7 @@ class BIRCH_PLANK(Block):
 
 class SPRUCE_PLANK(Block):
     block_id = 'spruce_plank'
-    name = 'spruce plank'
+    name = 'tile.wood.spruce.name'
     _texture_path = 'blocks.planks_spruce'
     break_sound = 'dig.wood'
     hardness = 2.0
@@ -358,7 +358,7 @@ class SPRUCE_PLANK(Block):
 
 class JUNGLE_PLANK(Block):
     block_id = 'jungle_plank'
-    name = 'jungle plank'
+    name = 'tile.wood.jungle.name'
     _texture_path = 'blocks.planks_jungle'
     break_sound = 'dig.wood'
     hardness = 2.0
@@ -366,7 +366,7 @@ class JUNGLE_PLANK(Block):
 
 class ACACIA_PLANK(Block):
     block_id = 'acacia_plank'
-    name = 'acacia plank'
+    name = 'tile.wood.acacia.name'
     _texture_path = 'blocks.planks_acacia'
     break_sound = 'dig.wood'
     hardness = 2.0
@@ -374,7 +374,7 @@ class ACACIA_PLANK(Block):
 
 class DARK_OAK_PLANK(Block):
     block_id = 'dark_oak_plank'
-    name = 'dark oak plank'
+    name = 'tile.wood.big_oak.name'
     _texture_path = 'blocks.planks_big_oak'
     break_sound = 'dig.wood'
     hardness = 2.0
@@ -383,7 +383,7 @@ class DARK_OAK_PLANK(Block):
 
 class CRAFTING_TABLE(Block):
     block_id = 'crafting_table'
-    name = 'crafting table'
+    name = 'tile.workbench.name'
     _texture_path = 'blocks.crafting_table_front'
     break_sound = 'dig.wood'
     hardness = 2.5
@@ -391,7 +391,7 @@ class CRAFTING_TABLE(Block):
 
 class GLOWSTONE(Block):
     block_id = 'glowstone'
-    name = 'glowstone'
+    name = 'tile.lightgem.name'
     _texture_path = 'blocks.glowstone'
     light_source = 15
     light_attenuation = 0
@@ -401,77 +401,77 @@ class GLOWSTONE(Block):
 
 class POPPY(Plant):
     block_id = 'poppy'
-    name = 'poppy'
+    name = 'tile.flower2.poppy.name'
     _texture_path = 'blocks.flower_rose'
 
 class DANDELION(Plant):
     block_id = 'dandelion'
-    name = 'dandelion'
+    name = 'tile.flower1.dandelion.name'
     _texture_path = 'blocks.flower_dandelion'
 
 class OAK_LEAVES(Leaves):
     block_id = 'oak_leaves'
-    name = 'oak_leaves'
+    name = 'tile.leaves.oak.name'
     _texture_path = 'blocks.leaves_oak'
 
 class OAK_LOG(Log):
     block_id = 'oak_log'
-    name = 'oak_log'
+    name = 'tile.log.oak.name'
     _texture_path = 'blocks.log_oak'
 
 class BIRCH_LEAVES(Leaves):
     block_id = 'birch_leaves'
-    name = 'birch leaves'
+    name = 'tile.leaves.birch.name'
     _texture_path = 'blocks.leaves_birch'
 
 class BIRCH_LOG(Log):
     block_id = 'birch_log'
-    name = 'birch log'
+    name = 'tile.log.birch.name'
     _texture_path = 'blocks.log_birch'
 
 class SPRUCE_LEAVES(Leaves):
     block_id = 'spruce_leaves'
-    name = 'spruce leaves'
+    name = 'tile.leaves.spruce.name'
     _texture_path = 'blocks.leaves_spruce'
 
 class SPRUCE_LOG(Log):
     block_id = 'spruce_log'
-    name = 'spruce log'
+    name = 'tile.log.spruce.name'
     _texture_path = 'blocks.log_spruce'
 
 class JUNGLE_LEAVES(Leaves):
     block_id = 'jungle_leaves'
-    name = 'jungle leaves'
+    name = 'tile.leaves.jungle.name'
     _texture_path = 'blocks.leaves_jungle'
 
 class JUNGLE_LOG(Log):
     block_id = 'jungle_log'
-    name = 'jungle log'
+    name = 'tile.log.jungle.name'
     _texture_path = 'blocks.log_jungle'
 
 class ACACIA_LEAVES(Leaves):
     block_id = 'acacia_leaves'
-    name = 'acacia leaves'
+    name = 'tile.leaves.acacia.name'
     _texture_path = 'blocks.leaves_acacia'
 
 class ACACIA_LOG(Log):
     block_id = 'acacia_log'
-    name = 'acacia log'
+    name = 'tile.log.acacia.name'
     _texture_path = 'blocks.log_acacia'
 
 class DARK_OAK_LEAVES(Leaves):
     block_id = 'dark_oak_leaves'
-    name = 'dark oak leaves'
+    name = 'tile.leaves.big_oak.name'
     _texture_path = 'blocks.leaves_big_oak'
 
 class DARK_OAK_LOG(Log):
     block_id = 'dark_oak_log'
-    name = 'dark oak log'
+    name = 'tile.log.big_oak.name'
     _texture_path = 'blocks.log_big_oak'
 
 class SAND(GravityBlock):
     block_id = 'sand'
-    name = 'sand'
+    name = 'tile.sand.name'
     _texture_path = 'blocks.sand'
     break_sound = "dig.sand"
     hardness = 0.5
@@ -479,7 +479,7 @@ class SAND(GravityBlock):
 
 class RED_SAND(GravityBlock):
     block_id = 'red_sand'
-    name = 'red sand'
+    name = 'tile.sand.red.name'
     _texture_path = 'blocks.red_sand'
     break_sound = "dig.sand"
     hardness = 0.5
@@ -487,7 +487,7 @@ class RED_SAND(GravityBlock):
 
 class SANDSTONE(Block):
     block_id = 'sandstone'
-    name = 'sandstone'
+    name = 'tile.sandStone.name'
     _texture_path = 'blocks.sandstone_normal'
     hardness = 0.8
     preferred_tool = 'pickaxe'
@@ -495,7 +495,7 @@ class SANDSTONE(Block):
 
 class RED_SANDSTONE(Block):
     block_id = 'red_sandstone'
-    name = 'red sandstone'
+    name = 'tile.redSandStone.name'
     _texture_path = 'blocks.red_sandstone_normal'
     hardness = 0.8
     preferred_tool = 'pickaxe'
@@ -503,7 +503,7 @@ class RED_SANDSTONE(Block):
 
 class GRAVEL(GravityBlock):
     block_id = 'gravel'
-    name = 'gravel'
+    name = 'tile.gravel.name'
     _texture_path = 'blocks.gravel'
     break_sound = 'dig.gravel'
     hardness = 0.6
@@ -511,7 +511,7 @@ class GRAVEL(GravityBlock):
 
 class CLAY(Block):
     block_id = 'clay'
-    name = 'clay'
+    name = 'tile.clay.name'
     _texture_path = 'blocks.clay'
     break_sound = 'dig.gravel'
     hardness = 0.6
@@ -519,7 +519,7 @@ class CLAY(Block):
 
 class HARDENED_CLAY(Block):
     block_id = 'hardened_clay'
-    name = 'hardened clay'
+    name = 'tile.clayHardened.name'
     _texture_path = 'blocks.hardened_clay'
     hardness = 1.25
     preferred_tool = 'pickaxe'
@@ -527,7 +527,7 @@ class HARDENED_CLAY(Block):
 
 class SNOW(BottomSupport):
     block_id = 'snow'
-    name = 'snow'
+    name = 'tile.snow.name'
     _texture_path = 'blocks.snow'
     break_sound = 'dig.snow'
     solid = False
@@ -566,7 +566,7 @@ class SNOW(BottomSupport):
 
 class SNOW_BLOCK(Block):
     block_id = 'snow_block'
-    name = 'snow block'
+    name = 'tile.snow.name'
     _texture_path = 'blocks.snow'
     break_sound = 'dig.snow'
     hardness = 0.2
@@ -574,7 +574,7 @@ class SNOW_BLOCK(Block):
 
 class ICE(Block):
     block_id = 'ice'
-    name = 'ice'
+    name = 'tile.ice.name'
     _texture_path = 'blocks.ice'
     break_sound = 'dig.glass'
     friction = 0.98
@@ -583,7 +583,7 @@ class ICE(Block):
 
 class WATER(FluidBlock):
     block_id = 'water'
-    name = 'water'
+    name = 'tile.water.name'
     _texture_path = 'blocks.water_still'
     _flow_texture_path = 'blocks.water_flow'
     _texture_cache = {}
@@ -593,7 +593,7 @@ class WATER(FluidBlock):
 
 class LAVA(FluidBlock):
     block_id = 'lava'
-    name = 'lava'
+    name = 'tile.lava.name'
     _texture_path = 'blocks.lava_still'
     _flow_texture_path = 'blocks.lava_flow'
     # LEVEL remains the vanilla 0..7 range; the two-level drop-off means
@@ -611,7 +611,7 @@ class LAVA(FluidBlock):
 
 class SUGAR_CANE(Plant):
     block_id = 'sugar_cane'
-    name = 'sugar_cane'
+    name = 'tile.reeds.name'
     _texture_path = 'blocks.reeds'
 
     def on_update(self):
@@ -631,18 +631,18 @@ class SUGAR_CANE(Plant):
 
 class FERN(GrassStain):
     block_id = 'fern'
-    name = 'fern'
+    name = 'tile.tallgrass.fern.name'
     _texture_path = 'blocks.fern'
 
 class DEAD_BUSH(Plant):
     block_id = 'dead_bush'
-    name = 'dead bush'
+    name = 'tile.deadbush.name'
     _texture_path = 'blocks.deadbush'
 
 
 class CACTUS(Block):
     block_id = 'cactus'
-    name = 'cactus'
+    name = 'tile.cactus.name'
     _texture_path = 'blocks.cactus_side'
     break_sound = 'dig.cloth'
     hardness = 0.4
@@ -655,7 +655,7 @@ class CACTUS(Block):
 
 class BROWN_MUSHROOM(Plant):
     block_id = 'brown_mushroom'
-    name = 'brown mushroom'
+    name = 'tile.mushroom.name'
     _texture_path = 'blocks.mushroom_brown'
 
     def on_update(self):
@@ -663,12 +663,12 @@ class BROWN_MUSHROOM(Plant):
 
 class RED_MUSHROOM(Plant):
     block_id = 'red_mushroom'
-    name = 'red mushroom'
+    name = 'tile.mushroom.name'
     _texture_path = 'blocks.mushroom_red'
 
 class COAL_ORE(Block):
     block_id = 'coal_ore'
-    name = 'coal ore'
+    name = 'tile.oreCoal.name'
     _texture_path = 'blocks.coal_ore'
     hardness = 3.0
     preferred_tool = 'pickaxe'
@@ -676,7 +676,7 @@ class COAL_ORE(Block):
 
 class IRON_ORE(Block):
     block_id = 'iron_ore'
-    name = 'iron ore'
+    name = 'tile.oreIron.name'
     _texture_path = 'blocks.iron_ore'
     hardness = 3.0
     preferred_tool = 'pickaxe'
@@ -685,7 +685,7 @@ class IRON_ORE(Block):
 
 class GOLD_ORE(Block):
     block_id = 'gold_ore'
-    name = 'gold ore'
+    name = 'tile.oreGold.name'
     _texture_path = 'blocks.gold_ore'
     hardness = 3.0
     preferred_tool = 'pickaxe'
@@ -694,7 +694,7 @@ class GOLD_ORE(Block):
 
 class DIAMOND_ORE(Block):
     block_id = 'diamond_ore'
-    name = 'diamond ore'
+    name = 'tile.oreDiamond.name'
     _texture_path = 'blocks.diamond_ore'
     hardness = 3.0
     preferred_tool = 'pickaxe'
@@ -703,7 +703,7 @@ class DIAMOND_ORE(Block):
 
 class EMERALD_ORE(Block):
     block_id = 'emerald_ore'
-    name = 'emerald ore'
+    name = 'tile.oreEmerald.name'
     _texture_path = 'blocks.emerald_ore'
     hardness = 3.0
     preferred_tool = 'pickaxe'
@@ -712,7 +712,7 @@ class EMERALD_ORE(Block):
 
 class LAPIS_ORE(Block):
     block_id = 'lapis_ore'
-    name = 'lapis ore'
+    name = 'tile.oreLapis.name'
     _texture_path = 'blocks.lapis_ore'
     hardness = 3.0
     preferred_tool = 'pickaxe'
@@ -721,7 +721,7 @@ class LAPIS_ORE(Block):
 
 class REDSTONE_ORE(Block):
     block_id = 'redstone_ore'
-    name = 'redstone ore'
+    name = 'tile.oreRedstone.name'
     _texture_path = 'blocks.redstone_ore'
     hardness = 3.0
     preferred_tool = 'pickaxe'
@@ -730,22 +730,22 @@ class REDSTONE_ORE(Block):
 
 class BLUE_ORCHID(Plant):
     block_id = 'blue_orchid'
-    name = 'blue orchid'
+    name = 'tile.flower2.blueOrchid.name'
     _texture_path = 'blocks.flower_blue_orchid'
 
 class ALLIUM(Plant):
     block_id = 'allium'
-    name = 'allium'
+    name = 'tile.flower2.allium.name'
     _texture_path = 'blocks.flower_allium'
 
 class AZURE_BLUET(Plant):
     block_id = 'azure_bluet'
-    name = 'azure bluet'
+    name = 'tile.flower2.houstonia.name'
     _texture_path = 'blocks.flower_houstonia'
 
 class OXEYE_DAISY(Plant):
     block_id = 'oxeye_daisy'
-    name = 'oxeye daisy'
+    name = 'tile.flower2.oxeyeDaisy.name'
     _texture_path = 'blocks.flower_oxeye_daisy'
 
 class DIAMOND_BLOCK(Block):

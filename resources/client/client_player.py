@@ -7,8 +7,6 @@ from resources.client.entity_skeleton import PlayerSkeleton
 from resources.client.game_mode import CreativeMode, SurvivalMode
 from resources.server.entity import Entity
 from resources.server.inventory import Inventory
-from resources.server.item_class import ItemStack
-from resources.server.materials import *
 
 if TYPE_CHECKING:
     from resources.client.client_main import Client
@@ -48,20 +46,16 @@ class ClientPlayer(Entity):
         self.skeleton = PlayerSkeleton(client, self)
         self.skeleton.x = self.client.render.SCREEN_WIDTH / 2
         self.skeleton.y = self.client.render.SCREEN_HEIGHT / 2
-        if game_mode == "creative":
-            for i in range(4):
-                self.inventory.set_item(i, ItemStack(GLOWSTONE(), 64))
-            for i in range(8, 16):
-                self.inventory.set_item(i, ItemStack(SAND(), 64))
-            for i in range(4, 8):
-                self.inventory.set_item(i, ItemStack(WATER(), 64))
-        else:
-            # The project has no animals/crops yet.  A small starter ration
-            # keeps the fully implemented hunger loop playable from day one.
-            self.inventory.set_item(0, ItemStack(APPLE(), 3))
-            self.inventory.set_item(1, ItemStack(BREAD(), 2))
         self.selected_slot = 0
         self.game_mode = CreativeMode(self) if game_mode == "creative" else SurvivalMode(self)
+
+    def set_creative_slot(self, slot: int, item_id: str = "air", amount: int = 64, nbt=None) -> None:
+        """Request a creative-only server-side replacement for one slot."""
+        self.client.sent_packet({
+            "__class__": "CreativeSetSlot",
+            "slot": int(slot),
+            "item": {"id": str(item_id), "amount": int(amount), "nbt": nbt or {}},
+        })
 
     def move_update(self):
         if self.dead:
@@ -141,23 +135,6 @@ class ClientPlayer(Entity):
             self.dead = True
             self.client.add_chat_message("You died!", (255, 85, 85))
             self.client.sent_packet({'__class__': 'RequestRespawn'})
-
-    def add_item_stack(self, stack: ItemStack) -> bool:
-        """Insert a picked-up item while respecting normal stack merging."""
-        for slot in range(len(self.inventory)):
-            current = self.inventory[slot]
-            if not current.is_empty() and current.material == stack.material and current.nbt == stack.nbt:
-                space = current.max_stack_size - current.amount
-                moved = min(space, stack.amount)
-                current.amount += moved
-                stack.amount -= moved
-                if stack.amount == 0:
-                    return True
-        for slot in range(len(self.inventory)):
-            if self.inventory[slot].is_empty():
-                self.inventory[slot] = stack
-                return True
-        return False
 
     def add_experience(self, amount: int):
         self.experience += max(0, int(amount))

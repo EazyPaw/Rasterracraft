@@ -153,23 +153,18 @@ class Backpack(GUI):
 
     def _handle_crafting_click(self, target, button):
         if target == "output":
-            result = self.crafting_result
-            if result is None:
-                return
-            if self._is_empty(self.dragging_item):
-                self.dragging_item = self._copy_stack(result)
-            elif self._can_stack(self.dragging_item, result) and self.dragging_item.amount + result.amount <= self.dragging_item.max_stack_size:
-                self.dragging_item.amount += result.amount
-            else:
-                return
-            for index in self.crafting_inputs:
-                stack = self.crafting_slots[index]
-                stack.reduce_amount(1)
-                if stack.is_empty():
-                    self.crafting_slots[index] = self._empty_stack()
-            self._refresh_crafting()
+            self.render.client.sent_packet({
+                "__class__": "CraftingTake",
+                "width": self.crafting_columns,
+                "height": self.crafting_rows,
+            })
             return
 
+        if self._is_crafting_slot(target):
+            self.render.client.sent_packet({
+                "__class__": "CraftingClick", "slot": target[1], "button": button,
+            })
+            return
         if button == 1:
             self._left_click_slot(target)
         else:
@@ -360,6 +355,16 @@ class Backpack(GUI):
         - 手中无物品 → 拿起槽位中整组物品
         - 手中有物品 → 合并或交换（调用 _merge_or_swap_with_slot）
         """
+        if isinstance(slot, int):
+            self.render.client.sent_packet({
+                "__class__": "InventoryClick", "slot": slot, "button": 1,
+            })
+            return
+        if self._is_crafting_slot(slot):
+            self.render.client.sent_packet({
+                "__class__": "CraftingClick", "slot": slot[1], "button": 1,
+            })
+            return
         target = self._get_slot_stack(slot)
         if self._is_empty(self.dragging_item):
             if not self._is_empty(target):
@@ -375,6 +380,16 @@ class Backpack(GUI):
         - 手中无物品 → 拿起槽位中半组物品（向上取整）
         - 手中有物品 → 放入 1 个或交换（调用 _place_one_or_swap_with_slot）
         """
+        if isinstance(slot, int):
+            self.render.client.sent_packet({
+                "__class__": "InventoryClick", "slot": slot, "button": 3,
+            })
+            return
+        if self._is_crafting_slot(slot):
+            self.render.client.sent_packet({
+                "__class__": "CraftingClick", "slot": slot[1], "button": 3,
+            })
+            return
         target = self._get_slot_stack(slot)
         if self._is_empty(self.dragging_item):
             if not self._is_empty(target):
@@ -427,15 +442,28 @@ class Backpack(GUI):
                     self.drag_slots.append(slot)
                     self.drag_moved = True  # 标记发生了移动（区别于原地点击）
                     # 实时应用预览：将物品立即放入拖拽路径上的所有槽位
-                    self._apply_drag_preview()
+                    # The server performs the distribution atomically when the
+                    # mouse button is released.
 
     def _finish_drag(self):
         """
         拖拽结束：物品已在实时预览中放入槽位，余数留在光标。
         此处仅做状态清理，物品保持不动。
         """
-        self._apply_drag_preview()  # 最后一次确认（处理松开时新增的槽位）
-        self._drag_preview_slots = {}
+        inventory_slots = [slot for slot in self.drag_slots if isinstance(slot, int)]
+        crafting_slots = [slot[1] for slot in self.drag_slots if self._is_crafting_slot(slot)]
+        if inventory_slots:
+            self.render.client.sent_packet({
+                "__class__": "InventoryDrag",
+                "slots": inventory_slots,
+                "button": self.drag_button,
+            })
+        if crafting_slots:
+            self.render.client.sent_packet({
+                "__class__": "CraftingDrag",
+                "slots": crafting_slots,
+                "button": self.drag_button,
+            })
         self._drag_material = None
         self._reset_drag()
 
@@ -535,14 +563,10 @@ class Backpack(GUI):
         """
         if self._is_empty(self.dragging_item):
             return
-        if single:
-            dropped = self._split_stack(self.dragging_item, 1)
-            if self.dragging_item.amount <= 0:
-                self.dragging_item = self._empty_stack()
-        else:
-            dropped = self.dragging_item
-            self.dragging_item = self._empty_stack()
-        self.drop_item_stack(dropped)
+        self.render.client.sent_packet({
+            "__class__": "InventoryDrop", "cursor": True,
+            "amount": 1 if single else None,
+        })
 
     def _drop_slot_item(self, slot, single=False):
         """
@@ -551,16 +575,12 @@ class Backpack(GUI):
         :param single: True=只丢弃1个，False=丢弃整组
         """
         target = self._get_slot_stack(slot)
-        if self._is_empty(target):
+        if self._is_empty(target) or not isinstance(slot, int):
             return
-        if single:
-            dropped = self._split_stack(target, 1)
-            if target.amount <= 0:
-                self._clear_slot(slot)
-        else:
-            dropped = target
-            self._clear_slot(slot)
-        self.drop_item_stack(dropped)
+        self.render.client.sent_packet({
+            "__class__": "InventoryDrop", "cursor": False,
+            "slot": slot, "amount": 1 if single else None,
+        })
 
     def _handle_click_outside(self, button):
         """
@@ -772,13 +792,10 @@ class Backpack(GUI):
         """背包关闭时归还临时物品并解除鼠标锁定。"""
         for index, stack in enumerate(self.crafting_slots):
             if not self._is_empty(stack):
-                if not self.render.client.client_player.add_item_stack(stack):
-                    self.drop_item_stack(stack)
                 self.crafting_slots[index] = self._empty_stack()
         self._refresh_crafting()
         self._reset_drag()
         if not self._is_empty(self.dragging_item):
-            if not self.render.client.client_player.add_item_stack(self.dragging_item):
-                self.drop_item_stack(self.dragging_item)
             self.dragging_item = self._empty_stack()
+        self.render.client.sent_packet({"__class__": "CraftingClose"})
         self.render.client.game_manager.ing_mouse_lock -= 1

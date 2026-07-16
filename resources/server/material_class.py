@@ -1,6 +1,7 @@
 import pygame
 import math
 
+from resources.client.resources_manager import transkey
 from resources.server.utils import client_method
 from resources.server.location import Location
 
@@ -78,6 +79,11 @@ class Material:
 
     def __str__(self):
         return self.name_id
+
+
+    def get_name(self) -> str:
+        """返回用于 HUD、背包等界面的可读物品名称。"""
+        return transkey(self.name)
 
 
 class BlockItem(Material):

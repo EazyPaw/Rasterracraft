@@ -90,7 +90,9 @@ class SurvivalHUD(HotBar):
         - 生命心（左）和饥饿鸡腿（右）在同一行，位于经验条上方，
           各自向外偏移一个图标宽度，以在它们之间形成可见间隙。
         """
-        super().draw()
+        # 先绘制快捷栏；物品名称应放在本 HUD 的所有计量条之上，
+        # 因此在本方法末尾再绘制它。
+        self._draw_hotbar()
         player = self.render.client.client_player
         if player is None:
             return
@@ -124,6 +126,7 @@ class SurvivalHUD(HotBar):
 
         # ---- 经验条（填充条 + 等级数字） ----
         self._draw_experience(player, bar_x, bar_y)
+        self.draw_item_name(meter_y - round(self.render.gui_scale * 3))
 
     # ------------------------------------------------------------------
     #  经验条

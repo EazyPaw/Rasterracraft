@@ -64,7 +64,7 @@ class Block(ABC):
             self.write_nbt(nbt)
 
     def get_name(self):
-        return transkey(f"tile.{self.block_id}.name")
+        return transkey(self.name)
 
     @classmethod
     @client_method

@@ -61,6 +61,7 @@ class CreativeMode(GameMode):
         self.player.flyable = True
         self.update_gui()
         self.inv = Backpack(self.player.client.render)
+        self.crafting_table = CraftingTable(self.player.client.render)
 
     def update_gui(self):
         # 确保 ChatGUI 单例存在（首次创建）
@@ -82,6 +83,12 @@ class CreativeMode(GameMode):
 
     def right_click_on_block(self, block: Block):
         if self.player.client.hold_mouse_buttons[2]:
+            return
+        if self.player.choosing_block and self.player.choosing_block.block_id == "crafting_table":
+            if self.crafting_table not in self.player.client.render.drawing_GUIs:
+                self.player.client.render.show_gui(self.crafting_table)
+            return
+        if self.player.choosing_block is None:
             return
         location = self.player.choosing_block.location
         item = self.player.inventory[self.player.selected_slot]
@@ -114,16 +121,24 @@ class CreativeMode(GameMode):
         self.player.choosing_block = self.player.client.client_world.get_block(block_x, block_y, 1)
 
     def mouse_wheel(self, direction):
-        if direction > 0:
-            if self.player.client.client_player.selected_slot == 0:
-                self.player.client.client_player.selected_slot = 8
-                return
-            self.player.client.client_player.selected_slot -= 1
-        else:
-            if self.player.client.client_player.selected_slot == 8:
-                self.player.client.client_player.selected_slot = 0
-                return
-            self.player.client.client_player.selected_slot += 1
+        # 物品名称必须在渲染循环中持续绘制；直接在事件处理阶段调用
+        # render_text() 会在下一帧场景重绘时被覆盖。
+        hotbar_slots = min(9, len(self.player.inventory))
+        if direction == 0 or hotbar_slots == 0:
+            return
+
+        slot_delta = -1 if direction > 0 else 1
+        self.player.selected_slot = (self.player.selected_slot + slot_delta) % hotbar_slots
+        self.player.client.sent_packet({
+            "__class__": "SelectHotbarSlot", "slot": self.player.selected_slot,
+        })
+
+        item_stack = self.player.inventory[self.player.selected_slot]
+        item_name = "" if item_stack.is_empty() else item_stack.get_name()
+        for gui in self.player.client.render.drawing_GUIs:
+            if isinstance(gui, HotBar):
+                gui.show_item_name(item_name)
+                break
 
     def open_inventory(self):
         if self.inv in self.player.client.render.drawing_GUIs:
@@ -210,13 +225,11 @@ class SurvivalMode(GameMode):
 
         # The server removes the block and creates its physical dropped item.
         self.pending_break_target = key
-        held_item = self.player.inventory[self.player.selected_slot].material.name_id
         self.player.client.sent_packet({
             '__class__': 'BreakBlock',
             'x': target.location.x,
             'y': target.location.y,
             'z': target.location.z,
-            'held_item': held_item,
         })
         self.reset_breaking()
 
@@ -244,8 +257,7 @@ class SurvivalMode(GameMode):
         if place_location is not None:
             new_block.location = place_location
             self.player.client.resources_manager.play_sound(new_block.place_sound)
-            if self.player.client.sent_packet(new_block, 'PlaceBlock'):
-                item.reduce_amount(1)
+            self.player.client.sent_packet(new_block, 'PlaceBlock')
 
     def _eat_selected_item(self, item):
         if self.player.food_level >= 20:
@@ -260,12 +272,8 @@ class SurvivalMode(GameMode):
         self.player.skeleton.trigger_swing()
         if self.eat_progress < 16:  # 0.8 seconds at 20 TPS
             return
-        food = getattr(item.material, "food_value", 0)
-        saturation = float(getattr(item.material, "saturation_modifier", 0.0))
-        self.player.food_level = min(20, self.player.food_level + food)
-        self.player.saturation = min(float(self.player.food_level), self.player.saturation + food * saturation * 2)
-        item.reduce_amount(1)
         self.player.client.resources_manager.play_sound("random.eat")
+        self.player.client.sent_packet({"__class__": "ConsumeItem"})
         self.eating_slot = None
         self.eat_progress = 0
 

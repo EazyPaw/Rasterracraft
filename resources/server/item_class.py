@@ -12,6 +12,12 @@ class ItemStack:
         self.material = material
         self.amount = amount
         self.max_stack_size = material.max_stack_size
+        self.name = None
+
+    def get_name(self):
+        if self.name is None:
+            return self.material.get_name()
+        return self.name
 
     def is_empty(self) -> bool:
         """

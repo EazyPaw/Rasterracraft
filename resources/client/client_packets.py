@@ -5,12 +5,40 @@ from resources.client.client_player import ClientPlayer
 from resources.client.game_mode import get_gamemode_by_id
 from resources.server.block_class import Block
 from resources.server.blocks import get_block_by_id
-from resources.server.item_class import ItemStack
+from resources.server.inventory import payload_to_stack, restore_inventory
 from resources.server.location import Location
-from resources.server.materials import get_material_by_id
 
 if TYPE_CHECKING:
     from resources.client.client_main import Client
+
+
+def _set_inventory_cursor(client: 'Client', cursor) -> None:
+    player = client.client_player
+    if player is None:
+        return
+    player.inventory_cursor = cursor
+    candidates = list(getattr(client.render, 'drawing_GUIs', []))
+    game_mode = getattr(player, 'game_mode', None)
+    if game_mode is not None:
+        candidates.extend(value for value in vars(game_mode).values() if hasattr(value, 'dragging_item'))
+    for gui in candidates:
+        if hasattr(gui, 'dragging_item'):
+            gui.dragging_item = cursor
+
+
+def _set_crafting_grid(client: 'Client', payload) -> None:
+    player = client.client_player
+    if player is None:
+        return
+    game_mode = getattr(player, 'game_mode', None)
+    if game_mode is None:
+        return
+    for gui in vars(game_mode).values():
+        if hasattr(gui, 'crafting_slots'):
+            restore_inventory(gui.crafting_slots, payload)
+            refresh = getattr(gui, '_refresh_crafting', None)
+            if refresh is not None:
+                refresh()
 
 
 def decode_packet(packet: dict, client: 'Client') -> None:
@@ -59,6 +87,18 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             for key in ('health', 'food_level', 'saturation', 'experience', 'experience_level'):
                 if key in packet:
                     setattr(client.client_player, key, packet[key])
+            if 'inventory' in packet:
+                restore_inventory(client.client_player.inventory, packet['inventory'])
+            if 'crafting' in packet:
+                _set_crafting_grid(client, packet['crafting'])
+            if 'cursor' in packet:
+                cursor = payload_to_stack(packet['cursor'])
+                _set_inventory_cursor(client, cursor)
+            if 'selected_slot' in packet:
+                try:
+                    client.client_player.selected_slot = max(0, min(8, int(packet['selected_slot'])))
+                except (TypeError, ValueError):
+                    client.client_player.selected_slot = 0
             client.client_player.dead = False
         # Do not acknowledge until the destination and its immediate neighbours
         # are fully installed.  This is the actual client-ready handshake; a
@@ -144,16 +184,33 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         client.client_world.weather_remaining_ticks = max(0, int(packet.get('remaining_ticks', 0)))
     elif packet['__class__'] == 'Particle':
         client.particle_manager.handle_packet(packet)
-    elif packet['__class__'] == 'ItemPickup':
+    elif packet['__class__'] == 'SoundEffect':
+        sound_id = packet.get('sound_id', '')
+        volume = float(packet.get('volume', 1.0))
+        if packet.get('global', False):
+            client.resources_manager.play_sound(sound_id, volume=volume)
+        else:
+            client.client_world.play_sound(
+                sound_id,
+                float(packet.get('x', 0.0)),
+                float(packet.get('y', 0.0)),
+                float(packet.get('z', 0.0)),
+                volume=volume,
+            )
+    elif packet['__class__'] == 'InventoryUpdate':
         player = client.client_player
-        item_data = packet.get('item', {})
         if player is not None:
-            player.add_item_stack(ItemStack(
-                get_material_by_id(item_data.get('id', 'air')),
-                int(item_data.get('amount', 1)),
-                item_data.get('nbt', {}),
-            ))
-            player.world.play_sound("random.pop", player.x, player.y, 0)
+            restore_inventory(player.inventory, packet.get('inventory', []))
+            _set_crafting_grid(client, packet.get('crafting', []))
+            for key in ('health', 'food_level', 'saturation'):
+                if key in packet:
+                    setattr(player, key, packet[key])
+            try:
+                player.selected_slot = max(0, min(8, int(packet.get('selected_slot', 0))))
+            except (TypeError, ValueError):
+                player.selected_slot = 0
+            cursor = payload_to_stack(packet.get('cursor', {}))
+            _set_inventory_cursor(client, cursor)
     elif packet['__class__'] == 'Experience':
         if client.client_player is not None:
             client.client_player.add_experience(int(packet.get('amount', 0)))

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Callable, List, Dict
 from resources.client.game_mode import get_gamemode_by_id
 from resources.server.blocks import get_block_by_id
 from resources.server.entity import Entity
-from resources.server.item_class import ItemStack
 from resources.server.location import Location
 from resources.server.materials import get_material_by_id
 from resources.server.player import Player
@@ -36,7 +35,8 @@ class CommandExecutor:
         """
         执行 Python 命令
         """
-        if not self.allow_python_execute: return "python execute is not enabled on this server!"
+        if not self.allow_python_execute or (isinstance(executor, Player) and not executor.is_operator):
+            return "python execute is not enabled for this player!"
         code = " ".join(args)
         exec(code)
 
@@ -66,6 +66,8 @@ class CommandExecutor:
         """
         if len(args) < 2:
             raise ValueError("Usage: /give <target> <item> [<count>]")
+        if isinstance(executor, Player) and not executor.is_operator:
+            raise ValueError("You do not have permission to use /give")
 
         # ---- 1. 解析目标 ----
         targets = self.target_selector(args[0], executor)
@@ -94,24 +96,18 @@ class CommandExecutor:
             count = material.max_stack_size
 
         # ---- 4. 分发物品 ----
-        given_count = 0
+        given_items = 0
+        given_players = 0
         for target in targets:
             if not isinstance(target, Player):
                 continue
-            item_stack = ItemStack(material.__class__(), count)
-            self.server.send_client_socket(
-                target,
-                {"__class__": "ItemPickup", "item": {
-                    "id": item_stack.material.name_id,
-                    "amount": item_stack.amount,
-                    "nbt": item_stack.nbt,
-                }},
-                "Forward",
-            )
-            given_count += 1
+            added = target.give_item(material, count)
+            given_items += added
+            if added:
+                given_players += 1
 
         item_name = getattr(material, "name", item_id)
-        return f"Gave {count}x {item_name} to {given_count} player(s)"
+        return f"Gave {given_items}x {item_name} to {given_players} player(s)"
 
     def time(self, args, executor: Player | str):
         if args[0] == "add" and isinstance(executor, Player):

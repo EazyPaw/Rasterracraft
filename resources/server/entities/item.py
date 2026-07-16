@@ -53,14 +53,10 @@ class Item(Entity):
     def pick_up(self, player) -> bool:
         if self.pickup_delay > 0 or not self.is_pickup_candidate(player):
             return False
-        self.world.server.send_client_socket(
-            player,
-            {"__class__": "ItemPickup", "item": {
-                "id": self.item.material.name_id,
-                "amount": self.item.amount,
-                "nbt": self.item.nbt,
-            }},
-            "Forward",
-        )
-        self.world.remove_entity(self)
+        before = self.item.amount
+        player.give_item_stack(self.item)
+        if self.item.amount != before:
+            self.world.server.broadcast_sound("random.pop", self.x, self.y, self.z)
+        if self.item.amount <= 0:
+            self.world.remove_entity(self)
         return True
