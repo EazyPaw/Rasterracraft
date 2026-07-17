@@ -9,7 +9,6 @@ from resources.client.GUI.survival_hud import SurvivalHUD
 from resources.server.block_class import Block
 from resources.server.blocks import AIR
 from resources.server.entity import Entity
-from resources.server.location import Location
 from abc import ABC
 
 if TYPE_CHECKING:
@@ -43,12 +42,25 @@ class GameMode(ABC):
     def get_choosing_block(self):
         pass
 
+    def get_block_placement_location(self, block: Block):
+        """统一构造放置上下文，再交给待放置方块解释。"""
+        target = self.player.choosing_block
+        if target is None:
+            return None
+        get_context = getattr(self.player.client.render, "get_placement_context", None)
+        context = get_context(target, self.player) if callable(get_context) else None
+        return block.get_placement_location(
+            target,
+            player=self.player,
+            fore_place=getattr(self.player, "fore_place", False),
+            context=context,
+        )
+
     def mouse_wheel(self, direction):
         pass
 
     def open_inventory(self):
         pass
-
 
 class CreativeMode(GameMode):
     name_id = "creative"
@@ -97,23 +109,38 @@ class CreativeMode(GameMode):
         if item.is_empty() or not callable(target_block):
             return
         new_block = target_block()
-        logging.debug(f"Placing block {new_block.name} at {location}")
-        if not self.player.choosing_block.on_right_click():
-            place_location = None
-            if isinstance(self.player.client.client_world.get_block(location), AIR):
-                place_location = location
-            else:
-                other_z = 1 if location.z == 0 else 0
-                alt_location = Location(location.world, location.x, location.y, other_z)
-                if isinstance(self.player.client.client_world.get_block(alt_location), AIR):
-                    place_location = alt_location
-            if place_location is not None:
-                new_block.location = place_location
-                self.player.client.resources_manager.play_sound(new_block.place_sound)
-                self.player.client.sent_packet(new_block, 'PlaceBlock')
+        if self.player.choosing_block.on_right_click():
+            return
+        place_location = self.get_block_placement_location(new_block)
+        if place_location is None:
+            return
+        new_block.location = place_location
+        logging.debug(
+            "Placing block %s at (%s, %s, %s)",
+            new_block.name,
+            place_location.x,
+            place_location.y,
+            place_location.z,
+        )
+        self.player.client.resources_manager.play_sound(new_block.place_sound)
+        self.player.client.sent_packet(new_block, 'PlaceBlock')
 
     def get_choosing_block(self):
         block_x, block_y = self.player.client.render.choosing_position
+        if self.player.fore_place:
+            foreground = self.player.client.client_world.get_block(block_x, block_y, 0)
+            if getattr(foreground, "solid", False):
+                self.player.choosing_block = foreground
+                return
+            background = self.player.client.client_world.get_block(block_x, block_y, 1)
+            if getattr(background, "solid", False):
+                self.player.choosing_block = background
+                return
+            if not isinstance(foreground, AIR):
+                self.player.choosing_block = foreground
+                return
+            self.player.choosing_block = foreground
+            return
         for z in [0, 1]:
             if not isinstance(self.player.client.client_world.get_block(block_x, block_y, z), AIR):
                 self.player.choosing_block = self.player.client.client_world.get_block(block_x, block_y, z)
@@ -244,20 +271,18 @@ class SurvivalMode(GameMode):
             return
 
         location = self.player.choosing_block.location if self.player.choosing_block else None
-        if location is None or item.is_empty() or not hasattr(item.material, 'target_block'):
+        target_block = getattr(item.material, 'target_block', None)
+        if location is None or item.is_empty() or not callable(target_block):
             return
-        new_block = item.material.target_block()
-        world = self.player.client.client_world
-        place_location = location if isinstance(world.get_block(location), AIR) else None
+        new_block = target_block()
+        if self.player.choosing_block.on_right_click():
+            return
+        place_location = self.get_block_placement_location(new_block)
         if place_location is None:
-            other_z = 1 if location.z == 0 else 0
-            alternative = Location(location.world, location.x, location.y, other_z)
-            if isinstance(world.get_block(alternative), AIR):
-                place_location = alternative
-        if place_location is not None:
-            new_block.location = place_location
-            self.player.client.resources_manager.play_sound(new_block.place_sound)
-            self.player.client.sent_packet(new_block, 'PlaceBlock')
+            return
+        new_block.location = place_location
+        self.player.client.resources_manager.play_sound(new_block.place_sound)
+        self.player.client.sent_packet(new_block, 'PlaceBlock')
 
     def _eat_selected_item(self, item):
         if self.player.food_level >= 20:

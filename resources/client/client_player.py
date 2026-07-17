@@ -48,6 +48,7 @@ class ClientPlayer(Entity):
         self.skeleton.y = self.client.render.SCREEN_HEIGHT / 2
         self.selected_slot = 0
         self.game_mode = CreativeMode(self) if game_mode == "creative" else SurvivalMode(self)
+        self.fore_place = False
 
     def set_creative_slot(self, slot: int, item_id: str = "air", amount: int = 64, nbt=None) -> None:
         """Request a creative-only server-side replacement for one slot."""

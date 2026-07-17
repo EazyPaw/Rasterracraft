@@ -582,7 +582,7 @@ class World:
         for entity in entities:
             if entity.removed:
                 continue
-            entity.move_update()
+            entity.update()
             if entity.removed:
                 continue
             for player in self.server.players:
@@ -727,6 +727,7 @@ class World:
                     if rx in self.regions:
                         return {rx}
                     self.regions[rx] = saved_chunk
+                    self._initialize_chunk_blocks(saved_chunk)
                     self.mark_chunk_dirty(rx)
                     changed = self.recalculate_light_for_chunks({rx})
                     self.schedule_chunk_and_boundary_fluids(rx)
@@ -752,11 +753,23 @@ class World:
         # 光照计算需要读取相邻区块，因此需要串行化以保证一致性
         with self._regions_lock:
             self.regions[rx] = new_chunk
+            self._initialize_chunk_blocks(new_chunk)
             self.mark_chunk_dirty(rx)
             # 使用世界上下文重新计算光照以支持跨区块传播
             changed = self.recalculate_light_for_chunks({rx})
             self.schedule_chunk_and_boundary_fluids(rx)
             return changed
+
+    def _initialize_chunk_blocks(self, chunk: Chunk) -> None:
+        """运行区块恢复后的方块初始化钩子。
+
+        普通方块没有这个钩子，因此不会增加加载成本；需要持续效果的
+        方块（例如火把）可以在这里恢复定时器，而不依赖玩家重新放置。
+        """
+        for block in chunk.region_array.flat:
+            on_load = getattr(block, "on_load", None)
+            if callable(on_load):
+                on_load()
 
     def break_block(self, x_loc: int | Location, y: int = None, z: int = None, tool=None):
         x, y, z = decide_x_or_loc(x_loc, y, z)

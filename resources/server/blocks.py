@@ -1,5 +1,6 @@
 import os
 
+from resources.client.render import WeatherMixin
 from resources.client.resources_manager import transkey
 from resources.server.biome import get_biome_by_id
 
@@ -766,6 +767,16 @@ class SupportedBlock(Block):
 
     support_offset = (0, -1, 0)
 
+    def get_support_offset(self) -> tuple[int, int, int]:
+        """返回当前方块状态对应的支撑方向。"""
+        return self.support_offset
+
+    def get_support_location(self):
+        if self.location is None or self.location.world is None:
+            return None
+        dx, dy, dz = self.get_support_offset()
+        return self.location.add(dx, dy, dz)
+
     @staticmethod
     def is_full_block(block) -> bool:
         """返回方块是否能提供完整立方体支撑。
@@ -787,10 +798,10 @@ class SupportedBlock(Block):
         return True
 
     def get_support_block(self):
-        if self.location is None or self.location.world is None:
+        support_location = self.get_support_location()
+        if support_location is None:
             return None
-        dx, dy, dz = self.support_offset
-        return self.location.world.get_block(self.location.add(dx, dy, dz))
+        return support_location.world.get_block(support_location)
 
     def can_survive(self) -> bool:
         return self.location is not None and self.is_full_block(self.get_support_block())
@@ -833,12 +844,22 @@ class ParticleEmitterBlock(SupportedBlock):
 
     def __init__(self, nbt=None):
         self._particle_event_scheduled = False
+        self._particles_active = False
         super().__init__(nbt)
 
     def get_safe_attributes(self):
         attributes = super().get_safe_attributes()
         attributes.pop("_particle_event_scheduled", None)
+        attributes.pop("_particles_active", None)
         return attributes
+
+    def place_at(self, location: Location) -> bool:
+        """玩家/命令正常放置时才启用运行时粒子。"""
+        self._particles_active = True
+        placed = super().place_at(location)
+        if not placed:
+            self._particles_active = False
+        return placed
 
     def get_particle_position(self) -> tuple[float, float, int]:
         if self.location is None:
@@ -867,10 +888,20 @@ class ParticleEmitterBlock(SupportedBlock):
 
     def _particle_tick(self):
         self._particle_event_scheduled = False
-        if self.location is None:
+        if self.location is None or not self._particles_active:
             return
         world = self.location.world
-        if world.get_block(self.location) is not self or not self.can_survive():
+        if world.get_block(self.location) is not self:
+            return
+        if not self.can_survive():
+            support_location = self.get_support_location()
+            is_loaded = getattr(world, "is_position_loaded", None)
+            if callable(is_loaded) and support_location is not None and not is_loaded(
+                support_location.x, support_location.y, support_location.z
+            ):
+                self._schedule_particle()
+                return
+            world.break_block(self.location)
             return
         self.emit_particle()
         self._schedule_particle()
@@ -879,22 +910,31 @@ class ParticleEmitterBlock(SupportedBlock):
         if self.location is None or not self.can_survive():
             super().on_update()
             return
-        self.emit_particle()
-        self._schedule_particle()
+        if self._particles_active:
+            self.emit_particle()
+            self._schedule_particle()
 
     def on_generate(self):
-        # 世界生成器/存档加载器如果选择调用生成钩子，粒子方块可以立即
-        # 接入同一套定时发射逻辑，而不需要为每种方块重复写初始化代码。
+        # 世界生成器如果通过 place_at 放置，状态已经启用；这里复用统一
+        # 的更新入口，而不需要为每种粒子方块重复写初始化代码。
         self.on_update()
+
+    def on_load(self):
+        """存档/区块恢复后的初始化钩子。"""
+        # 粒子启用状态是一次放置会话的运行时状态，不写入存档；加载出来
+        # 的发射方块保持静默，也不会因邻居更新意外重新启用。
+        self._particles_active = False
+        self._particle_event_scheduled = False
 
     def on_random_tick(self):
         # 没有事件调度器的测试世界/工具世界也能看到粒子；正式服务端由
         # _particle_tick 提供固定间隔效果。
-        if not self._particle_event_scheduled:
+        if self._particles_active and not self._particle_event_scheduled:
             self.emit_particle()
             self._schedule_particle()
 
     def on_break(self):
+        self._particles_active = False
         self._particle_event_scheduled = False
 
 
@@ -912,18 +952,20 @@ class TORCH(ParticleEmitterBlock):
     FACING_BACK = "back"
     FACING_LEFT = "left"
     FACING_RIGHT = "right"
+    FACING_FORWARD = FACING_BACK  # 深度层中的“向前”安装形态
     FACINGS = (FACING_UP, FACING_BACK, FACING_LEFT, FACING_RIGHT)
     # 短名称便于放置逻辑和未来的墙挂方块直接复用。
     UP, BACK, LEFT, RIGHT = FACINGS
     _FACING_ALIASES = {
-        "forward": FACING_UP,
-        "front": FACING_UP,
+        "upright": FACING_UP,
+        "forward": FACING_BACK,
+        "front": FACING_BACK,
         "behind": FACING_BACK,
         "backward": FACING_BACK,
         "rear": FACING_BACK,
     }
     # 侧向/向后的火把共用一个纵向长度，保持斜视角下的视觉基准一致。
-    _NON_UP_HEIGHT_RATIO = 0.75
+    _NON_UP_HEIGHT_RATIO = 0.85
     _SIDE_TILT_ANGLE = 22.5
     _oriented_texture_cache = {}
     particle_id = "minecraft:flame"
@@ -947,6 +989,11 @@ class TORCH(ParticleEmitterBlock):
             raise ValueError(f"Unknown torch facing: {facing}")
         return facing
 
+    def apply_placement_nbt(self, nbt: dict) -> None:
+        """应用客户端允许提交的放置状态，避免写入运行时内部字段。"""
+        if isinstance(nbt, dict) and "facing" in nbt:
+            self.facing = self.normalize_facing(nbt["facing"])
+
     @property
     def direction(self) -> str:
         return self.facing
@@ -967,31 +1014,104 @@ class TORCH(ParticleEmitterBlock):
         if self.location is None:
             return 0.0, 0.0, 0
         offsets = {
-            self.FACING_UP: (0.00, 0.83),
+            self.FACING_UP: (0.00, 0.7),
             self.FACING_BACK: (0.00, 0.70),
-            self.FACING_LEFT: (0.12, 0.70),
-            self.FACING_RIGHT: (-0.12, 0.70),
+            self.FACING_LEFT: (0.30, 0.75),
+            self.FACING_RIGHT: (-0.30, 0.75),
         }
         dx, dy = offsets[self.facing]
         return self.location.x + 0.5 + dx, self.location.y + dy, self.location.z
 
+    def get_support_offset(self) -> tuple[int, int, int]:
+        """根据火把朝向选择地面、深度面或左右墙面支撑。"""
+        if self.facing == self.FACING_BACK:
+            # z=0 是前景层，向前的火把由同格 z=1 背景方块支撑；
+            # 反向使用时也允许 z=1 火把依赖 z=0 方块。
+            return (0, 0, 1 if self.location is None or self.location.z == 0 else -1)
+        if self.facing == self.FACING_LEFT:
+            return (1, 0, 0)
+        if self.facing == self.FACING_RIGHT:
+            return (-1, 0, 0)
+        return super().get_support_offset()
+
+    def get_placement_location(self, target, *, player=None, fore_place=False,
+                               context=None):
+        """按射线命中面选择火把形态；支撑与可替换性仍由自身校验。"""
+        target_location = getattr(target, "location", None)
+        if target_location is None or not self.is_full_block(target):
+            return None
+        world = target_location.world
+        fore_place = bool(fore_place or getattr(context, "fore_place", False))
+
+        # 前景模式下点击背景块，明确表示要把火把插入同格前景层。
+        if fore_place and target_location.z == 1:
+            self.facing = self.FACING_FORWARD
+            place_location = target_location.add(0, 0, -1)
+        # 前景模式点击前景块时，优先将火把放在其上方；这避免把“前景
+        # 放置”误解成永远覆盖/插入同一格。
+        elif fore_place and target_location.z == 0:
+            above = target_location.add(0, 1, 0)
+            if not world.get_block(above).replaceable:
+                return None
+            self.facing = self.FACING_UP
+            place_location = above
+        else:
+            hit_face = getattr(context, "hit_face", None) or "top"
+            target_z = getattr(context, "target_z", target_location.z)
+            if hit_face == "bottom":
+                # 底面命中代表“向前插入”。两层世界中，前景/背景目标
+                # 自动选择另一层，仍由 can_survive 检查实际支撑。
+                self.facing = self.FACING_FORWARD
+                forward_z = 0 if target_location.z == 1 else 1
+                place_location = Location(world, target_location.x, target_location.y, forward_z)
+            elif hit_face == "left":
+                self.facing = self.FACING_LEFT
+                place_location = Location(world, target_location.x - 1, target_location.y, target_z)
+            elif hit_face == "right":
+                self.facing = self.FACING_RIGHT
+                place_location = Location(world, target_location.x + 1, target_location.y, target_z)
+            elif hit_face == "top":
+                self.facing = self.FACING_UP
+                place_location = Location(world, target_location.x, target_location.y + 1, target_z)
+            else:
+                return None
+
+        if not world.get_block(place_location).replaceable:
+            if target_location.z == 1:
+                self.facing = self.FACING_FORWARD
+                return target_location.add(0, 0, -1)
+            return None
+
+        self.location = place_location
+        if not self.can_survive():
+            self.location = None
+            return None
+        return place_location
+
     @classmethod
     @client_method
-    def _get_oriented_texture(cls, texture, size, facing):
+    def _get_oriented_texture(cls, texture, size, facing, client = None):
+        m = client.render.block_size // 16
         size = max(1, int(round(size)))
         scaled = pygame.transform.scale(texture, (size, size)).convert_alpha()
         if facing == cls.FACING_UP:
             return scaled
 
-        height = max(1, int(round(size * cls._NON_UP_HEIGHT_RATIO)))
-        compressed = pygame.transform.scale(scaled, (size, height)).convert_alpha()
         if facing == cls.FACING_BACK:
-            return compressed
+            height = max(1, int(round(size * cls._NON_UP_HEIGHT_RATIO)))
+            b = pygame.transform.scale(scaled, (size, height)).convert_alpha()
+            result = pygame.Surface(b.get_size(), pygame.SRCALPHA)
+            result.blit(b, (0, -3*m))
+            return result
 
         angle = cls._SIDE_TILT_ANGLE if facing == cls.FACING_LEFT else -cls._SIDE_TILT_ANGLE
-        rotated = pygame.transform.rotate(compressed, angle)
-        result = pygame.Surface((size, height), pygame.SRCALPHA)
-        result.blit(rotated, rotated.get_rect(center=result.get_rect().center))
+        rotated = pygame.transform.rotate(scaled, angle)
+        # 旋转后纹理居中，需要平移使火把根部紧贴支撑方块。
+        # FACING_LEFT:  支撑方块在右侧，向右平移。正值越大越靠右。
+        # FACING_RIGHT: 支撑方块在左侧，向左平移。负值越大越靠左。
+        shift_x = 3*m if facing == cls.FACING_LEFT else -7.7*m
+        result = pygame.Surface(rotated.get_size(), pygame.SRCALPHA)
+        result.blit(rotated, (shift_x, 0))
         return result
 
     @client_method

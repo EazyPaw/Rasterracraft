@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import pygame
 
-from .math_utils import cyclic_lerp_color, lerp_color
+from .render_utils import cyclic_lerp_color, lerp_color
 
 if TYPE_CHECKING:
     from resources.client.camera import Camera

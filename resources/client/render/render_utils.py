@@ -1,10 +1,10 @@
 """
-数学工具函数
+数学和渲染工具函数
 ============
 提供渲染过程中使用的纯数学函数：插值、平滑、量化、颜色混合等。
 所有函数均为无状态的纯函数，便于测试和复用。
 """
-
+import pygame
 from .constants import DAY_TICKS
 
 
@@ -127,3 +127,51 @@ def cyclic_lerp_color(keyframes: list[tuple[float, tuple[int, int, int]]], time_
             progress = (test_time - tick) / max(end_tick - tick, 1)
             return lerp_color(color, next_color, smoothstep(0.0, 1.0, progress))
     return frames[0][1]
+
+
+def draw_dashed_rect(surface, color, rect, dash_length=10, gap_length=5, width=1):
+    """
+    在指定surface上绘制一个虚线矩形框
+    """
+    x, y, w, h = rect
+    # 1. 绘制上边 (水平)
+    draw_dashed_line(surface, color, (x, y), (x + w, y), dash_length, gap_length, width)
+    # 2. 绘制下边 (水平)
+    draw_dashed_line(surface, color, (x, y + h), (x + w, y + h), dash_length, gap_length, width)
+    # 3. 绘制左边 (垂直)
+    draw_dashed_line(surface, color, (x, y), (x, y + h), dash_length, gap_length, width)
+    # 4. 绘制右边 (垂直)
+    draw_dashed_line(surface, color, (x + w, y), (x + w, y + h), dash_length, gap_length, width)
+
+
+def draw_dashed_line(surf, color, start_pos, end_pos, dash_length=10, gap_length=5, width=1):
+    """
+    在两点之间绘制一条虚线
+    """
+    # 计算线段的总长度和方向
+    x1, y1 = start_pos
+    x2, y2 = end_pos
+    length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+    if length == 0:
+        return
+
+    # 计算单位方向向量
+    dx = (x2 - x1) / length
+    dy = (y2 - y1) / length
+
+    # 沿着线段一步步绘制
+    current_dist = 0
+    while current_dist < length:
+        # 计算当前段的起始点
+        start_x = x1 + dx * current_dist
+        start_y = y1 + dy * current_dist
+        # 计算当前段的终点 (虚线部分)
+        end_dist = min(current_dist + dash_length, length)
+        end_x = x1 + dx * end_dist
+        end_y = y1 + dy * end_dist
+
+        # 绘制一个实线小段
+        pygame.draw.line(surf, color, (start_x, start_y), (end_x, end_y), width)
+
+        # 前进到下一个虚线段的起始位置 (跳过间隙)
+        current_dist += dash_length + gap_length

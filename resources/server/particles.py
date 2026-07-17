@@ -37,7 +37,7 @@ class Particle:
             particle_id = "minecraft:flame"
             _texture_path = "particle.flame"
             lifetime_ticks = (12, 18)
-            size = (0.06, 0.10)
+            size = (0.14, 0.22)
             gravity = -0.002
 
     服务端实例只负责携带生成位置、数量和附加数据；客户端收到包后会用
@@ -50,7 +50,7 @@ class Particle:
     _texture_paths: tuple[str, ...] = ()
 
     lifetime_ticks: tuple[int, int] = (20, 30)
-    size: tuple[float, float] = (0.08, 0.12)
+    size: tuple[float, float] = (0.16, 0.24)
     gravity: float = 0.0
     linear_acceleration: tuple[float, float] = (0.0, 0.0)
     linear_drag: float = 0.0
@@ -273,7 +273,7 @@ class SMOKE(TextureParticle):
     name = "smoke"
     _texture_paths = tuple(f"particle.big_smoke_{i}" for i in range(12))
     lifetime_ticks = (28, 46)
-    size = (0.12, 0.22)
+    size = (0.20, 0.34)
     gravity = -0.001
     linear_drag = 0.02
 
@@ -283,7 +283,7 @@ class FLAME(TextureParticle):
     name = "flame"
     _texture_path = "particle.flame"
     lifetime_ticks = (10, 18)
-    size = (0.06, 0.10)
+    size = (0.14, 0.22)
     gravity = 0
     linear_drag = 0.01
 
@@ -293,7 +293,7 @@ class HEART(TextureParticle):
     name = "heart"
     _texture_path = "particle.heart"
     lifetime_ticks = (28, 36)
-    size = (0.18, 0.24)
+    size = (0.28, 0.38)
     gravity = -0.002
     linear_drag = 0.01
 
@@ -303,9 +303,7 @@ class SPLASH(TextureParticle):
     name = "splash"
     _texture_paths = tuple(f"particle.splash_{i}" for i in range(4))
     lifetime_ticks = (8, 14)
-    # 旧尺寸在 64px 方块下只有 4~7px，且 splash 贴图本身透明像素较多，
-    # 雨天几乎不可见。保持轻量的同时放大到可辨识的水花尺寸。
-    size = (0.11, 0.20)
+    size = (0.16, 0.28)
     # A light gravity and drag turn the rain impact motion into a short arc.
     # Weather spawning gives it enough upward speed to remain above the
     # surface for the whole animation.
@@ -322,7 +320,7 @@ class BlockParticle(Particle):
     particle_id = None
     _texture_path = None
     lifetime_ticks = (10, 18)
-    size = (0.07, 0.12)
+    size = (0.14, 0.22)
     gravity = 0.035
     linear_drag = 0.035
     collision = CollisionSettings(enabled=True, radius=0.035, drag=0.55, restitution=0.16)
@@ -360,7 +358,7 @@ class SPRINT_STEP(BlockParticle):
     name = "sprint_step"
     _texture_paths = None
     lifetime_ticks = (6, 14)
-    size = (0.04, 0.09)
+    size = (0.10, 0.20)
     gravity = 0.02
     collision = CollisionSettings(enabled=True, radius=0.025, drag=0.45, restitution=0.05)
     linear_drag = 0.025

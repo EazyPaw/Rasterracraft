@@ -39,7 +39,10 @@ class Client:
         self._shutdown_lock = threading.Lock()
         self._shutdown_started = False
         self.version = "0.0.1 SNAPSHOT"
+
         self.language = "en_US"
+        self.fore_place_switch_mode = "switch"
+
         self.client_world = client_world.ClientWorld(self)
         self.render = render.Render(self)
         self._prepare_socket_transport()
@@ -445,6 +448,10 @@ class Client:
                 pygame.K_e: self.client_player.game_mode.open_inventory,
                 pygame.K_LCTRL: self.client_player.switch_sprint,
             }
+            if self.fore_place_switch_mode == "switch":
+                self.key_map[pygame.K_q] = lambda: setattr(
+                    self.client_player, 'fore_place', not self.client_player.fore_place
+                )
 
     @staticmethod
     def _get_resource_path(relative_path):

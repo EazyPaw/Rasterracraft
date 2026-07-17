@@ -60,3 +60,7 @@ class Item(Entity):
         if self.item.amount <= 0:
             self.world.remove_entity(self)
         return True
+
+    def update(self):
+        super().update()
+        

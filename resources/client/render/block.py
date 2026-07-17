@@ -17,7 +17,7 @@ from .constants import (
     BLOCK_RATIO_LEVELS,
     BLOCK_TINT_COLOR_STEP,
 )
-from .math_utils import cyclic_lerp_color, lerp_color, quantize_color, quantize_unit
+from .render_utils import cyclic_lerp_color, lerp_color, quantize_color, quantize_unit
 
 if TYPE_CHECKING:
     from resources.server.block_class import Block

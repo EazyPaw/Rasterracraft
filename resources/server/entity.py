@@ -2,6 +2,8 @@ import ast
 import logging
 import math
 import uuid
+from uuid import UUID
+from xml.dom.minidom import Entity
 
 from resources.server.location import Vector
 from resources.server.utils import is_safe_value
@@ -473,10 +475,6 @@ class Entity:
         if self.on_ground:
             self.flying = False
 
-        # Vanilla moves using the velocity for this tick, then applies drag to
-        # the velocity that will be used on the next tick.  Applying damping
-        # before collision makes the observed walking speed ~2.36 m/s instead
-        # of the documented 4.317 m/s.
         self.collision_check(steps=4)
 
         self.motion.y *= self.fluid_vertical_drag if self.in_fluid else self.drag_vertical
@@ -487,3 +485,22 @@ class Entity:
 
         self.swimming_up = False
         self._jumped_this_tick = False
+
+    def update(self):
+        self.move_update()
+
+    def calc_entity_distance(self, other: Entity | UUID | str) -> float:
+        """
+        计算实体到另一个实体之间的距离
+        :param other: 可为实体对象/实体UUID/实体UUID的字符串形式
+        :return: float 距离
+        """
+        if isinstance(other, UUID):
+            other: Entity = self.world.entities[str(other)]
+        if isinstance(other, str):
+            other: Entity = self.world.entities[other]
+        xd = self.x - other.x
+        yd = self.y - other.y
+        distance = math.sqrt(xd ** 2 + yd ** 2)
+        return distance
+

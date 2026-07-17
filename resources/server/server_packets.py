@@ -179,6 +179,13 @@ def decode_packet(packet: dict, player: Player):
         target_block = getattr(held.material, 'target_block', None)
         if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT and not held.is_empty() and callable(target_block):
             block = target_block()
+            if isinstance(packet.get('nbt'), dict):
+                apply_placement_nbt = getattr(block, 'apply_placement_nbt', None)
+                if callable(apply_placement_nbt):
+                    try:
+                        apply_placement_nbt(packet['nbt'])
+                    except (TypeError, ValueError):
+                        return
             # Ignore the client-provided block id; the selected server slot is
             # the only authority for what can be placed.
             if block.place_at(Location(world, packet['x'], packet['y'], packet['z'])) is not False:

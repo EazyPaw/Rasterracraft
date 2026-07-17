@@ -142,10 +142,13 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         #     'y': location.y,
         #     'z': location.z,
         #     'block_id': obj.block_id,
+        #     'nbt': optional placement state (e.g. torch facing),
         # }
         world = client.client_world
         if 0 <= packet['y'] < world.y_max:
             block = get_block_by_id(packet['block_id'])
+            if isinstance(packet.get('nbt'), dict):
+                block.write_nbt(packet['nbt'])
             world.set_block(block, packet['x'], packet['y'], packet['z'])
     elif packet['__class__'] == 'BlockUpdate':
         # {
@@ -307,13 +310,17 @@ def encode_packet(obj, obj_type = None, args = None) -> dict:
         }
     elif  isinstance(obj, Block) and obj_type == 'PlaceBlock':
         location: Location = obj.location
-        return {
+        packet = {
             '__class__': 'PlaceBlock',
             'x': location.x,
             'y': location.y,
             'z': location.z,
             'block_id': obj.block_id,
         }
+        nbt = obj.parse_nbt()
+        if nbt:
+            packet['nbt'] = nbt
+        return packet
     elif isinstance(obj, dict) and '__class__' in obj:
         # 直传已构建好的数据包（如 ChatMessage）
         return obj

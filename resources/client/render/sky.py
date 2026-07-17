@@ -13,7 +13,7 @@ import numpy as np
 import pygame
 
 from .constants import DAY_TICKS, DAY_LENGTH_SECONDS, MIN_SKY_LIGHT_WEIGHT, SKY_CACHE_TICK_STEP
-from .math_utils import clamp, cyclic_lerp_color, lerp, lerp_color, smoothstep
+from .render_utils import clamp, cyclic_lerp_color, lerp, lerp_color, smoothstep
 
 
 class SkyMixin:

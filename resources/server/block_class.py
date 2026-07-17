@@ -3,6 +3,7 @@ from abc import ABC
 import os
 import ast
 import logging
+from dataclasses import dataclass
 
 from pygame import Surface
 
@@ -20,6 +21,22 @@ BLOCK_EXPERIENCE = {
     "coal_ore": (0, 2), "diamond_ore": (3, 7), "emerald_ore": (3, 7),
     "lapis_ore": (2, 5), "redstone_ore": (1, 5),
 }
+
+
+@dataclass(frozen=True)
+class PlacementContext:
+    """射线选面后的通用放置上下文。
+
+    ``hit_face`` 使用 ``top``、``bottom``、``left``、``right`` 表示射线
+    进入目标方块的面；坐标系与世界方块一致，y 轴向上。方块只需消费
+    自己关心的字段，新增需要定向放置的方块无需改动游戏模式。
+    """
+
+    hit_face: str | None
+    ray_origin: tuple[float, float]
+    ray_direction: tuple[float, float]
+    target_z: int
+    fore_place: bool = False
 
 
 class Block(ABC):
@@ -136,6 +153,25 @@ class Block(ABC):
             location.world.set_block(self, location)
             return True
         return False
+
+    def get_placement_location(self, target, *, player=None, fore_place=False,
+                               context: PlacementContext | None = None):
+        """返回客户端放置预览应使用的位置。
+
+        普通方块默认沿用项目原有的同格/另一深度层规则。需要根据玩家
+        方向、支撑面或方块状态计算位置的方块覆写此接口，游戏模式本身
+        不需要知道具体方块类型。
+        """
+        target_location = getattr(target, "location", None)
+        if target_location is None:
+            return None
+        world = target_location.world
+        if world.get_block(target_location).replaceable:
+            return target_location
+
+        other_z = 1 if target_location.z == 0 else 0
+        alternative = target_location.add(0, 0, other_z - target_location.z)
+        return alternative if world.get_block(alternative).replaceable else None
 
     def on_generate(self):
         """

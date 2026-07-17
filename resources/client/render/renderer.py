@@ -18,11 +18,12 @@ import pygame
 from resources.client.GUI.gui import GUI
 from resources.client.camera import Camera
 from resources.server.biome import get_biome_by_id
+from resources.server.block_class import PlacementContext
 from resources.server.text import Text
 
 from .block import BlockRenderMixin
 from .constants import BLOCK_TINT_COLOR_STEP
-from .math_utils import cyclic_lerp_color, lerp_color, quantize_color
+from .render_utils import cyclic_lerp_color, lerp_color, quantize_color, draw_dashed_rect
 from .sky import SkyMixin
 from .weather import WeatherMixin
 
@@ -479,6 +480,14 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 entity.skeleton.update()
                 entity.skeleton.draw()
 
+    def get_mouse_world_position(self) -> tuple[float, float]:
+        """将当前鼠标位置转换为世界坐标。"""
+        self.mouse_x, self.mouse_y = pygame.mouse.get_pos()
+        return (
+            (self.mouse_x - self.SCREEN_WIDTH // 2) / self.block_size + self.camera.x + 0.5,
+            -(self.mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + self.camera.y - 0.5,
+        )
+
     def get_hovered_block_position(self) -> tuple[int | None, int | None]:
         """获取鼠标当前悬停的方块世界坐标。
 
@@ -487,11 +496,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         返回:
             (block_x, block_y) 或 (None, None)（超出交互范围时）
         """
-        self.mouse_x, self.mouse_y = pygame.mouse.get_pos()
-
-        # 逆投影：屏幕 → 世界
-        world_x = (self.mouse_x - self.SCREEN_WIDTH // 2) / self.block_size + self.camera.x + 0.5
-        world_y = -(self.mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + self.camera.y - 0.5
+        world_x, world_y = self.get_mouse_world_position()
 
         block_x = _math.floor(world_x)
         block_y = _math.floor(world_y)
@@ -508,6 +513,59 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.choosing_position = (block_x, block_y)
         return block_x, block_y
 
+    @staticmethod
+    def _ray_hit_face(origin: tuple[float, float], direction: tuple[float, float],
+                      location) -> str | None:
+        """返回射线进入方块矩形时首先穿过的面。"""
+        ox, oy = origin
+        dx, dy = direction
+        x0, x1 = location.x, location.x + 1
+        y0, y1 = location.y, location.y + 1
+        epsilon = 1e-8
+        candidates = []
+
+        def add_candidate(t, face, coordinate, low, high):
+            if t <= epsilon:
+                return
+            other = coordinate(t)
+            if low - epsilon <= other <= high + epsilon:
+                candidates.append((t, face))
+
+        if dx > epsilon:
+            add_candidate((x0 - ox) / dx, "left", lambda t: oy + dy * t, y0, y1)
+        elif dx < -epsilon:
+            add_candidate((x1 - ox) / dx, "right", lambda t: oy + dy * t, y0, y1)
+        if dy > epsilon:
+            add_candidate((y0 - oy) / dy, "bottom", lambda t: ox + dx * t, x0, x1)
+        elif dy < -epsilon:
+            add_candidate((y1 - oy) / dy, "top", lambda t: ox + dx * t, x0, x1)
+        return min(candidates, default=(0, None))[1]
+
+    def get_placement_context(self, target, player=None) -> PlacementContext | None:
+        """从玩家视线构造可复用的定向放置上下文。"""
+        location = getattr(target, "location", None)
+        if location is None:
+            return None
+        player = player or getattr(self.client, "client_player", None)
+        if player is None:
+            return None
+        mouse_world = self.get_mouse_world_position()
+        eye = (
+            player.x + getattr(player, "width", 0.3) * 0.5,
+            player.y + getattr(player, "height", 1.8) * 0.9,
+        )
+        direction = (mouse_world[0] - eye[0], mouse_world[1] - eye[1])
+        if abs(direction[0]) < 1e-8 and abs(direction[1]) < 1e-8:
+            return None
+        hit_face = self._ray_hit_face(eye, direction, location)
+        return PlacementContext(
+            hit_face=hit_face,
+            ray_origin=eye,
+            ray_direction=direction,
+            target_z=0 if getattr(player, "fore_place", False) else int(location.z),
+            fore_place=bool(getattr(player, "fore_place", False)),
+        )
+
     def draw_hovered_block_outline(self) -> None:
         """绘制鼠标悬停方块的黑色边框高亮。"""
         block_x, block_y = self.get_hovered_block_position()
@@ -522,6 +580,17 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         )
 
         outline_rect = pygame.Rect(screen_x, screen_y, self.block_size, self.block_size)
+
+        if getattr(self.client.client_player, "fore_place", False):
+            temp_surf = pygame.Surface((outline_rect.width, outline_rect.height), pygame.SRCALPHA)
+            temp_surf.fill((255, 255, 255, 20))
+            self.screen.blit(temp_surf, (outline_rect.x, outline_rect.y))
+        if not any(
+            getattr(self.client_world.get_block(block_x, block_y, z), "solid", False)
+            for z in (0, 1)
+        ):
+            draw_dashed_rect(self.screen, (0, 0, 0), outline_rect, dash_length=8, gap_length=4, width=1)
+            return
         pygame.draw.rect(self.screen, (0, 0, 0), outline_rect, 1)
 
     def draw_destroy_progress(self) -> None:
@@ -597,7 +666,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         text_lines = [
             f"Biome: {biome.name}",
             f"ID: {biome_id}",
-            f"Block at {block_x}, {block_y}: {self.client_world.get_block(block_x, block_y, 0).block_id}"
+            f"Block at {block_x}, {block_y}: {self.client_world.get_block(block_x, block_y, 0).block_id}",
+            # f'{self.client_world.get_block(block_x, block_y, 1).location}'
         ]
         font_size = 18
         font = self.get_font(font_size)

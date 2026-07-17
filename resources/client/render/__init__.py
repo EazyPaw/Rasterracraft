@@ -9,7 +9,7 @@ PyCraft2D 渲染包
 
 模块结构:
   constants.py   - 渲染常量
-  math_utils.py  - 数学工具函数
+  render_utils.py  - 数学工具函数
   lighting.py    - 光照工具函数
   sky.py         - 天空渲染 Mixin
   block.py       - 方块渲染 Mixin
@@ -24,7 +24,7 @@ PyCraft2D 渲染包
 from .renderer import Render
 
 # ---- 数学工具函数（模块级导出，向后兼容） ----
-from .math_utils import (
+from .render_utils import (
     clamp,
     cyclic_lerp_color,
     lerp,
