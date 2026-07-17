@@ -10,6 +10,7 @@ from resources.server.entity import Entity
 from resources.server.location import Location
 from resources.server.materials import get_material_by_id
 from resources.server.player import Player
+from resources.server.text import Text, TextColor
 
 if TYPE_CHECKING:
     from resources.server.server_main import Server
@@ -30,6 +31,7 @@ class CommandExecutor:
         "weather": self.weather,
         "gamemode": self.switch_gamemode,
         "give": self.give_command,
+        "kick": self.kick_command,
     }
 
     def python_execute(self, args, executor: Player | str):
@@ -111,6 +113,22 @@ class CommandExecutor:
 
         item_name = getattr(material, "name", item_id)
         return f"Gave {given_items}x {item_name} to {given_players} player(s)"
+
+    def kick_command(self, args, executor: Player | str):
+        """/kick <target> [reason] -- Minecraft-style server kick command."""
+        if not args:
+            raise ValueError("Usage: /kick <target> [reason]")
+        if isinstance(executor, Player) and not executor.is_operator:
+            raise ValueError("You do not have permission to use /kick")
+        targets = self.target_selector(args[0], executor)
+        if targets is None or not targets:
+            raise ValueError(f"No targets matched: {args[0]}")
+        reason = " ".join(args[1:]).strip() or None
+        kicked = 0
+        for target in targets:
+            if isinstance(target, Player) and self.server.kick_player(target, reason):
+                kicked += 1
+        return f"Kicked {kicked} player(s)"
 
     def time(self, args, executor: Player | str):
         if args[0] == "add" and isinstance(executor, Player):

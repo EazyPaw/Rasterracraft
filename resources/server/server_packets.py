@@ -95,7 +95,15 @@ def decode_packet(packet: dict, player: Player):
         logging.warning("Received unknown packet")
         logging.debug(packet)
         return
-    elif packet['__class__'] == 'PlayerMove':
+    if packet['__class__'] == 'DisconnectAck':
+        player.world.server.acknowledge_disconnect(player)
+        return
+    if getattr(player, '_disconnecting', False):
+        # Once a Disconnect packet has been queued, only its acknowledgement
+        # matters. Ignoring movement/GUI packets prevents more outbound state
+        # from being generated behind the disconnect reason.
+        return
+    if packet['__class__'] == 'PlayerMove':
         # {
         #     '__class__': 'PlayerMove',
         #     'x': obj.x,

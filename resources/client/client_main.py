@@ -20,10 +20,12 @@ from resources.client.GUI.main_menu import MainMenu
 from resources.client.GUI.pause_menu import PauseMenu
 from resources.client.GUI.saves_menu import SavesMenu
 from resources.client.GUI.loading_screen import LoadingScreen
+from resources.client.GUI.disconnect_screen import DisconnectScreen
 from resources.client.particles import ParticleManager
 from resources.client.resources_manager import ResourcesManager
 from resources.server import save_manager
 from resources.server.server_main import Server
+from resources.server.text import Text
 from resources.server.utils import recv_exact, set_client
 
 class Client:
@@ -59,6 +61,7 @@ class Client:
         self.in_game = False
         self.world_loading = False
         self.loading_screen: LoadingScreen | None = None
+        self.disconnect_screen: DisconnectScreen | None = None
         self.loaded_chunk_regions: set[int] = set()
         self.required_spawn_regions: set[int] = set()
         self.pending_teleport_id: int | None = None
@@ -109,24 +112,34 @@ class Client:
         # 重试连接：子进程模式下服务端需要时间绑定端口并开始监听
         max_retries = 10
         retry_delay = 0.3
+        last_error = None
+        connected = False
         for attempt in range(max_retries):
             try:
                 self.client_sock.connect(("127.0.0.1", 14525))
+                connected = True
                 break
-            except ConnectionRefusedError:
+            except ConnectionRefusedError as e:
+                last_error = e
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                 else:
                     logging.error("Could not connect to integrated server after retries")
-                    return
             except OSError as e:
+                last_error = e
                 if not self.socket_thread_running or self.is_shutting_down:
                     return
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                 else:
                     logging.error(f"Could not connect to integrated server: {e}")
-                    return
+
+        if not connected:
+            if self.socket_thread_running and not self.is_shutting_down:
+                self.show_disconnect(
+                    "connect.failed", self._format_connection_error(last_error)
+                )
+            return
 
         logging.info("Connected to integrated server")
         self.socket_connected.set()
@@ -139,9 +152,16 @@ class Client:
                 # logging.debug(f"Received {msg_len} data from server")
                 obj_dict = msgpack.unpackb(msg_body, raw=False)
                 decode_packet(obj_dict, self)
-            except (ConnectionAbortedError, ConnectionResetError, OSError):
-                # socket 被关闭或连接中断，正常退出
-                logging.info(f"Socket connection closed.")
+            except (ConnectionError, OSError) as e:
+                logging.info("Socket connection closed: %s", e)
+                if (
+                    self.socket_thread_running
+                    and not self.is_shutting_down
+                    and self.disconnect_screen is None
+                ):
+                    self.show_disconnect(
+                        "disconnect.lost", self._format_connection_error(e)
+                    )
                 break
             except Exception as e:
                 if not self.socket_thread_running:
@@ -149,7 +169,32 @@ class Client:
                     break
                 logging.error(f"Socket error: {e}")
                 logging.error(traceback.format_exc())
+                if self.disconnect_screen is None:
+                    self.show_disconnect(
+                        "disconnect.lost", self._format_connection_error(e)
+                    )
                 break
+
+    @staticmethod
+    def _format_connection_error(error: BaseException | None) -> str:
+        if error is None:
+            return "ConnectionError"
+        message = str(error).strip()
+        return f"{type(error).__name__}: {message}" if message else type(error).__name__
+
+    def show_disconnect(self, title_key: str, reason: str | Text) -> None:
+        """Stop gameplay and show exactly one connection failure screen."""
+        if self.is_shutting_down or self.disconnect_screen is not None:
+            return
+        self.socket_connected.clear()
+        self.in_game = False
+        self.world_loading = False
+        self.loading_screen = None
+        self.hold_mouse_buttons = [False, False, False]
+        for gui in self.render.drawing_GUIs[:]:
+            self.render.close_gui(gui)
+        self.disconnect_screen = DisconnectScreen(self.render, title_key, reason)
+        self.render.show_gui(self.disconnect_screen)
 
     def sent_packet(self, obj, obj_type = None, *args) -> bool:
         """
@@ -210,6 +255,7 @@ class Client:
                 version=self.version,
             )["id"]
         self.current_save_id = save_id
+        self.disconnect_screen = None
         self.save_complete_event.clear()
         self.game_started = True
         self.in_game = False
@@ -353,6 +399,7 @@ class Client:
         self.client_player = None
         self.world_loading = False
         self.loading_screen = None
+        self.disconnect_screen = None
         self.loaded_chunk_regions.clear()
         self.required_spawn_regions.clear()
         self.pending_teleport_id = None

@@ -49,6 +49,25 @@ def decode_packet(packet: dict, client: 'Client') -> None:
     if '__class__' not in packet:
         logging.warning("Received unknown packet")
         return
+    elif packet['__class__'] == 'Disconnect':
+        reason = packet.get('reason', '')
+        if packet.get('reason_is_translation_key') and isinstance(reason, str):
+            reason = client.resources_manager.get_translation_key(reason)
+        elif isinstance(reason, dict):
+            try:
+                reason = Text.from_dict(reason)
+            except (KeyError, TypeError, ValueError):
+                logging.warning("Received malformed disconnect reason")
+                reason = client.resources_manager.get_translation_key("disconnect.closed")
+        elif not isinstance(reason, str):
+            reason = str(reason)
+        # Confirm receipt before show_disconnect clears socket_connected. The
+        # server waits for this acknowledgement instead of closing immediately,
+        # which avoids Windows turning the close into a TCP reset that can race
+        # ahead of the Disconnect frame.
+        client.sent_packet({'__class__': 'DisconnectAck'})
+        client.show_disconnect("disconnect.disconnected", reason)
+        return
     elif packet['__class__'] == 'Chunk':
         # {
         #     "__Class__": "Chunk",  # 约 10 字节

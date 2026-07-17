@@ -53,7 +53,7 @@ class Server:
         self.initialized = False
         self.input_thread = threading.Thread(target=self.check_input, name="Command thread")
         self.input_thread.daemon = True
-        self.commands_error_traceback = True
+        self.commands_error_traceback = False
         self.input_thread.start()
         self.command_executor = CommandExecutor(self)
         self.client = client
@@ -111,6 +111,23 @@ class Server:
                     if self.running:
                         logging.error("Socket server accept failed")
                     break
+
+                # This hook intentionally runs before a Player is created or
+                # added to the server.  Server implementations can override
+                # ``check_player_connection`` to reject an address, token,
+                # whitelist entry, etc.  Returning None accepts the client;
+                # returning Text or str sends a Disconnect packet instead.
+                try:
+                    rejection_reason = self.server.check_player_connection(
+                        client_sock, client_addr
+                    )
+                except Exception:
+                    logging.exception("Player connection check failed for %s", client_addr)
+                    self.server.reject_connection(client_sock, None)
+                    continue
+                if rejection_reason is not None:
+                    self.server.reject_connection(client_sock, rejection_reason)
+                    continue
 
                 spawn_x, spawn_y = self.server.get_player_spawn()
                 player = Player(spawn_x, spawn_y, self.server.worlds["overworld"])
@@ -214,6 +231,7 @@ class Server:
         :return:
         """
         if not self.players: # 无玩家
+            logging.warning("Null client, closing integrated server.")
             self.close_server()
             self.register_event(self.integrated_check, ticks=20)
 
@@ -473,6 +491,11 @@ class Server:
 
         try:
             encoded_obj = encode_packet(obj, obj_type, args)
+            if (
+                getattr(player, '_disconnecting', False)
+                and encoded_obj.get('__class__') != 'Disconnect'
+            ):
+                return False
             
             # 辅助函数：将嵌套结构中的 numpy 类型转换为 python 原生类型
             def convert_numpy_types(o):
@@ -631,7 +654,113 @@ class Server:
         self.chunk_gen_pool.shutdown(wait=True)
         logging.info("Server closed")
 
+    def check_player_connection(self, client_sock, client_addr) -> Text | str | None:
+        """连接准入接口。
+
+        返回 ``None`` 接受连接；返回 ``Text`` 或字符串则拒绝连接并把
+        返回值显示在客户端断开界面。这里保留了一个可直接改写的示例：
+        将 ``some_condition`` 换成白名单、人数上限或认证检查即可。
+        """
+        # 一个可用的准入示例：服务器满员时拒绝新连接。
+        if len(self.players) >= self.max_players:
+            return "disconnect.serverFull"
+        # 其它规则示例（默认关闭）：
+        # if some_condition(client_addr):
+        #     return Text("This server is not accepting your connection")
+        return None
+
+    def reject_connection(self, client_sock, reason: Text | str | None) -> bool:
+        """向尚未成为 Player 的客户端发送拒绝原因并关闭连接。"""
+        packet = self._disconnect_packet(reason, default_key="disconnect.loginFailed")
+        try:
+            payload = msgpack.packb(packet, use_bin_type=True)
+            client_sock.sendall(struct.pack('>I', len(payload)) + payload)
+            try:
+                client_sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            client_sock.close()
+            return True
+        except (ConnectionError, OSError):
+            logging.info("Rejected client disconnected before receiving the response")
+            try:
+                client_sock.close()
+            except OSError:
+                pass
+            return False
+
+    @staticmethod
+    def _disconnect_packet(reason: Text | str | None, *, default_key: str) -> dict:
+        if reason is None:
+            reason = default_key
+            reason_is_translation_key = True
+        elif isinstance(reason, Text):
+            reason = reason.to_dict()
+            reason_is_translation_key = False
+        else:
+            reason = str(reason)
+            reason_is_translation_key = reason.startswith(
+                ("disconnect.", "connect.", "gui.")
+            )
+        return {
+            '__class__': 'Disconnect',
+            'reason': reason,
+            'reason_is_translation_key': reason_is_translation_key,
+        }
+
+    def kick_player(self, player: Player, reason: Text | str | None = None) -> bool:
+        """主动断开一个已加入玩家的连接（游戏内踢出接口）。"""
+        if player not in self.players or getattr(player, '_disconnecting', False):
+            return False
+        setattr(player, '_disconnecting', True)
+        sent = self.send_client_socket(
+            player,
+            self._disconnect_packet(reason, default_key="disconnect.kicked"),
+            "Forward",
+        )
+        if sent:
+            # Normal path: the client acknowledges the Disconnect packet and
+            # acknowledge_disconnect closes the socket. This timeout handles a
+            # frozen or malicious client that never sends the acknowledgement.
+            self.register_event(
+                self._force_kicked_disconnect,
+                player,
+                ticks=max(1, self.rate * 2),
+            )
+        else:
+            self._force_kicked_disconnect(player)
+        return sent
+
+    def acknowledge_disconnect(self, player: Player) -> None:
+        """Finish a kick after the client confirms the reason was decoded."""
+        if not getattr(player, '_disconnecting', False):
+            return
+        self._close_player_connection(player)
+        self.on_player_disconnect(player)
+
+    def _force_kicked_disconnect(self, player: Player) -> None:
+        if player not in self.players and player not in self.socket_server.connections:
+            return
+        self._close_player_connection(player)
+        self.on_player_disconnect(player)
+
+    def _close_player_connection(self, player: Player) -> None:
+        connection_info = self.socket_server.connections.get(player)
+        if connection_info is None:
+            return
+        connection = connection_info[0]
+        try:
+            connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            connection.close()
+        except OSError:
+            pass
+
     def on_player_disconnect(self, player: Player):
+        if player not in self.players and player not in self.socket_server.connections:
+            return
         self.save_all(player, force=True)
         # 广播离开消息（黄色，排除已离开的玩家）
         self.broadcast_chat(f"{player.name} left the game", (255, 255, 85), exclude=player)
