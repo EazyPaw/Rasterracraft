@@ -89,11 +89,7 @@ class Material:
 
     @client_method
     def get_anchor(self):
-        """
-        用于获取渲染时客户端的手持点位，最后一个值为缩放倍率
-        :return:
-        """
-        return {'anchor':(0.5,0.5),'offset':(0, 0),'scale':0.7,'rotation':0}
+        return {'anchor':(0.5,0.9),'offset':(0, 0),'scale':0.5,'rotation':-90}
 
 
 class BlockItem(Material):
@@ -106,7 +102,7 @@ class BlockItem(Material):
             return None
         block_size = max(1, int(round(16 * size)))
         block = cls.target_block()
-        # Some block item textures (grass/leaves) use biome colouring.  Item
+        # Some block item textures (grass/leaves) use biome coloring.  Item
         # entities do not carry a Block instance, so borrow the local player's
         # biome solely for rendering instead of dereferencing a None location.
         player = getattr(client, "client_player", None)

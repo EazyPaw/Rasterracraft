@@ -284,7 +284,7 @@ class FLAME(TextureParticle):
     _texture_path = "particle.flame"
     lifetime_ticks = (10, 18)
     size = (0.06, 0.10)
-    gravity = -0.004
+    gravity = 0
     linear_drag = 0.01
 
 

@@ -757,7 +757,148 @@ class DIAMOND_BLOCK(Block):
     requires_correct_tool = True
     required_tool_tier = 'iron'
 
-class TORCH(Block):
+class SupportedBlock(Block):
+    """需要完整方块支撑的装饰方块基类。
+
+    ``support_offset`` 是相对于方块自身位置的支撑方向。默认值对应
+    地面方块；挂壁方块只需要覆写这个属性即可复用存活检查和放置检查。
+    """
+
+    support_offset = (0, -1, 0)
+
+    @staticmethod
+    def is_full_block(block) -> bool:
+        """返回方块是否能提供完整立方体支撑。
+
+        ``solid`` 只表示碰撞/遮挡意义上的实体，半砖仍可能为 solid，
+        所以支撑方块还要排除已知的半砖形态；特殊方块可显式提供
+        ``full_block`` 覆盖这个默认判断。透明但占满整个格子的方块（如玻璃）
+        仍然可以支撑火把。
+        """
+        if block is None or not getattr(block, "solid", False):
+            return False
+        explicit = getattr(block, "full_block", None)
+        if explicit is not None:
+            return bool(explicit)
+        # SLABS 使用 _type 标记 top/bottom 半砖；不要用透明像素判断，
+        # 因为玻璃等完整方块同样可能带透明纹理。
+        if getattr(block, "_type", None) in {"top", "bottom"}:
+            return False
+        return True
+
+    def get_support_block(self):
+        if self.location is None or self.location.world is None:
+            return None
+        dx, dy, dz = self.support_offset
+        return self.location.world.get_block(self.location.add(dx, dy, dz))
+
+    def can_survive(self) -> bool:
+        return self.location is not None and self.is_full_block(self.get_support_block())
+
+    def can_place_at(self, location: Location) -> bool:
+        """预检放置位置，避免短暂生成一个无支撑方块。"""
+        if location is None or not location.world.get_block(location).replaceable:
+            return False
+        old_location = self.location
+        self.location = location
+        try:
+            return self.can_survive()
+        finally:
+            self.location = old_location
+
+    def place_at(self, location: Location) -> bool:
+        if not self.can_place_at(location):
+            return False
+        placed = super().place_at(location)
+        if placed:
+            # Block.place_at 只负责写入世界；新方块本身不会收到邻居更新。
+            self.on_update()
+        return placed
+
+    def on_update(self):
+        if self.location is not None and not self.can_survive():
+            self.location.world.break_block(self.location)
+
+
+class ParticleEmitterBlock(SupportedBlock):
+    """带有持续粒子效果的支撑方块。
+
+    子类只需提供 ``particle_id``、发射间隔和 ``get_particle_position``，
+    就能获得放置时立即发射、服务端定时发射以及失去支撑后自动停止的行为。
+    """
+
+    particle_id = None
+    particle_interval_ticks = 4
+    particle_count = 1
+
+    def __init__(self, nbt=None):
+        self._particle_event_scheduled = False
+        super().__init__(nbt)
+
+    def get_safe_attributes(self):
+        attributes = super().get_safe_attributes()
+        attributes.pop("_particle_event_scheduled", None)
+        return attributes
+
+    def get_particle_position(self) -> tuple[float, float, int]:
+        if self.location is None:
+            return 0.0, 0.0, 0
+        return self.location.x + 0.5, self.location.y + 0.75, self.location.z
+
+    def emit_particle(self) -> bool:
+        if self.location is None or not self.can_survive() or not self.particle_id:
+            return False
+        play_particle = getattr(self.location.world, "play_particle", None)
+        if not callable(play_particle):
+            return False
+        x, y, z = self.get_particle_position()
+        play_particle(self.particle_id, x, y, z, count=self.particle_count)
+        return True
+
+    def _schedule_particle(self):
+        if self._particle_event_scheduled or self.location is None:
+            return
+        server = getattr(self.location.world, "server", None)
+        register_event = getattr(server, "register_event", None)
+        if not callable(register_event):
+            return
+        self._particle_event_scheduled = True
+        register_event(self._particle_tick, ticks=max(1, int(self.particle_interval_ticks)))
+
+    def _particle_tick(self):
+        self._particle_event_scheduled = False
+        if self.location is None:
+            return
+        world = self.location.world
+        if world.get_block(self.location) is not self or not self.can_survive():
+            return
+        self.emit_particle()
+        self._schedule_particle()
+
+    def on_update(self):
+        if self.location is None or not self.can_survive():
+            super().on_update()
+            return
+        self.emit_particle()
+        self._schedule_particle()
+
+    def on_generate(self):
+        # 世界生成器/存档加载器如果选择调用生成钩子，粒子方块可以立即
+        # 接入同一套定时发射逻辑，而不需要为每种方块重复写初始化代码。
+        self.on_update()
+
+    def on_random_tick(self):
+        # 没有事件调度器的测试世界/工具世界也能看到粒子；正式服务端由
+        # _particle_tick 提供固定间隔效果。
+        if not self._particle_event_scheduled:
+            self.emit_particle()
+            self._schedule_particle()
+
+    def on_break(self):
+        self._particle_event_scheduled = False
+
+
+class TORCH(ParticleEmitterBlock):
     block_id = 'torch'
     name = 'tile.torch.name'
     hardness = 0
@@ -765,14 +906,127 @@ class TORCH(Block):
     _texture_path = 'blocks.torch_on'
     light_source = 15
     break_sound = "dig.wood"
+    has_transparent_pixels = True
+
+    FACING_UP = "up"
+    FACING_BACK = "back"
+    FACING_LEFT = "left"
+    FACING_RIGHT = "right"
+    FACINGS = (FACING_UP, FACING_BACK, FACING_LEFT, FACING_RIGHT)
+    # 短名称便于放置逻辑和未来的墙挂方块直接复用。
+    UP, BACK, LEFT, RIGHT = FACINGS
+    _FACING_ALIASES = {
+        "forward": FACING_UP,
+        "front": FACING_UP,
+        "behind": FACING_BACK,
+        "backward": FACING_BACK,
+        "rear": FACING_BACK,
+    }
+    # 侧向/向后的火把共用一个纵向长度，保持斜视角下的视觉基准一致。
+    _NON_UP_HEIGHT_RATIO = 0.75
+    _SIDE_TILT_ANGLE = 22.5
+    _oriented_texture_cache = {}
+    particle_id = "minecraft:flame"
+    particle_interval_ticks = 4
+    particle_count = 1
+
+    def __init__(self, facing="up", nbt=None, *, direction=None):
+        # 允许 TORCH(nbt_dict) 保持 Block 的旧式构造习惯；direction 是
+        # 面向未来 API 的别名，存档仍统一使用 facing 字段。
+        if isinstance(facing, dict) and nbt is None:
+            nbt, facing = facing, "up"
+        self.facing = self.normalize_facing(direction if direction is not None else facing)
+        super().__init__(nbt)
+        self.facing = self.normalize_facing(self.facing)
+
+    @classmethod
+    def normalize_facing(cls, facing) -> str:
+        facing = str(facing).lower() if facing is not None else cls.FACING_UP
+        facing = cls._FACING_ALIASES.get(facing, facing)
+        if facing not in cls.FACINGS:
+            raise ValueError(f"Unknown torch facing: {facing}")
+        return facing
+
+    @property
+    def direction(self) -> str:
+        return self.facing
+
+    @direction.setter
+    def direction(self, value):
+        self.facing = self.normalize_facing(value)
+
+    @property
+    def orientation(self) -> str:
+        return self.facing
+
+    @orientation.setter
+    def orientation(self, value):
+        self.facing = self.normalize_facing(value)
+
+    def get_particle_position(self) -> tuple[float, float, int]:
+        if self.location is None:
+            return 0.0, 0.0, 0
+        offsets = {
+            self.FACING_UP: (0.00, 0.83),
+            self.FACING_BACK: (0.00, 0.70),
+            self.FACING_LEFT: (0.12, 0.70),
+            self.FACING_RIGHT: (-0.12, 0.70),
+        }
+        dx, dy = offsets[self.facing]
+        return self.location.x + 0.5 + dx, self.location.y + dy, self.location.z
+
+    @classmethod
+    @client_method
+    def _get_oriented_texture(cls, texture, size, facing):
+        size = max(1, int(round(size)))
+        scaled = pygame.transform.scale(texture, (size, size)).convert_alpha()
+        if facing == cls.FACING_UP:
+            return scaled
+
+        height = max(1, int(round(size * cls._NON_UP_HEIGHT_RATIO)))
+        compressed = pygame.transform.scale(scaled, (size, height)).convert_alpha()
+        if facing == cls.FACING_BACK:
+            return compressed
+
+        angle = cls._SIDE_TILT_ANGLE if facing == cls.FACING_LEFT else -cls._SIDE_TILT_ANGLE
+        rotated = pygame.transform.rotate(compressed, angle)
+        result = pygame.Surface((size, height), pygame.SRCALPHA)
+        result.blit(rotated, rotated.get_rect(center=result.get_rect().center))
+        return result
+
+    @client_method
+    def get_texture(self, size, client=None):
+        texture = client.resources_manager.get_texture_img(self._texture_path)
+        if texture is None:
+            return None
+        cls = type(self)
+        if cls.has_transparent_pixels is None:
+            cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(texture)
+        size = max(1, int(round(size)))
+        cache = cls.__dict__.get("_oriented_texture_cache")
+        if cache is None:
+            cache = {}
+            cls._oriented_texture_cache = cache
+        # Surface 对象本身作为键可同时兼容静态纹理缓存和动画纹理换帧，
+        # 不依赖 id 复用行为。
+        key = (texture, size, self.facing)
+        oriented = cache.get(key)
+        if oriented is None:
+            oriented = cls._get_oriented_texture(texture, size, self.facing)
+            cache[key] = oriented
+            if len(cache) > 32:
+                cache.pop(next(iter(cache)))
+        return oriented
 
 class OAK_SLAB(SLABS):
     block_id = 'oak_slab'
     name = 'tile.oak_slab.name'
     _texture_path = 'blocks.planks_oak'
 
-
-
+class TNT(Block):
+    block_id = 'TNT'
+    name = 'tile.tnt.name'
+    _texture_path = 'blocks.tnt_side'
 
 
 # ---- block_id → Block 子类 缓存 ----
