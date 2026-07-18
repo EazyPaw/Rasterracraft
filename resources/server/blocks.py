@@ -971,10 +971,29 @@ class OAK_SLAB(SLABS):
     _texture_path = 'blocks.planks_oak'
 
 class TNT(Block):
-    block_id = 'TNT'
+    block_id = 'tnt'
     name = 'tile.tnt.name'
     _texture_path = 'blocks.tnt_side'
 
+class MYCELIUM(Block):
+    block_id = "mycelium"
+    name = 'tile.mycelium.name'
+    _texture_path = 'blocks.mycelium_side'
+
+class MUSHROOM_STEM(Block):
+    block_id = "mushroom_stem"
+    name = 'tile.mushroom_stem.name'
+    _texture_path = 'blocks.mushroom_block_skin_stem'
+
+class RED_MUSHROOM_BLOCK(Block):
+    block_id = "red_mushroom_block"
+    name = 'tile.red_mushroom_block.name'
+    _texture_path = 'blocks.mushroom_block_skin_red'
+
+class BROWN_MUSHROOM_BLOCK(Block):
+    block_id = "brown_mushroom_block"
+    name = 'tile.brown_mushroom_block.name'
+    _texture_path = 'blocks.mushroom_block_skin_brown'
 
 # ---- block_id → Block 子类 缓存 ----
 _BLOCK_REGISTRY: dict[str, type] = None  # None = 尚未构建
