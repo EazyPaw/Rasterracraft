@@ -15,6 +15,14 @@ if os.environ.get('PYCRAFT_CLIENT') == '1':
 
 from resources.server.location import Location
 from resources.server.tags import BlockTag
+from resources.server.block_collision import (
+    EMPTY,
+    FULL_BLOCK,
+    HALF_BOTTOM,
+    HALF_TOP,
+    BlockCollisionBox,
+    coerce_collision_shape,
+)
 
 
 BLOCK_EXPERIENCE = {
@@ -47,6 +55,10 @@ class Block(ABC):
     _last_scaled = -1
     _last_tex_id = -1    # 用于检测动画帧变化（id(tex)）
     solid = True
+    # ``solid`` is retained for rendering, light and block-support rules.  It
+    # is deliberately not used as the collision source: transparent, partial
+    # and stateful blocks can all have different collision geometry.
+    collision_box = FULL_BLOCK
 
     # 方块属性
     hardness = 1.5
@@ -81,6 +93,18 @@ class Block(ABC):
             self.place_sound = self.break_sound
         if nbt:
             self.write_nbt(nbt)
+
+    def get_collision_box(self) -> BlockCollisionBox:
+        """Return this block instance's collision shape.
+
+        Subclasses may override this for NBT/state-dependent geometry (for
+        example a top/bottom slab or a fluid with a changing level).  Returning
+        ``None``/``EMPTY`` means the block is non-collidable.
+        """
+        return coerce_collision_shape(self.collision_box)
+
+    def has_collision_box(self) -> bool:
+        return bool(self.get_collision_box())
 
     def get_name(self):
         return transkey(self.name)
@@ -236,6 +260,7 @@ class Block(ABC):
 
 class FluidBlock(Block):
     solid = False
+    collision_box = EMPTY
     replaceable = True
     light_attenuation = 1
     has_transparent_pixels = True
@@ -777,6 +802,7 @@ class Plant(Block):
     # 所有植物基类
     break_sound = 'dig.grass'
     solid = False
+    collision_box = EMPTY
     light_attenuation = 1
 
     def on_update(self):
@@ -905,7 +931,8 @@ class BottomSupport(Block):
     底部需要支撑的方块
     """
     def on_update(self):
-        if not self.location.world.get_block(self.location.add(0, -1, 0)).solid:
+        below = self.location.world.get_block(self.location.add(0, -1, 0))
+        if not getattr(below, "has_collision_box", lambda: False)():
             self.location.world.break_block(self.location)
 
 class Log(Block):
@@ -939,7 +966,7 @@ class GravityBlock(Block):
         if getattr(self, "_fall_scheduled", False):
             return
         below = self.location.world.get_block(self.location.add(0, -1, 0))
-        if getattr(below, "solid", False):
+        if getattr(below, "has_collision_box", lambda: False)():
             return
         self._fall_scheduled = True
         server.register_event(self._start_falling)
@@ -958,7 +985,7 @@ class GravityBlock(Block):
         if world.get_block(x, y, z) is not self:
             return
         below = world.get_block(x, y - 1, z)
-        if getattr(below, "solid", False):
+        if getattr(below, "has_collision_box", lambda: False)():
             return
 
         world.set_block(AIR(), self.location, send_packet=True, block_update=True)
@@ -972,6 +999,15 @@ class SLABS(Block):
     def __init__(self, _type = "bottom"):
         super().__init__()
         self._type = _type
+
+    def get_collision_box(self) -> BlockCollisionBox:
+        if self._type == "bottom":
+            return HALF_BOTTOM
+        if self._type == "top":
+            return HALF_TOP
+        if self._type == "double":
+            return FULL_BLOCK
+        raise ValueError(f"Unknown slabs type {self._type}")
 
     @client_method
     def get_texture(self, size, client=None):
@@ -1037,16 +1073,20 @@ class SupportedBlock(Block):
         ``full_block`` 覆盖这个默认判断。透明但占满整个格子的方块（如玻璃）
         仍然可以支撑火把。
         """
-        if block is None or not getattr(block, "solid", False):
+        if block is None:
             return False
         explicit = getattr(block, "full_block", None)
         if explicit is not None:
             return bool(explicit)
-        # SLABS 使用 _type 标记 top/bottom 半砖；不要用透明像素判断，
-        # 因为玻璃等完整方块同样可能带透明纹理。
-        if getattr(block, "_type", None) in {"top", "bottom"}:
+        getter = getattr(block, "get_collision_box", None)
+        if not callable(getter):
             return False
-        return True
+        shape = coerce_collision_shape(getter())
+        if len(shape) != 1:
+            return False
+        box = next(iter(shape))
+        return (box.min_x <= 0 and box.min_y <= 0
+                and box.max_x >= 1 and box.max_y >= 1)
 
     def get_support_block(self):
         support_location = self.get_support_location()

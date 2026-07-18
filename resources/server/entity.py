@@ -7,6 +7,7 @@ from xml.dom.minidom import Entity
 
 from resources.server.location import Vector
 from resources.server.utils import is_safe_value
+from resources.server.block_collision import EMPTY, coerce_collision_shape
 
 
 class Entity:
@@ -139,11 +140,30 @@ class Entity:
                 logging.warning(f"Entity {self.uuid} has no attribute {key}.")
 
     def _is_block_solid(self, x: int, y: int, z: int = 0) -> bool:
+        """Compatibility name for a block collision query.
+
+        Older callers use this helper, but collision is now determined by the
+        block's shape rather than its unrelated ``solid`` flag.
+        """
         try:
             block = self.world.get_block(x, y, z)
-            return block.solid
-        except (IndexError, AttributeError, TypeError):
+            getter = getattr(block, "get_collision_box", None)
+            shape = getter() if callable(getter) else getattr(block, "collision_box", EMPTY)
+            return bool(coerce_collision_shape(shape))
+        except (IndexError, AttributeError, TypeError, ValueError):
             return False
+
+    def _get_collision_boxes(self, x: int, y: int, z: int = 0):
+        """Return world-space collision boxes for one block cell."""
+        try:
+            block = self.world.get_block(x, y, z)
+            getter = getattr(block, "get_collision_box", None)
+            shape = coerce_collision_shape(
+                getter() if callable(getter) else getattr(block, "collision_box", EMPTY)
+            )
+            return tuple(box.translated(x, y) for box in shape)
+        except (IndexError, AttributeError, TypeError, ValueError):
+            return ()
 
     def _get_block_at(self, x: float, y: float, z: int = 0):
         try:
@@ -218,19 +238,15 @@ class Entity:
         sticky walls and, more importantly, made the ground test report true
         when the player was touching a wall.
         """
-        epsilon = 1.0e-9
-        min_x = math.floor(x + epsilon)
-        max_x = math.floor(x + self.width - epsilon)
-        min_y = math.floor(y + epsilon)
-        max_y = math.floor(y + self.height - epsilon)
-
-        if max_x < min_x or max_y < min_y:
-            return False
-
+        min_x = math.floor(x) - 1
+        max_x = math.floor(x + self.width) + 1
+        min_y = math.floor(y) - 1
+        max_y = math.floor(y + self.height) + 1
         for block_x in range(min_x, max_x + 1):
             for block_y in range(min_y, max_y + 1):
-                if self._is_block_solid(block_x, block_y):
-                    return True
+                for box in self._get_collision_boxes(block_x, block_y, getattr(self, "z", 0)):
+                    if box.overlaps(x, y, x + self.width, y + self.height):
+                        return True
         return False
 
     def _check_support_at(self, x: float | None = None, y: float | None = None) -> bool:
@@ -238,14 +254,16 @@ class Entity:
         x = self.x if x is None else x
         y = self.y if y is None else y
         epsilon = 1.0e-7
-        min_x = math.floor(x + epsilon)
-        max_x = math.floor(x + self.width - epsilon)
-        # Collision resolution leaves a tiny 0.001 block gap to avoid
-        # re-entering a face, so probe just below that gap.
-        support_y = math.floor(y - 0.001 - epsilon)
+        min_x = math.floor(x) - 1
+        max_x = math.floor(x + self.width) + 1
+        # Collision resolution leaves a tiny gap to avoid re-entering a face.
         for block_x in range(min_x, max_x + 1):
-            if self._is_block_solid(block_x, support_y):
-                return True
+            for block_y in range(math.floor(y) - 2, math.floor(y) + 1):
+                for box in self._get_collision_boxes(block_x, block_y, getattr(self, "z", 0)):
+                    horizontal = box.max_x > x + epsilon and box.min_x < x + self.width - epsilon
+                    top_near_feet = y - 0.01 <= box.max_y <= y + epsilon
+                    if horizontal and top_near_feet:
+                        return True
         return False
 
     def _prevent_edge_fall(self, dx: float) -> float:
@@ -273,101 +291,51 @@ class Entity:
         if dx == 0:
             return 0.0, False
 
-        y_min = self.y
-        y_max = self.y + self.height
-
-        if dx > 0:
-            leading_x = self.x + self.width
-            start_cell_x = math.floor(leading_x)
-            end_cell_x = math.floor(leading_x + dx)
-            step = 1
-        else:
-            leading_x = self.x
-            start_cell_x = math.floor(leading_x)
-            end_cell_x = math.floor(leading_x + dx)
-            step = -1
-
-        if start_cell_x == end_cell_x:
+        y_min, y_max = self.y, self.y + self.height
+        leading_x = self.x + self.width if dx > 0 else self.x
+        low_x, high_x = sorted((leading_x, leading_x + dx))
+        best_hit = None
+        for block_x in range(math.floor(low_x) - 2, math.floor(high_x) + 3):
+            for block_y in range(math.floor(y_min) - 2, math.floor(y_max) + 3):
+                for box in self._get_collision_boxes(block_x, block_y, getattr(self, "z", 0)):
+                    if box.max_y <= y_min + 1e-9 or box.min_y >= y_max - 1e-9:
+                        continue
+                    hit_x = box.min_x if dx > 0 else box.max_x
+                    distance = hit_x - leading_x
+                    if (dx > 0 and distance >= -1e-9 and distance <= dx + 1e-9) or \
+                            (dx < 0 and distance <= 1e-9 and distance >= dx - 1e-9):
+                        if best_hit is None or abs(distance) < abs(best_hit):
+                            best_hit = distance
+        if best_hit is None:
             return dx, False
-
-        for cell_x in range(start_cell_x + step, end_cell_x + step, step):
-            if dx > 0:
-                hit_x = cell_x
-                move_to_collision = hit_x - leading_x
-            else:
-                hit_x = cell_x + 1
-                move_to_collision = hit_x - leading_x
-
-            if abs(move_to_collision) > abs(dx):
-                continue
-
-            min_y_cell = math.floor(y_min)
-            max_y_cell = math.floor(y_max)
-            collides = False
-            for block_y in range(min_y_cell, max_y_cell + 1):
-                if self._is_block_solid(cell_x, block_y):
-                    collides = True
-                    break
-
-            if collides:
-                if dx > 0:
-                    final_x = hit_x - self.width - 0.001
-                else:
-                    final_x = hit_x + 0.001
-                actual_dx = final_x - self.x
-                return actual_dx, True
-
-        return dx, False
+        hit_x = leading_x + best_hit
+        final_x = hit_x - self.width - 0.001 if dx > 0 else hit_x + 0.001
+        return final_x - self.x, True
 
     def _sweep_y(self, dy: float):
         if dy == 0:
             return 0.0, False
 
-        x_min = self.x
-        x_max = self.x + self.width
-
-        if dy > 0:
-            leading_y = self.y + self.height
-            start_cell_y = math.floor(leading_y)
-            end_cell_y = math.floor(leading_y + dy)
-            step = 1
-        else:
-            leading_y = self.y
-            start_cell_y = math.floor(leading_y)
-            end_cell_y = math.floor(leading_y + dy)
-            step = -1
-
-        if start_cell_y == end_cell_y:
+        x_min, x_max = self.x, self.x + self.width
+        leading_y = self.y + self.height if dy > 0 else self.y
+        low_y, high_y = sorted((leading_y, leading_y + dy))
+        best_hit = None
+        for block_x in range(math.floor(x_min) - 2, math.floor(x_max) + 3):
+            for block_y in range(math.floor(low_y) - 2, math.floor(high_y) + 3):
+                for box in self._get_collision_boxes(block_x, block_y, getattr(self, "z", 0)):
+                    if box.max_x <= x_min + 1e-9 or box.min_x >= x_max - 1e-9:
+                        continue
+                    hit_y = box.min_y if dy > 0 else box.max_y
+                    distance = hit_y - leading_y
+                    if (dy > 0 and distance >= -1e-9 and distance <= dy + 1e-9) or \
+                            (dy < 0 and distance <= 1e-9 and distance >= dy - 1e-9):
+                        if best_hit is None or abs(distance) < abs(best_hit):
+                            best_hit = distance
+        if best_hit is None:
             return dy, False
-
-        for cell_y in range(start_cell_y + step, end_cell_y + step, step):
-            if dy > 0:
-                hit_y = cell_y
-                move_to_collision = hit_y - leading_y
-            else:
-                hit_y = cell_y + 1
-                move_to_collision = hit_y - leading_y
-
-            if abs(move_to_collision) > abs(dy):
-                continue
-
-            min_x_cell = math.floor(x_min)
-            max_x_cell = math.floor(x_max)
-            collides = False
-            for block_x in range(min_x_cell, max_x_cell + 1):
-                if self._is_block_solid(block_x, cell_y):
-                    collides = True
-                    break
-
-            if collides:
-                if dy > 0:
-                    final_y = hit_y - self.height - 0.001
-                else:
-                    final_y = hit_y + 0.001
-                actual_dy = final_y - self.y
-                return actual_dy, True
-
-        return dy, False
+        hit_y = leading_y + best_hit
+        final_y = hit_y - self.height - 0.001 if dy > 0 else hit_y + 0.001
+        return final_y - self.y, True
 
     def collision_check(self, steps: int = 16):
         actual_dx, collided_x = self._sweep_x(self.motion.x)
@@ -503,4 +471,3 @@ class Entity:
         yd = self.y - other.y
         distance = math.sqrt(xd ** 2 + yd ** 2)
         return distance
-

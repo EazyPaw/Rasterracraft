@@ -238,24 +238,43 @@ class ParticleManager:
         return False
 
     def _collides_at(self, block_x: int, y_min: float, y_max: float, z: int) -> bool:
-        """检查某个 X 列和 Y 范围内是否有固体方块。"""
+        """检查某个 X 列和 Y 范围内是否有碰撞箱。"""
         for block_y in range(math.floor(y_min), math.floor(y_max) + 1):
-            if self._is_block_solid(block_x, block_y, z):
-                return True
+            try:
+                block = self.client.client_world.get_block(block_x, block_y, z)
+                getter = getattr(block, "get_collision_box", None)
+                shape = getter() if callable(getter) else getattr(block, "collision_box", ())
+                local_min_y = y_min - block_y
+                local_max_y = y_max - block_y
+                if any(box.max_y > local_min_y and box.min_y < local_max_y
+                       for box in shape):
+                    return True
+            except (IndexError, AttributeError, TypeError, ValueError):
+                continue
         return False
 
     def _collides_at_y(self, x_min: float, x_max: float, block_y: int, z: int) -> bool:
-        """检查某个 Y 行和 X 范围内是否有固体方块。"""
+        """检查某个 Y 行和 X 范围内是否有碰撞箱。"""
         for block_x in range(math.floor(x_min), math.floor(x_max) + 1):
-            if self._is_block_solid(block_x, block_y, z):
-                return True
+            try:
+                block = self.client.client_world.get_block(block_x, block_y, z)
+                getter = getattr(block, "get_collision_box", None)
+                shape = getter() if callable(getter) else getattr(block, "collision_box", ())
+                if any(box.max_x > x_min - block_x and box.min_x < x_max - block_x
+                       for box in shape):
+                    return True
+            except (IndexError, AttributeError, TypeError, ValueError):
+                continue
         return False
 
     def _is_block_solid(self, x: int, y: int, z: int) -> bool:
-        """判断指定格子是否为固体。"""
+        """判断指定格子是否有碰撞形状（兼容旧方法名）。"""
         try:
-            return bool(self.client.client_world.get_block(x, y, z).solid)
-        except (IndexError, AttributeError, TypeError):
+            block = self.client.client_world.get_block(x, y, z)
+            getter = getattr(block, "get_collision_box", None)
+            shape = getter() if callable(getter) else getattr(block, "collision_box", ())
+            return bool(shape)
+        except (IndexError, AttributeError, TypeError, ValueError):
             return False
 
     def _is_near_player(self, particle: Particle) -> bool:

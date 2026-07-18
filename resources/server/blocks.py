@@ -15,6 +15,7 @@ class AIR(Block):
     name = 'tile.air.name'
     _texture_path = None
     solid = False
+    collision_box = EMPTY
     replaceable = True
     breakable = False
     light_attenuation = 1
@@ -530,6 +531,7 @@ class SNOW(BottomSupport):
     _texture_path = 'blocks.snow'
     break_sound = 'dig.snow'
     solid = False
+    collision_box = EMPTY
     light_attenuation = 1
     has_transparent_pixels = True
     hardness = 0.1
@@ -541,7 +543,12 @@ class SNOW(BottomSupport):
         super().__init__()
         if layer > 8:
             raise Exception('layer > 8')
-        self.layer = layer
+        self.layer = max(1, int(layer))
+
+    def get_collision_box(self):
+        # Snow layers occupy one to eight sixteenths of a block.  Keep this
+        # instance-dependent so NBT/state changes are reflected immediately.
+        return BlockCollisionBox.from_box(0, 0, 1, self.layer / 8)
 
     @client_method
     def get_texture(self, size, client):
@@ -762,6 +769,7 @@ class TORCH(ParticleEmitterBlock):
     name = 'tile.torch.name'
     hardness = 0
     solid = False
+    collision_box = EMPTY
     _texture_path = 'blocks.torch_on'
     light_source = 15
     break_sound = "dig.wood"

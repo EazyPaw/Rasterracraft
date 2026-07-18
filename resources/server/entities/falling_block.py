@@ -36,7 +36,7 @@ class FallingBlock(Entity):
             target = self.world.get_block(loc)
             if target.replaceable:
                 self.world.set_block(self.block, loc)
-            elif not target.solid:
+            elif not getattr(target, "has_collision_box", lambda: False)():
                 self.world.break_block(loc)
                 self.world.set_block(self.block, loc)
             self.world.remove_entity(self)
