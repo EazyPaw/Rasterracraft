@@ -211,3 +211,6 @@ __marimo__/
 /data/
 /resources/client/render.py.bak
 /saves/
+/main.build/
+/main.dist/
+/main.onefile-build/

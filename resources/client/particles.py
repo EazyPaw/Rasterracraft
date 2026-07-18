@@ -30,7 +30,7 @@ class ParticleManager:
         self.max_particles = 700
         self._lock = threading.RLock()
 
-        self._scaled_texture_cache: OrderedDict[tuple[pygame.Surface, int], pygame.Surface] = OrderedDict()
+        self._scaled_texture_cache: OrderedDict[tuple[pygame.Surface, int, int], pygame.Surface] = OrderedDict()
         self._block_fragment_cache: OrderedDict[tuple[pygame.Surface, int, int, int], tuple[pygame.Surface, ...]] = OrderedDict()
         self._max_scaled_cache = 512
         self._max_fragment_cache = 192
@@ -298,15 +298,17 @@ class ParticleManager:
             self._block_fragment_cache.popitem(last=False)
         return result
 
-    def get_scaled_texture(self, texture: pygame.Surface, pixel_size: int) -> pygame.Surface:
-        """获取指定像素尺寸的粒子材质缓存。"""
-        key = (texture, pixel_size)
+    def get_scaled_texture(self, texture: pygame.Surface, scale: float) -> pygame.Surface:
+        """按原始贴图尺寸和缩放倍数获取粒子材质缓存。"""
+        width = max(1, round(texture.get_width() * scale))
+        height = max(1, round(texture.get_height() * scale))
+        key = (texture, width, height)
         cached = self._scaled_texture_cache.get(key)
         if cached is not None:
             self._scaled_texture_cache.move_to_end(key)
             return cached
 
-        scaled = pygame.transform.scale(texture, (pixel_size, pixel_size)).convert_alpha()
+        scaled = pygame.transform.scale(texture, (width, height)).convert_alpha()
         self._scaled_texture_cache[key] = scaled
         if len(self._scaled_texture_cache) > self._max_scaled_cache:
             self._scaled_texture_cache.popitem(last=False)

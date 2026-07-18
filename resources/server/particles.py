@@ -37,7 +37,7 @@ class Particle:
             particle_id = "minecraft:flame"
             _texture_path = "particle.flame"
             lifetime_ticks = (12, 18)
-            size = (0.14, 0.22)
+            size = (1.0, 1.0)
             gravity = -0.002
 
     服务端实例只负责携带生成位置、数量和附加数据；客户端收到包后会用
@@ -50,7 +50,10 @@ class Particle:
     _texture_paths: tuple[str, ...] = ()
 
     lifetime_ticks: tuple[int, int] = (20, 30)
-    size: tuple[float, float] = (0.16, 0.24)
+    # 以原始粒子贴图为基准的缩放倍数。渲染时贴图本身会先乘
+    # Render.trans_scale，因此默认 1.0 表示 8x8 粒子贴图在 64px
+    # 方块尺寸下绘制为 32x32，而不是按方块边长再缩小一次。
+    size: tuple[float, float] = (1.0, 1.0)
     gravity: float = 0.0
     linear_acceleration: tuple[float, float] = (0.0, 0.0)
     linear_drag: float = 0.0
@@ -248,8 +251,10 @@ class Particle:
         if sy < -margin or sy > render.SCREEN_HEIGHT + margin:
             return
 
-        pixel_size = max(1, int(self.actual_size * render.block_size))
-        texture = manager.get_scaled_texture(self.texture, pixel_size)
+        texture = manager.get_scaled_texture(
+            self.texture,
+            render.trans_scale * self.actual_size,
+        )
         tint = render.get_world_light_tint(self.x, self.y)
         texture = render.get_tinted_surface(texture, tint)
         dest = texture.get_rect(center=(sx, sy))
@@ -266,6 +271,9 @@ class GENERIC(TextureParticle):
     particle_id = "minecraft:generic"
     name = "generic"
     _texture_paths = tuple(f"particle.generic_{i}" for i in range(8))
+    # generic 的后几帧几乎铺满整个 8x8 画布；使用半尺寸避免它们
+    # 比火焰和碎片显得突兀地大。
+    size = (0.45, 0.60)
 
 
 class SMOKE(TextureParticle):
@@ -273,7 +281,7 @@ class SMOKE(TextureParticle):
     name = "smoke"
     _texture_paths = tuple(f"particle.big_smoke_{i}" for i in range(12))
     lifetime_ticks = (28, 46)
-    size = (0.20, 0.34)
+    size = (1.0, 1.0)
     gravity = -0.001
     linear_drag = 0.02
 
@@ -283,18 +291,8 @@ class FLAME(TextureParticle):
     name = "flame"
     _texture_path = "particle.flame"
     lifetime_ticks = (10, 18)
-    size = (0.14, 0.22)
+    size = (0.6, 0.7)
     gravity = 0
-    linear_drag = 0.01
-
-
-class HEART(TextureParticle):
-    particle_id = "minecraft:heart"
-    name = "heart"
-    _texture_path = "particle.heart"
-    lifetime_ticks = (28, 36)
-    size = (0.28, 0.38)
-    gravity = -0.002
     linear_drag = 0.01
 
 
@@ -303,7 +301,9 @@ class SPLASH(TextureParticle):
     name = "splash"
     _texture_paths = tuple(f"particle.splash_{i}" for i in range(4))
     lifetime_ticks = (8, 14)
-    size = (0.16, 0.28)
+    # 水花画布底部只有 1--3 个不透明像素，保留完整贴图倍率才能
+    # 让实际可见部分不至于缩成一个点。
+    size = (0.6, 0.7)
     # A light gravity and drag turn the rain impact motion into a short arc.
     # Weather spawning gives it enough upward speed to remain above the
     # surface for the whole animation.
@@ -313,6 +313,15 @@ class SPLASH(TextureParticle):
     animation_frame_ticks = 2
     animation_loop = False
 
+class HEART(TextureParticle):
+    particle_id = "minecraft:heart"
+    name = "heart"
+    _texture_path = "particle.heart"
+    lifetime_ticks = (28, 36)
+    size = (1.0, 1.0)
+    gravity = -0.002
+    linear_drag = 0.01
+
 
 class BlockParticle(Particle):
     """方块碎片粒子基类，材质来自方块本身而不是粒子贴图。"""
@@ -320,7 +329,7 @@ class BlockParticle(Particle):
     particle_id = None
     _texture_path = None
     lifetime_ticks = (10, 18)
-    size = (0.14, 0.22)
+    size = (0.2, 0.2)
     gravity = 0.035
     linear_drag = 0.035
     collision = CollisionSettings(enabled=True, radius=0.035, drag=0.55, restitution=0.16)
@@ -358,7 +367,7 @@ class SPRINT_STEP(BlockParticle):
     name = "sprint_step"
     _texture_paths = None
     lifetime_ticks = (6, 14)
-    size = (0.10, 0.20)
+    size = (0.2, 0.3)
     gravity = 0.02
     collision = CollisionSettings(enabled=True, radius=0.025, drag=0.45, restitution=0.05)
     linear_drag = 0.025

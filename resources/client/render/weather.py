@@ -445,7 +445,7 @@ class WeatherMixin:
                 # 粒子以中心点绘制；将中心抬到“半个粒子高度”后，底边才会
                 # 贴在水面/方块表面，而不是陷入方块内部。横向位置也在
                 # 方块范围内随机取样，避免所有水花排成整齐的中心线。
-                splash_size = random.uniform(0.14, 0.24)
+                splash_height = random.uniform(0.14, 0.24)
                 if random.random() > min(0.75, 0.24 + self.weather_intensity * 0.20):
                     continue
                 # 从向上的扇形范围内随机选择发射方向和速度。相比独立随机
@@ -459,10 +459,13 @@ class WeatherMixin:
                 spawned = manager.spawn(
                     "minecraft:splash",
                     world_x + random.uniform(0.12, 0.88),
-                    height + splash_size * 0.5,
+                    height + splash_height * 0.5,
                     z=z,
                     motion=splash_motion,
-                    size_=splash_size,
+                    # size_ 是相对于原始贴图的视觉倍率，而不是世界坐标
+                    # 的方块占比。水花贴图本身的非透明区域很窄，需保持
+                    # 接近原尺寸乘 trans_scale 的绘制大小。
+                    size_=random.uniform(0.6, 0.7),
                     lifetime=random.randint(10, 18),
                 )
                 if spawned is None:

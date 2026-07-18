@@ -482,6 +482,14 @@ class ClientWorld:
 
         if best is None:
             return
-        _, sound_id, x, y, z = best
+        try:
+            
+            _, sound_id, x, y, z = best
+        except (TypeError, ValueError):
+            if best is None:
+                return
+            # 其他异常处理
+            logging.warning(f"Unexpected best value: {best!r}")
+            return
         self.play_sound(sound_id, x, y, z, volume=0.65)
         self._last_fluid_sound_tick = tick

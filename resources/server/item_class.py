@@ -67,7 +67,7 @@ class ItemStack:
             return False
 
     @client_method
-    def get_texture(self, scale: float, client, shadow=False, multiply=False):
+    def get_texture(self, scale: float, client, shadow=False, multiply=1):
         cache_key = (round(scale, 4), shadow, multiply)
         if cache_key in self.material.texture_cache:
             return self.material.texture_cache[cache_key]
