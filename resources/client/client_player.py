@@ -25,7 +25,7 @@ class ClientPlayer(Entity):
         # effective ground acceleration is 0.098 blocks/tick.
         self.move_speed = 0.1
         self.damping = 0.91
-        self.width = 0.3
+        self.width = 0.6
         self.height = 1.8
         self.jump_height = 0.42
         self.max_health = 20

@@ -1,5 +1,7 @@
 import os
 
+import logging
+
 from resources.server.biome import get_biome_by_id
 
 if os.environ.get('PYCRAFT_CLIENT') == '1':
@@ -672,6 +674,20 @@ class RED_MUSHROOM(Plant):
     name = 'tile.mushroom.name'
     _texture_path = 'blocks.mushroom_red'
 
+    def on_update(self):
+        pass
+
+class VINE(GrassStain):
+    block_id = 'vine'
+    name = 'tile.vine.name'
+    _texture_path = 'blocks.vine'
+    light_attenuation = 1
+
+    def on_update(self):
+        # World-generated vines are decorative foreground growth and do not
+        # require bottom support like ordinary plants.
+        pass
+
 class COAL_ORE(Block):
     block_id = 'coal_ore'
     name = 'tile.oreCoal.name'
@@ -1027,4 +1043,5 @@ def get_block_by_id(block_id: str) -> Block:
     cls = _BLOCK_REGISTRY.get(block_id)
     if cls is not None:
         return cls()
-    raise ValueError(f"Unknown block ID: {block_id}")
+    logging.error(f"Unknown block ID: {block_id}")
+    return DIRT()

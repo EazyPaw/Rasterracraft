@@ -1490,19 +1490,19 @@ class MushroomFields(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.9, 1.0)
     foliage_color = _default_foliage_color(0.9, 1.0)
-    surface = 'grass_block'
+    surface = 'mycelium'
     subsurface = 'dirt'
     filler = 'stone'
     tree = None
     tree_chance = 0.0
-    grass_chance = 0.15
-    flower_chance = 0.02
+    grass_chance = 0.02
+    flower_chance = 0.0
     fern_chance = 0.0
-    mushroom_chance = 0.08
+    mushroom_chance = 0.55
     cactus_chance = 0.0
     sugar_cane_chance = 0.0
-    elevation_bias = 0
-    amplitude = 0.9
+    elevation_bias = 1
+    amplitude = 1.35
 
 
 

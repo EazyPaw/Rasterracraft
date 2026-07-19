@@ -11,6 +11,7 @@ from resources.server.location import Location
 from resources.server.materials import get_material_by_id
 from resources.server.player import Player
 from resources.server.text import Text, TextColor
+from resources.server.biome import BIOME_PROFILES
 
 if TYPE_CHECKING:
     from resources.server.server_main import Server
@@ -32,6 +33,7 @@ class CommandExecutor:
         "gamemode": self.switch_gamemode,
         "give": self.give_command,
         "kick": self.kick_command,
+        "locate": self.locate_command,
     }
 
     def python_execute(self, args, executor: Player | str):
@@ -129,6 +131,41 @@ class CommandExecutor:
             if isinstance(target, Player) and self.server.kick_player(target, reason):
                 kicked += 1
         return f"Kicked {kicked} player(s)"
+
+    def locate_command(self, args, executor: Player | str):
+        """Locate the nearest generated feature or biome.
+
+        ``/locate biome <id>`` searches the generator's column biome field,
+        returning the surface coordinate nearest to the executing player.
+        """
+        if len(args) < 2 or args[0].lower() != "biome":
+            raise ValueError("Usage: /locate biome <biome>")
+        biome_id = args[1].lower().removeprefix("minecraft:")
+        if biome_id not in BIOME_PROFILES:
+            raise ValueError(f"Unknown biome: {args[1]}")
+        if isinstance(executor, Player):
+            world = executor.world
+            origin_x = int(round(executor.x))
+        else:
+            world = self.server.worlds[self.server.main_world_id]
+            origin_x = 0
+        generator = world.generator
+        # Rare climate intersections can be hundreds of thousands of blocks
+        # away on a particular seed. Search far enough to cover those cases
+        # instead of failing at the previous arbitrary 8192-block boundary.
+        max_radius = 524288
+        # Check the origin first, then alternating columns by distance.
+        for radius in range(max_radius + 1):
+            candidates = (origin_x,) if radius == 0 else (origin_x - radius, origin_x + radius)
+            for x in candidates:
+                if generator.get_original_biome(x, 0) != biome_id:
+                    continue
+                if hasattr(generator, "get_surface_height"):
+                    y = generator.get_surface_height(x)
+                else:
+                    y = 70
+                return f"The nearest {biome_id} is at ({x}, {y})"
+        raise ValueError(f"Could not locate biome {biome_id} within {max_radius} blocks")
 
     def time(self, args, executor: Player | str):
         if args[0] == "add" and isinstance(executor, Player):

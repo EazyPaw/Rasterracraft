@@ -22,7 +22,7 @@ class Player(Entity):
         self.initial_load_complete_sent = False
         self.name = "Player_" + self.uuid.hex[:8]
         self.is_operator = False
-        self.width = 0.3
+        self.width = 0.6
         self.height = 1.8
         self.max_health = 20
         self.health = self.max_health

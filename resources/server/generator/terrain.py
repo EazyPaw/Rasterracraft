@@ -24,29 +24,37 @@ class TerrainMixin(NoiseMixin):
 
     # ---- 生物群系配置表 ----
     biome_profiles = BIOME_PROFILES
+    emerald_biomes = frozenset({
+        "windswept_hills", "windswept_forest", "windswept_gravelly_hills",
+        "jagged_peaks", "frozen_peaks", "stony_peaks", "snowy_slopes",
+        "grove", "meadow",
+    })
 
     # ---- 矿石生成规则 ----
     # 每个元组: (block_id, 生成概率, 最小Y, 最大Y, 哈希盐值)
     # 概率表示每个在Y范围内的石头方块生成该矿石的概率
     ore_rules: tuple[tuple[str, float, int, int, int], ...] = (
-        ("coal_ore",     0.018,  10, 128, 301),
-        ("iron_ore",     0.012,   5,  68, 302),
-        ("gold_ore",     0.006,   3,  34, 303),
-        ("redstone_ore", 0.005,   3,  22, 304),
-        ("lapis_ore",    0.004,   5,  36, 305),
-        ("diamond_ore",  0.003,   3,  18, 306),
-        ("emerald_ore",  0.002,  18,  76, 307),
+        ("coal_ore",     0.012,   5, 132, 301),
+        ("iron_ore",     0.010,   5,  68, 302),
+        ("gold_ore",     0.005,   5,  34, 303),
+        ("redstone_ore", 0.006,   5,  20, 304),
+        ("lapis_ore",    0.004,   5,  33, 305),
+        ("diamond_ore",  0.002,   5,  20, 306),
+        ("emerald_ore",  0.001,   5,  33, 307),
     )
 
     ore_vein_rules: tuple[tuple[str, float, int, int, int, int, int, int], ...] = (
-        # block_id, veins per cell, min_y, max_y, salt, cell size, min radius, max radius
-        ("coal_ore",     0.10,  24, 132, 301, 16, 2, 5),
-        ("iron_ore",     0.075,  8,  82, 302, 15, 2, 4),
-        ("gold_ore",     0.035,  3,  38, 303, 14, 1, 3),
-        ("redstone_ore", 0.035,  3,  24, 304, 13, 1, 3),
-        ("lapis_ore",    0.025,  6,  36, 305, 13, 1, 2),
-        ("diamond_ore",  0.016,  3,  18, 306, 12, 1, 2),
-        ("emerald_ore",  0.014, 18,  86, 307, 12, 1, 2),
+        # block_id, candidate chance, min_y, max_y, salt, cell size,
+        # minimum/maximum horizontal half-length.  Heights follow the Wiki's
+        # classic 0..255 Overworld table used by this project's coordinate
+        # system; projected 2D cluster sizes are intentionally compact.
+        ("coal_ore",     0.30,  5, 132, 301, 18, 2, 5),
+        ("iron_ore",     0.25,  5,  68, 302, 17, 1, 4),
+        ("gold_ore",     0.12,  5,  34, 303, 16, 1, 3),
+        ("redstone_ore", 0.14,  5,  20, 304, 15, 1, 3),
+        ("lapis_ore",    0.12,  5,  33, 305, 15, 1, 2),
+        ("diamond_ore",  0.10,  5,  20, 306, 14, 1, 2),
+        ("emerald_ore",  0.12,  5,  33, 307, 18, 0, 0),
     )
 
     # ------------------------------------------------------------------
@@ -65,32 +73,71 @@ class TerrainMixin(NoiseMixin):
         return self.biome_profiles.get(base, self.biome_profiles["plains"])
 
     @lru_cache(maxsize=8192)
-    def get_column_biome(self, x: int) -> str:
+    def _raw_river_candidate(self, x: int) -> bool:
+        """Return whether a column belongs to the unclipped river band."""
+        continentalness = self._noise1(x, 0.00040, 2, 10) * 3.5
+        continentalness = max(-1.0, min(1.0, continentalness))
+        continentalness *= 1.0 + abs(continentalness) * 1.2
+        weirdness = self._noise1(x, 0.00060, 2, 40) * 3.5
+        weirdness = max(-1.0, min(1.0, weirdness))
+        river_noise = self._noise1(x, 0.00056, 2, 60)
+        return continentalness > -0.04 and abs(river_noise) < 0.003 and abs(weirdness) < 0.34
+
+    @lru_cache(maxsize=8192)
+    def _is_wide_river_column(self, x: int) -> bool:
+        """Keep a guaranteed five-column core of a wider raw river band."""
+        if not self._raw_river_candidate(x):
+            return False
+        left = right = x
+        for _ in range(64):
+            if not self._raw_river_candidate(left - 1):
+                break
+            left -= 1
+        for _ in range(64):
+            if not self._raw_river_candidate(right + 1):
+                break
+            right += 1
+        # Erode six columns at each edge so the 13-column terrain smoothing
+        # window sees river ground on both sides.  A raw band must therefore
+        # be at least 19 columns wide; the resulting waterway remains at
+        # least seven columns and has sloped banks rather than hard cuts.
+        return right - left + 1 >= 19 and left + 6 <= x <= right - 6
+
+    @lru_cache(maxsize=8192)
+    def _get_column_biome_base(self, x: int) -> str:
         """通过五维噪声参数判定指定列的生物群系。
 
         五维参数：大陆性（continentalness）决定海陆分布，
         温度（temperature）和湿度（humidity）决定气候带，
         奇异度（weirdness）和侵蚀度（erosion）添加地形变化。
 
-        阈值经过平衡，目标分布：~22% 海洋, ~10% 沙滩,
+        阈值经过平衡，目标分布：~22% 海洋, ~8% 沙滩,
         ~5% 河流, ~10% 山地, ~12% 寒冷, ~12% 炎热,
         ~6% 丛林, ~4% 沼泽, ~14% 森林, ~5% 平原。
         """
         # 降低 octaves 以避免噪声值过度集中在 0 附近
-        continentalness = self._noise1(x, 0.0028, 2, 10)
-        temperature     = self._noise1(x, 0.0031, 2, 20)
-        humidity        = self._noise1(x, 0.0030, 2, 30)
-        weirdness       = self._noise1(x, 0.0039, 2, 40)
-        erosion         = self._noise1(x, 0.0044, 2, 50)
-        river_noise     = self._noise1(x, 0.0068, 2, 60)
+        # Low frequencies keep biome runs near the requested ~100-block scale.
+        continentalness = self._noise1(x, 0.0012, 2, 10)
+        temperature     = self._noise1(x, 0.00145, 2, 20)
+        humidity        = self._noise1(x, 0.0013, 2, 30)
+        weirdness       = self._noise1(x, 0.0016, 2, 40)
+        erosion         = self._noise1(x, 0.00175, 2, 50)
+        # Perlin's low-frequency samples have a narrow amplitude.  Stretch
+        # climate channels before applying the Minecraft-style thresholds so
+        # warm, cold, arid and humid biomes all remain reachable.
+        continentalness = max(-1.0, min(1.0, continentalness * 3.5))
+        temperature = max(-1.0, min(1.0, temperature * 3.5))
+        humidity = max(-1.0, min(1.0, humidity * 3.5))
+        weirdness = max(-1.0, min(1.0, weirdness * 3.5))
+        erosion = max(-1.0, min(1.0, erosion * 3.5))
         # 非线性拉伸：让噪声值更均匀地分布在整个 [-1,1] 范围
         continentalness = continentalness * (1.0 + abs(continentalness) * 1.2)
         temperature     = temperature * (1.0 + abs(temperature) * 0.6)
         humidity        = humidity * (1.0 + abs(humidity) * 0.6)
 
-        # ── 1. 海洋（大陆性 < -0.12） ──
-        if continentalness < -0.12:
-            if continentalness < -0.48:          # 深海
+        # ── 1. 海洋（收紧阈值，避免海洋占据近半世界） ──
+        if continentalness < -0.40:
+            if continentalness < -0.78:          # 深海
                 if temperature < -0.15:
                     return "deep_frozen_ocean"
                 if temperature > 0.35:
@@ -105,8 +152,8 @@ class TerrainMixin(NoiseMixin):
                     return "lukewarm_ocean"
                 return "cold_ocean" if humidity < 0.0 else "ocean"
 
-        # ── 2. 沙滩（大陆性 -0.12 至 -0.04） ──
-        if continentalness < -0.04:
+        # ── 2. 沙滩（大陆性 -0.40 至 -0.20） ──
+        if continentalness < -0.20:
             if temperature < -0.05:
                 return "snowy_beach"
             if erosion < -0.30:
@@ -114,7 +161,8 @@ class TerrainMixin(NoiseMixin):
             return "beach"
 
         # ── 3. 河流（独立低频河网，跟随当地温度结冰） ──
-        if continentalness > -0.04 and abs(river_noise) < 0.006 and abs(weirdness) < 0.34:
+        # A river is a band, not a one-column line.
+        if self._is_wide_river_column(x):
             return "frozen_river" if temperature < -0.10 else "river"
 
         # ── 4. 高峰（奇异度 > 0.35） ──
@@ -137,6 +185,13 @@ class TerrainMixin(NoiseMixin):
                 return "windswept_forest"
             return "grove"
 
+        # Rare surface expressions of cave biomes keep every registered biome
+        # discoverable by /locate and useful for testing the profile table.
+        if continentalness > 0.25 and humidity > 0.30 and weirdness < -0.15:
+            return "lush_caves"
+        if continentalness > 0.25 and humidity < -0.30 and weirdness < -0.15:
+            return "dripstone_caves"
+
         # ── 气候带判定 ──
 
         # 6. 寒冷气候（温度 < -0.12）
@@ -155,15 +210,17 @@ class TerrainMixin(NoiseMixin):
         # 7. 炎热气候（温度 > 0.28）
         if temperature > 0.16:
             if humidity < -0.08:                 # 干旱炎热
-                if weirdness > 0.07:
-                    if humidity < -0.34:
+                if humidity < -0.34:
+                    if weirdness > 0.04:
                         return "eroded_badlands"
-                    return "wooded_badlands" if humidity < -0.20 else "savanna_plateau"
+                    return "badlands" if weirdness > -0.05 else "desert"
+                if weirdness > -0.10:
+                    return "wooded_badlands" if humidity < -0.12 else "savanna_plateau"
                 if humidity < -0.30:
                     return "desert" if weirdness < -0.05 else "badlands"
                 if humidity < -0.18:
                     return "savanna"
-                return "savanna_plateau" if weirdness > 0.04 else "savanna"
+                return "savanna_plateau" if weirdness > -0.12 else "savanna"
             elif humidity > 0.18:                # 湿润炎热（丛林）
                 if humidity > 0.30 and temperature > 0.28:
                     return "bamboo_jungle" if weirdness > 0.02 else "jungle"
@@ -177,11 +234,11 @@ class TerrainMixin(NoiseMixin):
                 return "mangrove_swamp" if temperature > 0.12 else "swamp"
             if humidity > 0.34 and weirdness > 0.02:
                 return "dark_forest"
-            if weirdness > 0.02:
+            if weirdness > -0.02:
                 return "flower_forest"
             return "forest" if temperature > 0.06 else "taiga"
         elif humidity > 0.05:                    # 中等湿润
-            if weirdness > 0.06 and temperature > 0.05 and humidity > 0.10:
+            if weirdness > -0.08 and temperature > -0.02 and humidity > 0.08:
                 return "old_growth_birch_forest"
             if weirdness > 0.03:
                 return "birch_forest" if temperature > 0.05 else "taiga"
@@ -200,6 +257,60 @@ class TerrainMixin(NoiseMixin):
         # ── 9. 回退（不应到达） ──
         return "plains"
 
+    @lru_cache(maxsize=8192)
+    def get_column_biome(self, x: int) -> str:
+        """Return a climate biome with bounded regional run lengths.
+
+        The base climate field remains continuous, while a deterministic
+        regional selector introduces a compatible neighbour biome when a
+        land profile would otherwise span more than roughly two 48-column
+        regions. This avoids mountain/highland plateaus hundreds of blocks
+        long without hard one-column cuts.
+        """
+        biome_id = self._get_column_biome_base(x)
+        # Quantize only land climate decisions to 48-column cells.  This
+        # prevents one-column slivers at climate thresholds while rivers and
+        # shorelines retain their column-level geometry.
+        cell_center = (x // 48) * 48 + 24
+        cell_biome = self._get_column_biome_base(cell_center)
+        if cell_biome not in {"river", "frozen_river"}:
+            biome_id = cell_biome
+        if ("ocean" in biome_id or biome_id in {"beach", "snowy_beach", "stony_shore"}):
+            return biome_id
+        alternatives = {
+                "stony_peaks": "windswept_hills",
+                "frozen_peaks": "snowy_slopes",
+                "jagged_peaks": "windswept_gravelly_hills",
+                "windswept_hills": "meadow",
+                "windswept_forest": "forest",
+                "snowy_taiga": "taiga",
+                "taiga": "birch_forest",
+                "snowy_plains": "plains",
+                "plains": "meadow",
+                "meadow": "plains",
+                "savanna": "plains",
+                "savanna_plateau": "savanna",
+                "sunflower_plains": "plains",
+                "flower_forest": "forest",
+                "birch_forest": "forest",
+                "old_growth_birch_forest": "birch_forest",
+                "dripstone_caves": "plains",
+                "lush_caves": "forest",
+                "desert": "savanna",
+                "badlands": "desert",
+                "eroded_badlands": "badlands",
+                "dark_forest": "forest",
+                "jungle": "sparse_jungle",
+                "bamboo_jungle": "jungle",
+                "mushroom_fields": "plains",
+            }
+        alternate = alternatives.get(biome_id)
+        region = x // 48
+        region_biome = self._get_column_biome_base(region * 48 + 24)
+        if alternate and region_biome == biome_id and region % 2:
+            return alternate
+        return biome_id
+
     # ------------------------------------------------------------------
     # 地形高度
     # ------------------------------------------------------------------
@@ -212,7 +323,17 @@ class TerrainMixin(NoiseMixin):
         ridge = abs(self._noise1(x, 0.0065, 2, 95))
         mountain = (ridge ** 1.8) * 18 * mountain_gate
         detail = self._noise1(x, 0.045, 1, 100) * 1.1
-        return self.sea_level + profile.elevation_bias + broad + hills + mountain + detail
+        mushroom_hills = 0.0
+        if profile.biome_id == "mushroom_fields":
+            hill_gate = max(0.0, self._noise1(x, 0.0065, 2, 96))
+            mushroom_hills = (hill_gate ** 1.45) * 24
+        raw_height = self.sea_level + profile.elevation_bias + broad + hills + mountain + mushroom_hills + detail
+        if profile.biome_id in {"river", "frozen_river"} or self._raw_river_candidate(x):
+            # Lower the source terrain before the neighbourhood blur.  This
+            # creates a sloped river bank instead of a vertical one-column
+            # cut caused by clamping the already-smoothed result.
+            raw_height = min(raw_height, self.sea_level - 16)
+        return raw_height
 
     @lru_cache(maxsize=8192)
     def get_surface_height(self, x: int) -> int:
@@ -223,7 +344,28 @@ class TerrainMixin(NoiseMixin):
         for offset, weight in zip(offsets, weights):
             total += self._raw_surface_height(x + offset) * weight
             weight_sum += weight
-        return max(4, min(245, int(round(total / weight_sum))))
+        height = max(4, min(245, int(round(total / weight_sum))))
+        if self.get_column_biome(x) == "mushroom_fields":
+            # Keep broad flat island shelves, punctuated by deterministic
+            # steep hill profiles instead of smoothing the whole island flat.
+            cell = x // 32
+            center = cell * 32 + 8 + self._stable_hash(cell, 991) % 16
+            distance = abs(x - center)
+            if distance <= 12:
+                # Taper hills near a biome edge so an island never forms a
+                # vertical wall that cuts through neighbouring terrain.
+                edge = 12
+                for step in range(1, 13):
+                    if (self.get_column_biome(x - step) != "mushroom_fields"
+                            or self.get_column_biome(x + step) != "mushroom_fields"):
+                        edge = step
+                        break
+                edge_factor = min(1.0, edge / 8.0)
+                height += int(max(0, (12 - distance) * 1.15) * edge_factor)
+                if distance <= 3:
+                    height += int(4 * edge_factor)
+            height = min(245, height)
+        return height
 
     @lru_cache(maxsize=8192)
     def get_layer_surface_height(self, x: int, z: int) -> int:
@@ -247,20 +389,39 @@ class TerrainMixin(NoiseMixin):
         - 更深处 → 优先矿脉，无矿脉则放石头变种
         """
         depth = surface_y - y
+        # Deep ore channels at Y<=7 are lava-dominated.  Check before the
+        # shallow subsurface layers so the magma actually fills the vein.
+        if 2 <= y <= 7 and self._is_in_lava_vein(x, y, z):
+            return LAVA()
         # 表层（地表方块）
         if depth == 0:
+            if profile.biome_id == "mushroom_fields" and surface_y <= self.sea_level:
+                # Narrow island shore: mostly sand, with occasional grass
+                # patches between the mycelium interior and surrounding water.
+                if self._rand01(x, surface_y, 955 + z * 17) < 0.22:
+                    return GRASS_BLOCK()
+                return SAND()
             if surface_y < self.sea_level and profile.surface == "grass_block":
                 return DIRT()
             # 寒冷群系：使用带积雪的草方块
             if profile.surface == "grass_block" and profile.is_cold:
                 return GRASS_BLOCK(snowed=True)
             return self._block(profile.surface)
+        if z == 0 and 1 <= depth <= 8 and self._is_exposed_ore_outcrop(x, y, surface_y):
+            exposed_ore = self.get_ore_block_id(x, y, z)
+            if exposed_ore and self._rand01(x, y, 965) < 0.72:
+                return self._block(exposed_ore)
         # 亚层（地表下 1-4 格）
         if depth <= 4:
             return self._block(profile.subsurface)
         # 砂岩 / 红砂岩的额外填充层（地表下 5-8 格）
         if profile.filler in {"sandstone", "red_sandstone"} and depth <= 8:
             return self._block(profile.filler)
+
+        # Small deep lava pockets/veins.  Keep them below Y=12 so surface
+        # lakes are still water-driven and expose lava naturally in caves.
+        if 2 <= y <= 12 and self._is_in_lava_vein(x, y, z):
+            return LAVA()
 
         # 矿石检查
         ore = self.get_ore_block_id(x, y, z)
@@ -270,6 +431,41 @@ class TerrainMixin(NoiseMixin):
         # 默认：石头变种
         stone_variant = self.get_stone_variant(x, y)
         return self._block(stone_variant)
+
+    def _is_exposed_ore_outcrop(self, x: int, y: int, surface_y: int) -> bool:
+        """Allow a small number of ore blocks to show on cave/cliff faces."""
+        for nx in (x - 1, x + 1):
+            neighbour_surface = self.get_surface_height(nx)
+            if y >= neighbour_surface:
+                return True
+            if self.is_cave_air(nx, y, 0, neighbour_surface):
+                return True
+        if self.is_cave_air(x, y + 1, 0, surface_y):
+            return True
+        return False
+
+    def _is_in_lava_vein(self, x: int, y: int, z: int = 0) -> bool:
+        cell_size = 13
+        cell_x, cell_y = x // cell_size, y // cell_size
+        for cx in range(cell_x - 1, cell_x + 2):
+            for cy in range(cell_y - 1, cell_y + 2):
+                salt = 960 + z * 997
+                chance = 0.98 if y <= 7 else 0.38
+                if self._rand01(cx, cy, salt) >= chance:
+                    continue
+                center_x = cx * cell_size + 2 + self._stable_hash(cx, cy, salt + 1) % 8
+                center_y = cy * cell_size + 2 + self._stable_hash(cx, cy, salt + 2) % 7
+                dx = x - center_x
+                dy = y - center_y
+                # Mostly single-cell horizontal seams, with occasional
+                # two-row pools in the deepest cells.
+                radius = 1 + self._stable_hash(cx, cy, salt + 3) % 3
+                if abs(dy) == 0 and abs(dx) <= radius:
+                    return True
+                if (abs(dy) == 1 and abs(dx) <= max(1, radius - 1)
+                        and self._stable_hash(cx, cy, salt + 4) % 4 == 0):
+                    return True
+        return False
 
     def get_stone_variant(self, x: int, y: int) -> str:
         """获取石头变种（花岗岩 / 闪长岩 / 安山岩 / 普通石头）。"""
@@ -288,9 +484,13 @@ class TerrainMixin(NoiseMixin):
         使用稳定哈希均匀分布，产生约 1-2% 的矿石覆盖率。
         每个矿石在其 Y 范围内以给定概率独立生成。
         """
+        biome_id = self.get_column_biome(x)
         for block_id, chance, min_y, max_y, salt, cell_size, min_radius, max_radius in self.ore_vein_rules:
+            if block_id == "emerald_ore" and biome_id not in self.emerald_biomes:
+                continue
+            weighted_chance = chance * self._ore_height_weight(block_id, y, min_y, max_y)
             if min_y <= y <= max_y and self._is_in_ore_vein(
-                x, y, z, chance, salt, cell_size, min_radius, max_radius
+                x, y, z, weighted_chance, salt, cell_size, min_radius, max_radius
             ):
                 if z == 0 and self._has_background_ore_at(x, y):
                     continue
@@ -298,12 +498,26 @@ class TerrainMixin(NoiseMixin):
         return None
 
     def _has_background_ore_at(self, x: int, y: int) -> bool:
+        biome_id = self.get_column_biome(x)
         for block_id, chance, min_y, max_y, salt, cell_size, min_radius, max_radius in self.ore_vein_rules:
+            if block_id == "emerald_ore" and biome_id not in self.emerald_biomes:
+                continue
+            weighted_chance = chance * self._ore_height_weight(block_id, y, min_y, max_y)
             if min_y <= y <= max_y and self._is_in_ore_vein(
-                x, y, 1, chance, salt, cell_size, min_radius, max_radius
+                x, y, 1, weighted_chance, salt, cell_size, min_radius, max_radius
             ):
                 return True
         return False
+
+    def _ore_height_weight(self, block_id: str, y: int, min_y: int, max_y: int) -> float:
+        if not min_y <= y <= max_y:
+            return 0.0
+        if block_id == "lapis_ore":
+            # Lapis peaks near Y=16.
+            peak = 16
+            span = max(1, max(peak - min_y, max_y - peak))
+            return max(0.18, 1.0 - abs(y - peak) / span)
+        return 1.0
 
     def _is_in_ore_vein(self, x: int, y: int, z: int, chance: float, salt: int,
                         cell_size: int, min_radius: int, max_radius: int) -> bool:
@@ -321,12 +535,15 @@ class TerrainMixin(NoiseMixin):
                 radius = min_radius
                 if radius_span > 0:
                     radius += self._stable_hash(cx, cy, layer_salt + 13) % (radius_span + 1)
-                stretch_x = 1.25 + self._rand01(cx, cy, layer_salt + 14) * 0.9
-                stretch_y = 0.75 + self._rand01(cx, cy, layer_salt + 15) * 0.55
-                dx = (x - center_x) / stretch_x
-                dy = (y - center_y) / stretch_y
-                vein_noise = self._noise2(x + z * 31, y, 0.28, 1, layer_salt + 16) * 0.55
-                if dx * dx + dy * dy <= (radius + vein_noise) ** 2:
+                dx, dy = abs(x - center_x), abs(y - center_y)
+                pattern = self._stable_hash(cx, cy, layer_salt + 14) % 10
+                # Most seams are horizontal. A minority use a stepped or
+                # compact silhouette to avoid a single repetitive pattern.
+                if pattern < 7 and dy == 0 and dx <= radius:
+                    return True
+                if 7 <= pattern < 9 and dx <= radius and dy == (1 if dx % 2 else 0):
+                    return True
+                if pattern == 9 and dx * dx + dy * dy <= max(1, radius):
                     return True
         return False
 

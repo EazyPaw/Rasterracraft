@@ -76,7 +76,7 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
 
         生成逻辑依次为：
 
-        1. y ≤ 0 → 基岩
+        1. y = 0 → 基岩；Y=1..4 按递减概率生成基岩
         2. y ≥ 250 → 空气
         3. 结构方块判定（树木、装饰物、积雪层）
         4. y > 地表高度 → 水（低于海平面且 z==0）或空气
@@ -100,6 +100,8 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
         # 边界条件：基岩层以下 & 建筑高度以上
         if y <= 0:
             return BEDROCK()
+        if 0 < y < 5 and self._bedrock_at(x, y, z):
+            return BEDROCK()
         if y >= 250:
             return AIR()
 
@@ -109,17 +111,17 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
         foreground_surface_y = self.get_surface_height(x)
         surface_y = self.get_layer_surface_height(x, z)
 
-        if y > surface_y and y <= self.sea_level:
-            if profile.freezes_ocean_surface and y == self.sea_level:
-                return ICE()
-            return WATER()
-
         # 优先检查结构方块（树木、积雪、花草等）
         structure_block = self.get_structure_block(
             x, y, z, surface_y, profile, foreground_surface_y
         )
         if structure_block is not None:
             return structure_block
+
+        if y > surface_y and y <= self.sea_level:
+            if profile.freezes_ocean_surface and y == self.sea_level:
+                return ICE()
+            return WATER()
 
         # 地表以上：水或空气
         if y > surface_y:
@@ -131,3 +133,8 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
 
         # 地表以下：按深度放置方块
         return self.get_underground_block(x, y, surface_y, profile, z)
+
+    def _bedrock_at(self, x: int, y: int, z: int = 0) -> bool:
+        """Taper bedrock upward instead of creating a flat layer."""
+        chance = max(0.0, 1.0 - (y / 5.0))
+        return self._rand01(x, y, 901 + z * 37) < chance
