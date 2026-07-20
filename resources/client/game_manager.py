@@ -20,6 +20,61 @@ class GameManager:
         self.last_space_time = 0.0
         self.event_queue = []
         self.ing_mouse_lock = 0 # 鼠标锁，大于0时鼠标的操作不会影响游戏内动作（大于零时的数值即占用鼠标的GUI个数）
+        # GUI 关闭时，物理上仍按住的键不能立即“穿透”回游戏。
+        # 等所有键鼠释放后才恢复游戏输入，适用于聊天、背包等所有 GUI。
+        self._wait_for_input_release = False
+        self._pressed_keys: set[int] = set()
+        self._pressed_mouse_buttons: set[int] = set()
+
+    def acquire_game_input(self):
+        """让 GUI 独占键鼠输入。"""
+        self.ing_mouse_lock += 1
+        self.client.hold_mouse_buttons = [False, False, False]
+
+    def release_game_input(self):
+        """释放一次 GUI 输入独占，并阻止仍按住的键泄漏到游戏。"""
+        if self.ing_mouse_lock <= 0:
+            self.ing_mouse_lock = 0
+            return
+        self.ing_mouse_lock -= 1
+        if self.ing_mouse_lock == 0:
+            self._wait_for_input_release = True
+            self.client.hold_mouse_buttons = [False, False, False]
+
+    def reset_game_input(self):
+        """切换世界/界面时清空输入独占状态。"""
+        self.ing_mouse_lock = 0
+        self._wait_for_input_release = False
+        self._pressed_keys.clear()
+        self._pressed_mouse_buttons.clear()
+        self.client.hold_mouse_buttons = [False, False, False]
+
+    def gameplay_input_blocked(self) -> bool:
+        """返回游戏动作当前是否必须忽略键鼠状态。"""
+        if self.ing_mouse_lock > 0:
+            return True
+        if not self._wait_for_input_release:
+            return False
+        if self._pressed_keys or self._pressed_mouse_buttons:
+            return True
+        self._wait_for_input_release = False
+        return False
+
+    def _track_physical_input(self, events):
+        """记录 GUI 消费前的原始按键状态，供释放门闩使用。"""
+        for event in events:
+            if event.type == pygame.KEYDOWN:
+                self._pressed_keys.add(event.key)
+            elif event.type == pygame.KEYUP:
+                self._pressed_keys.discard(event.key)
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                self._pressed_mouse_buttons.add(event.button)
+            elif event.type == pygame.MOUSEBUTTONUP:
+                self._pressed_mouse_buttons.discard(event.button)
+            elif event.type == pygame.WINDOWFOCUSLOST:
+                # 失焦后可能收不到对应 KEYUP；SDL 也会清空硬件状态。
+                self._pressed_keys.clear()
+                self._pressed_mouse_buttons.clear()
 
     def tick_ig(self):
         """执行一次游戏内逻辑更新"""
@@ -42,10 +97,7 @@ class GameManager:
 
     def handle_key_pressed(self):
         """处理键盘输入"""
-        # 聊天栏打开时禁止游戏键鼠操作
-        if self.client.chat_gui and self.client.chat_gui.is_open:
-            return
-        if self.ing_mouse_lock > 0:
+        if self.gameplay_input_blocked():
             return
         keys = pygame.key.get_pressed()
         mouse_button = pygame.mouse.get_pressed()
@@ -110,9 +162,15 @@ class GameManager:
         # 先把自己队列里的副本取出来（避免在遍历时 render 又往里加）
         events = self.event_queue
         self.event_queue = []
+        self._track_physical_input(events)
 
         for gui in self.client.render.drawing_GUIs[:]:
             gui.handle_events(events)  # GUI 处理事件, 被GUI处理的事件会从事件队列中删除
+
+        # GUI 可能刚在本批事件中关闭。此时丢弃剩余游戏事件，并等当前
+        # 物理按键全部释放，防止回车、Shift、Space 等穿透到游戏。
+        if self.gameplay_input_blocked():
+            return
 
         for event in events:
             if not self.client.in_game or self.client.client_player is None:

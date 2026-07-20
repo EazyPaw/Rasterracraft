@@ -68,9 +68,15 @@ class ClientPlayer(Entity):
             self.motion.y = 0
             self.fall_distance = 0.0
             return
-        keys = pygame.key.get_pressed()
-        self.sneaking = (keys[pygame.K_LSHIFT] or keys[pygame.K_s]) and not self.flying
-        self.swimming_up = keys[pygame.K_SPACE] and not self.flying
+        if self.client.game_manager.gameplay_input_blocked():
+            # 这些状态原先绕过事件队列直接轮询键盘，导致 GUI 已经吃掉
+            # KEYDOWN 后玩家仍会下蹲/上浮。统一服从游戏输入门闩。
+            self.sneaking = False
+            self.swimming_up = False
+        else:
+            keys = pygame.key.get_pressed()
+            self.sneaking = (keys[pygame.K_LSHIFT] or keys[pygame.K_s]) and not self.flying
+            self.swimming_up = keys[pygame.K_SPACE] and not self.flying
 
         previous_y = self.y
         was_on_ground = self.on_ground

@@ -99,6 +99,7 @@ class InputBox:
         self._last_cursor_toggle = 0
         self._cursor_visible = True
         self._metrics_font: pygame.font.Font | None = None
+        self._render = None
 
     # ===================== 自适应尺寸计算 =====================
 
@@ -153,13 +154,17 @@ class InputBox:
         self.focused = True
         self._last_cursor_toggle = pygame.time.get_ticks()
         self._cursor_visible = True
-        pygame.key.start_text_input()
+        request = getattr(self._render, "request_text_input", None)
+        if callable(request):
+            request(True)
 
     def blur(self):
         """失焦输入框，停止接收文本输入。"""
         if self.focused:
             self.focused = False
-            pygame.key.stop_text_input()
+            request = getattr(self._render, "request_text_input", None)
+            if callable(request):
+                request(False)
 
     # ===================== 事件处理 =====================
 
@@ -199,6 +204,7 @@ class InputBox:
         """绘制输入框：标签 → 背景框 → 文本 → 光标。"""
         if not self.visible:
             return
+        self._render = render
 
         if self.label:
             label_size = self._eff_label_font_size()
@@ -276,14 +282,17 @@ class InputBox:
         if now - self._last_cursor_toggle >= 530:
             self._cursor_visible = not self._cursor_visible
             self._last_cursor_toggle = now
-        if not self._cursor_visible:
-            return
 
         inner = self._inner_rect()
         font_size = self._eff_font_size()
         font = render.get_font(font_size)
         cursor_x = inner.x + font.size(self.text[:self.cursor_pos])[0] - self._text_scroll
         cursor_x = max(inner.x, min(inner.right - 1, cursor_x))
+        request = getattr(render, "request_text_input", None)
+        if callable(request):
+            request(True, pygame.Rect(cursor_x, inner.y, 1, inner.height))
+        if not self._cursor_visible:
+            return
         cursor_top = inner.y + max(2, inner.height // 6)
         cursor_bottom = inner.bottom - max(2, inner.height // 6)
         render.draw_line((255, 255, 255), (cursor_x, cursor_top), (cursor_x, cursor_bottom), 2)

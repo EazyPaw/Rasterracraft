@@ -157,12 +157,8 @@ class DeathScreen(GUI):
         self.render.client.return_to_main_menu()
 
     def on_open(self) -> None:
-        self.render.client.game_manager.ing_mouse_lock += 1
-        self.render.client.hold_mouse_buttons = [False, False, False]
-        pygame.key.stop_text_input()
+        self.render.client.game_manager.acquire_game_input()
+        self.render.request_text_input(False)
 
     def on_close(self) -> None:
-        self.render.client.game_manager.ing_mouse_lock = max(
-            0,
-            self.render.client.game_manager.ing_mouse_lock - 1,
-        )
+        self.render.client.game_manager.release_game_input()

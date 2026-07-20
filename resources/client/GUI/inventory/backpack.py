@@ -786,7 +786,7 @@ class Backpack(GUI):
 
     def on_open(self):
         """背包打开时的回调：增加鼠标锁定计数，使玩家视角无法旋转"""
-        self.render.client.game_manager.ing_mouse_lock += 1
+        self.render.client.game_manager.acquire_game_input()
 
     def on_close(self):
         """背包关闭时归还临时物品并解除鼠标锁定。"""
@@ -798,4 +798,4 @@ class Backpack(GUI):
         if not self._is_empty(self.dragging_item):
             self.dragging_item = self._empty_stack()
         self.render.client.sent_packet({"__class__": "CraftingClose"})
-        self.render.client.game_manager.ing_mouse_lock -= 1
+        self.render.client.game_manager.release_game_input()

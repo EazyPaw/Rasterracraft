@@ -96,7 +96,7 @@ class Client:
         self.main_menu = MainMenu(self.render)
         self.render.show_gui(self.main_menu)
         self.game_thread.start()
-        pygame.key.stop_text_input()
+        self.render.request_text_input(False)
 
         # 简写方法
         # self.transkey = self.resources_manager.get_translation_key
@@ -440,7 +440,7 @@ class Client:
         self.hold_mouse_buttons = [False, False, False]
         self.hold_key_map = {}
         self.key_map = {}
-        self.game_manager.ing_mouse_lock = 0
+        self.game_manager.reset_game_input()
         self.game_manager.last_pressed_time.clear()
         self.current_save_id = None
         self.current_game_mode = "survival"
@@ -450,8 +450,7 @@ class Client:
         self.render.drawing_GUIs.clear()
         self.main_menu = MainMenu(self.render)
         self.render.show_gui(self.main_menu)
-        pygame.key.stop_text_input()
-        pygame.key.set_repeat(0, 0)
+        self.render.request_text_input(False)
         self._prepare_socket_transport()
         self._prepare_server_thread()
 

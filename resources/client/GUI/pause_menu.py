@@ -44,14 +44,11 @@ class PauseMenu(GUI):
         self.render.client.return_to_main_menu()
 
     def on_open(self):
-        self.render.client.game_manager.ing_mouse_lock += 1
-        pygame.key.stop_text_input()
+        self.render.client.game_manager.acquire_game_input()
+        self.render.request_text_input(False)
 
     def on_close(self):
-        self.render.client.game_manager.ing_mouse_lock = max(
-            0,
-            self.render.client.game_manager.ing_mouse_lock - 1,
-        )
+        self.render.client.game_manager.release_game_input()
 
     def _layout_buttons(self):
         screen_w = self.render.SCREEN_WIDTH

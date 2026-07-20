@@ -10,6 +10,7 @@ Render 类是整个渲染系统的核心，通过多重继承组合以下 Mixin�
 
 import logging
 import math as _math
+import os
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
@@ -49,6 +50,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         参数:
             client: Client 主实例引用
         """
+        # SDL2 默认隐藏原生输入法候选窗；必须在视频子系统初始化前启用。
+        os.environ["SDL_IME_SHOW_UI"] = "1"
         pygame.init()
         pygame.mixer.init()
 
@@ -66,6 +69,16 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         pygame.display.set_caption("PyCraft 2D - 0.0.1 SNAPSHOT")
         self.icon: pygame.Surface = pygame.image.load("icon.png").convert_alpha()
         pygame.display.set_icon(self.icon)
+
+        # SDL 的文本输入 API 必须由窗口主线程驱动。GUI 事件在游戏线程
+        # 消费，只更新下面的请求状态，真正的 start/stop 在渲染循环执行。
+        self._text_input_requested = False
+        self._text_input_active = False
+        self._text_input_rect: pygame.Rect | None = None
+        self._text_input_repeat = (0, 0)
+        self._window_focused = True
+        pygame.key.stop_text_input()
+        pygame.key.set_repeat(0, 0)
 
         # ---- 渲染参数 ----
         self.block_size: int = 64
@@ -367,8 +380,14 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     )
                     self.ig_gui_layer.fill((0, 0, 0, 128))
                 else:
+                    if event.type == pygame.WINDOWFOCUSLOST:
+                        self._window_focused = False
+                    elif event.type == pygame.WINDOWFOCUSGAINED:
+                        self._window_focused = True
                     # 键盘、鼠标等游戏事件转发给 GameManager
                     self.client.game_manager.event_queue.append(event)
+
+            self._sync_text_input_state()
 
             # 退出检查
             if not self.running or self.client.is_shutting_down:
@@ -429,6 +448,32 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             pygame.quit()
 
     # ===================== GUI 管理 =====================
+
+    def request_text_input(
+        self,
+        enabled: bool,
+        rect: pygame.Rect | None = None,
+        repeat: tuple[int, int] = (0, 0),
+    ) -> None:
+        """线程安全地请求主线程启停 SDL 文本输入。"""
+        self._text_input_requested = bool(enabled)
+        self._text_input_rect = pygame.Rect(rect) if rect is not None else None
+        self._text_input_repeat = repeat if enabled else (0, 0)
+
+    def _sync_text_input_state(self) -> None:
+        """只在渲染/窗口线程调用 SDL 键盘与 IME API。"""
+        should_be_active = self._text_input_requested and self._window_focused
+        if should_be_active and self._text_input_rect is not None:
+            pygame.key.set_text_input_rect(self._text_input_rect)
+        if should_be_active != self._text_input_active:
+            if should_be_active:
+                pygame.key.start_text_input()
+            else:
+                pygame.key.stop_text_input()
+            self._text_input_active = should_be_active
+        pygame.key.set_repeat(*(
+            self._text_input_repeat if should_be_active else (0, 0)
+        ))
 
     def draw_gui(self) -> None:
         """按优先级顺序绘制所有活动 GUI。"""
