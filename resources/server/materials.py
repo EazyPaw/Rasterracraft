@@ -1,37 +1,42 @@
 from resources.server.material_class import Material, BlockItem
-import resources.server.blocks as blocks
 from resources.server.utils import client_method
 
 
 class DIRT(BlockItem):
     name_id = "dirt"
     name = "tile.dirt.name"
-    target_block = blocks.DIRT
+    target_block_id = "dirt"
 
 class AIR(BlockItem):
     name_id = "air"
     name = "tile.air.name"
-    target_block = blocks.AIR
+    target_block_id = "air"
 
 class GLOWSTONE(BlockItem):
     name_id = "glowstone"
     name = "tile.lightgem.name"
-    target_block = blocks.GLOWSTONE
+    target_block_id = "glowstone"
 
 class SAND(BlockItem):
     name_id = "sand"
     name = "tile.sand.name"
-    target_block = blocks.SAND
+    target_block_id = "sand"
+
+
+class COBBLESTONE(BlockItem):
+    name_id = "cobblestone"
+    name = "tile.stonebrick.name"
+    target_block_id = "cobblestone"
 
 class WATER(BlockItem):
     name_id = "water"
     name = "tile.water.name"
-    target_block = blocks.WATER
+    target_block_id = "water"
 
 class LAVA(BlockItem):
     name_id = "lava"
     name = "tile.lava.name"
-    target_block = blocks.LAVA
+    target_block_id = "lava"
 
 class APPLE(Material):
     name_id = "apple"
@@ -111,7 +116,7 @@ class DIAMOND_PICKAXE(WOODEN_PICKAXE):
 class TORCH(BlockItem):
     name_id = "torch"
     name = "tile.torch.name"
-    target_block = blocks.TORCH
+    target_block_id = "torch"
 
 
 class SNOWBALL(Material):
@@ -132,7 +137,7 @@ def get_block_item(block):
             f"{block_id.title().replace('_', '')}Item",
             (BlockItem,),
             {"name_id": block_id, "name": getattr(block, "name", block_id),
-             "target_block": type(block)},
+             "target_block_id": block_id},
         )
         _block_item_types[block_id] = item_type
     return item_type()
@@ -142,15 +147,18 @@ def get_material_by_id(material_id: str):
     """Resolve a wire-format material id, including generated block items."""
     material_id = str(material_id).removeprefix("minecraft:")
     known = {
-        "air": AIR, "dirt": DIRT, "sand": SAND, "water": WATER,
+        "air": AIR, "dirt": DIRT, "sand": SAND,
+        "cobblestone": COBBLESTONE, "water": WATER, "lava": LAVA,
         "glowstone": GLOWSTONE, "apple": APPLE, "bread": BREAD,
         "cooked_beef": COOKED_BEEF, "stick": STICK,
+        "torch": TORCH,
         "wooden_pickaxe": WOODEN_PICKAXE, "stone_pickaxe": STONE_PICKAXE,
         "iron_pickaxe": IRON_PICKAXE, "diamond_pickaxe": DIAMOND_PICKAXE,
     }
     material_type = known.get(material_id)
     if material_type is not None:
         return material_type()
+    from resources.server import blocks
     try:
         return get_block_item(blocks.get_block_by_id(material_id))
     except ValueError:

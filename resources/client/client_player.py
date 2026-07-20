@@ -43,7 +43,7 @@ class ClientPlayer(Entity):
         self.choosing_block = None
         self.flyable = False
         self.inventory = Inventory(36)
-        self.skeleton = PlayerSkeleton(client, self)
+        self.skeleton = PlayerSkeleton(self)
         self.skeleton.x = self.client.render.SCREEN_WIDTH / 2
         self.skeleton.y = self.client.render.SCREEN_HEIGHT / 2
         self.selected_slot = 0

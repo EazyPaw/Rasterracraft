@@ -93,15 +93,28 @@ class Material:
 
 
 class BlockItem(Material):
-    target_block = None
+    target_block_id = None
+
+    @classmethod
+    def create_block(cls):
+        """Create the block represented by this inventory material.
+
+        Block classes are resolved only when the item is actually used.  This
+        keeps the material definitions independent from ``blocks.py`` during
+        module initialization while retaining a stable, serializable link.
+        """
+        if cls.target_block_id is None:
+            return None
+        from resources.server.blocks import get_block_by_id
+        return get_block_by_id(cls.target_block_id)
 
     @classmethod
     @client_method
     def get_texture(cls, size: float, client):
-        if cls.target_block is None:
+        block = cls.create_block()
+        if block is None:
             return None
         block_size = max(1, int(round(16 * size)))
-        block = cls.target_block()
         # Some block item textures (grass/leaves) use biome coloring.  Item
         # entities do not carry a Block instance, so borrow the local player's
         # biome solely for rendering instead of dereferencing a None location.

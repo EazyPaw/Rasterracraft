@@ -8,6 +8,7 @@ if os.environ.get('PYCRAFT_CLIENT') == '1':
     pass
 
 from resources.server.block_class import *
+from resources.server.materials import COBBLESTONE as COBBLESTONE_ITEM
 from resources.server.tags import BlockTag
 from resources.server.utils import client_method
 
@@ -37,6 +38,7 @@ class STONE(Block):
     _texture_path = 'blocks.stone'
     preferred_tool = 'pickaxe'
     requires_correct_tool = True
+    drops = (BlockDrop(COBBLESTONE_ITEM),)
 
 class COBBLESTONE(Block):
     block_id = 'cobblestone'
@@ -335,7 +337,7 @@ class LILAC_TOP(DoublePlantTopMixin, Plant):
     bottom_block_id = 'lilac'
 
 class OAK_PLANK(Block):
-    block_id = 'oak_plank'
+    block_id = 'oak_planks'
     name = 'tile.wood.oak.name'
     _texture_path = 'blocks.planks_oak'
     break_sound = 'dig.wood'
@@ -343,7 +345,7 @@ class OAK_PLANK(Block):
     preferred_tool = 'axe'
 
 class BIRCH_PLANK(Block):
-    block_id = 'birch_plank'
+    block_id = 'birch_planks'
     name = 'tile.wood.birch.name'
     _texture_path = 'blocks.planks_birch'
     break_sound = 'dig.wood'
@@ -351,7 +353,7 @@ class BIRCH_PLANK(Block):
     preferred_tool = 'axe'
 
 class SPRUCE_PLANK(Block):
-    block_id = 'spruce_plank'
+    block_id = 'spruce_planks'
     name = 'tile.wood.spruce.name'
     _texture_path = 'blocks.planks_spruce'
     break_sound = 'dig.wood'
@@ -359,7 +361,7 @@ class SPRUCE_PLANK(Block):
     preferred_tool = 'axe'
 
 class JUNGLE_PLANK(Block):
-    block_id = 'jungle_plank'
+    block_id = 'jungle_planks'
     name = 'tile.wood.jungle.name'
     _texture_path = 'blocks.planks_jungle'
     break_sound = 'dig.wood'
@@ -367,7 +369,7 @@ class JUNGLE_PLANK(Block):
     preferred_tool = 'axe'
 
 class ACACIA_PLANK(Block):
-    block_id = 'acacia_plank'
+    block_id = 'acacia_planks'
     name = 'tile.wood.acacia.name'
     _texture_path = 'blocks.planks_acacia'
     break_sound = 'dig.wood'
@@ -375,7 +377,7 @@ class ACACIA_PLANK(Block):
     preferred_tool = 'axe'
 
 class DARK_OAK_PLANK(Block):
-    block_id = 'dark_oak_plank'
+    block_id = 'dark_oak_planks'
     name = 'tile.wood.big_oak.name'
     _texture_path = 'blocks.planks_big_oak'
     break_sound = 'dig.wood'

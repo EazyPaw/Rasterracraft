@@ -584,6 +584,8 @@ class Client:
             except Exception:
                 pass
 
+        logging.info("Client Closed.")
+
     def _shutdown_server_subprocess(self):
         """终止服务端子进程。"""
         if not self.server_process:

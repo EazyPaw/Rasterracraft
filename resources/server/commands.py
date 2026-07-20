@@ -1,5 +1,6 @@
 import ast
 import logging
+import re
 import traceback
 import time
 from typing import TYPE_CHECKING, Callable, List, Dict
@@ -34,6 +35,7 @@ class CommandExecutor:
         "give": self.give_command,
         "kick": self.kick_command,
         "locate": self.locate_command,
+        "summon": self.summon_command,
     }
 
     def python_execute(self, args, executor: Player | str):
@@ -166,6 +168,82 @@ class CommandExecutor:
                     y = 70
                 return f"The nearest {biome_id} is at ({x}, {y})"
         raise ValueError(f"Could not locate biome {biome_id} within {max_radius} blocks")
+
+    @staticmethod
+    def _parse_summon_nbt(raw: str) -> dict:
+        """Parse a small, safe subset of SNBT used by summon.
+
+        Python/JSON-style dictionaries are accepted as well as common
+        Minecraft forms such as ``{Health:10f,NoAI:1b}``.
+        """
+        raw = raw.strip()
+        if not raw:
+            return {}
+        try:
+            value = ast.literal_eval(raw)
+        except (SyntaxError, ValueError):
+            normalized = re.sub(
+                r"([,{]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)",
+                r"\1'\2'\3",
+                raw,
+            )
+            normalized = re.sub(
+                r"(?<=\d)[bBsSlLfFd](?=\s*[,}])",
+                "",
+                normalized,
+            )
+            normalized = re.sub(r"\btrue\b", "True", normalized, flags=re.IGNORECASE)
+            normalized = re.sub(r"\bfalse\b", "False", normalized, flags=re.IGNORECASE)
+            try:
+                value = ast.literal_eval(normalized)
+            except (SyntaxError, ValueError) as exc:
+                raise ValueError(f"Invalid entity NBT: {raw}") from exc
+        if not isinstance(value, dict):
+            raise ValueError("Entity NBT must be a compound")
+        return value
+
+    def summon_command(self, args, executor: Player | str):
+        """/summon <entity> [<x> <y> <z>] [<nbt>]."""
+        if not args:
+            raise ValueError("Usage: /summon <entity> [<x> <y> <z>] [<nbt>]")
+        if isinstance(executor, Player) and not executor.is_operator:
+            raise ValueError("You do not have permission to use /summon")
+
+        entity_id = args[0].lower().removeprefix("minecraft:")
+        if entity_id != "zombie":
+            raise ValueError(f"Unknown entity: {args[0]}")
+
+        if isinstance(executor, Player):
+            world = executor.world
+        else:
+            world = self.server.worlds[self.server.main_world_id]
+        ref_x, ref_y, ref_z = self._get_reference_position(executor)
+
+        if len(args) == 1:
+            x, y, z = ref_x, ref_y, int(ref_z)
+            nbt = {}
+        else:
+            if len(args) < 4:
+                raise ValueError("Summon position requires x, y and z")
+            try:
+                x = self._parse_coord(args[1], ref_x)
+                y = self._parse_coord(args[2], ref_y)
+                raw_z = self._parse_coord(args[3], ref_z)
+            except ValueError as exc:
+                raise ValueError(f"Invalid coordinate: {exc}") from exc
+            if not raw_z.is_integer() or int(raw_z) not in (0, 1):
+                raise ValueError("z must be foreground 0 or background 1")
+            z = int(raw_z)
+            nbt = self._parse_summon_nbt(" ".join(args[4:])) if len(args) > 4 else {}
+
+        if not 0 <= y < world.attribute.MAX_BUILD_HEIGHT:
+            raise ValueError(f"y must be between 0 and {world.attribute.MAX_BUILD_HEIGHT - 1}")
+
+        from resources.server.entities.zombie import Zombie
+        zombie = Zombie(x, y, world, z)
+        zombie.apply_summon_nbt(nbt)
+        world.spawn_entity(zombie)
+        return f"Summoned zombie at ({zombie.x:g}, {zombie.y:g}, {zombie.z})"
 
     def time(self, args, executor: Player | str):
         if args[0] == "add" and isinstance(executor, Player):

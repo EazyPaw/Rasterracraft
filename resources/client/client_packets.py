@@ -234,6 +234,15 @@ def decode_packet(packet: dict, client: 'Client') -> None:
                 player.selected_slot = 0
             cursor = payload_to_stack(packet.get('cursor', {}))
             _set_inventory_cursor(client, cursor)
+    elif packet['__class__'] == 'PlayerHurt':
+        player = client.client_player
+        if player is not None:
+            player.health = max(0.0, min(player.max_health, float(packet.get('health', player.health))))
+            player.hurt_time = max(player.hurt_time, int(packet.get('hurt_time', player.HURT_FLASH_TICKS)))
+            if player.health <= 0 and not player.dead:
+                player.dead = True
+                client.add_chat_message("You died!", (255, 85, 85))
+                client.sent_packet({'__class__': 'RequestRespawn'})
     elif packet['__class__'] == 'Experience':
         if client.client_player is not None:
             client.client_player.add_experience(int(packet.get('amount', 0)))

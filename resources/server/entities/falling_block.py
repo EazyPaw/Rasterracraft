@@ -1,8 +1,10 @@
 import math
 
+from resources.client.entity_skeleton import EntitySkeleton
 from resources.server import blocks
 from resources.server.entity import Entity
 from resources.server.location import Location
+from resources.server.utils import client_method
 
 
 class FallingBlock(Entity):
@@ -40,3 +42,34 @@ class FallingBlock(Entity):
                 self.world.break_block(loc)
                 self.world.set_block(self.block, loc)
             self.world.remove_entity(self)
+
+
+class FallingBlockSkeleton(EntitySkeleton):
+
+    @client_method
+    def __init__(self, entity, client = None):
+        super().__init__(client, "blocks.sand", entity)
+        self._visual_center = (0.5, 0.5)
+
+    def draw(self):
+        block = getattr(self.entity, "block", None)
+        if block is None:
+            return
+        render = self.client.render
+        bs = render.block_size
+        render_x = self._render_x
+        render_y = self._render_y
+        if getattr(block, "location", None) is not None:
+            block.location.x = math.floor(render_x)
+            block.location.y = math.floor(render_y)
+            block.location.z = getattr(self.entity, "z", block.location.z)
+        tex = block.get_texture(bs)
+        if tex is None:
+            return
+        tint = render.get_world_light_tint(render_x + 0.5, render_y + 0.5)
+        tex = render.get_tinted_surface(tex, tint)
+        sx = (render_x - render.camera.x - 0.5) * bs + render.SCREEN_WIDTH // 2
+        sy = render.SCREEN_HEIGHT - (
+            ((render_y + 1) - render.camera.y + 0.5) * bs + render.SCREEN_HEIGHT // 2
+        )
+        render.blit(tex, (round(sx), round(sy)))

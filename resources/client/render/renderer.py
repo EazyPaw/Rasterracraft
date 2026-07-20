@@ -471,7 +471,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         entities = self.client_world.iter_entities()
         entities.sort(key=lambda entity: entity.y)
         for entity in entities:
-            if entity.entity_id in ("falling_block", "item"):
+            if entity.entity_id in ("falling_block", "item", "zombie"):
                 if entity.z != z_filter:
                     continue
             elif z_filter == 1:

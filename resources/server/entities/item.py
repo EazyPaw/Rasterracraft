@@ -63,4 +63,6 @@ class Item(Entity):
 
     def update(self):
         super().update()
+
+# 负责物品渲染的类在 client_entity.py 中的 ItemEntityRenderer
         

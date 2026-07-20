@@ -3,8 +3,8 @@ import logging
 import math
 import uuid
 from uuid import UUID
-from xml.dom.minidom import Entity
 
+from resources.server.damange_type import DamageType
 from resources.server.location import Vector
 from resources.server.utils import is_safe_value
 from resources.server.block_collision import EMPTY, coerce_collision_shape
@@ -56,6 +56,8 @@ class Entity:
         self.swimming_up = False
         self._jumped_this_tick = False
         self.fire_ticks = 0
+        self.last_damage_type = None
+        self.max_step_height = 0.5
 
     def teleport_to(self, x, y, world = None):
         self.x = x
@@ -368,6 +370,17 @@ class Entity:
         base = 0.049 if self.flying else (
             self.movement_acceleration if self.on_ground else self.air_acceleration
         )
+        # ``move_speed`` is the entity's movement-speed attribute.  Older
+        # movement code only used ``movement_acceleration`` and therefore
+        # changing a mob's speed attribute had no effect.  Keep 0.1 as the
+        # vanilla/player reference value and scale the same acceleration path
+        # for every entity, including hostile mobs.
+        try:
+            speed_scale = max(0.0, float(getattr(self, "move_speed", 0.1)) / 0.1)
+        except (TypeError, ValueError):
+            speed_scale = 1.0
+        base *= speed_scale
+
         block_factor = 1.0
         if self.on_ground and not self.flying and not self.in_fluid:
             block_factor = self.get_ground_speed_factor()
@@ -457,7 +470,11 @@ class Entity:
     def update(self):
         self.move_update()
 
-    def calc_entity_distance(self, other: Entity | UUID | str) -> float:
+    def apply_damage(self, hearts: int, damage_type: DamageType):
+        self.last_damage_type = damage_type
+        self.health -= hearts
+
+    def calc_entity_distance(self, other: UUID | str) -> float:
         """
         计算实体到另一个实体之间的距离
         :param other: 可为实体对象/实体UUID/实体UUID的字符串形式

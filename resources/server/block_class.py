@@ -14,6 +14,7 @@ if os.environ.get('PYCRAFT_CLIENT') == '1':
     import pygame
 
 from resources.server.location import Location
+from resources.server.material_class import Material
 from resources.server.tags import BlockTag
 from resources.server.block_collision import (
     EMPTY,
@@ -45,6 +46,25 @@ class PlacementContext:
     ray_direction: tuple[float, float]
     target_z: int
     fore_place: bool = False
+
+
+@dataclass(frozen=True)
+class BlockDrop:
+    """Declarative loot entry that creates a fresh stack per break."""
+
+    material_type: type[Material]
+    amount: int = 1
+    nbt: dict | None = None
+
+    def create_stack(self):
+        if self.amount <= 0:
+            raise ValueError("Block drop amount must be positive")
+        from resources.server.item_class import ItemStack
+        return ItemStack(
+            self.material_type(),
+            self.amount,
+            dict(self.nbt) if self.nbt is not None else None,
+        )
 
 
 class Block(ABC):
@@ -84,7 +104,7 @@ class Block(ABC):
     light_source = 0
     Tags = []
     has_transparent_pixels = None  # None = 自动从纹理检测，也可手动覆盖为 True/False
-    drops = None
+    drops: tuple[BlockDrop, ...] | None = None
 
     def __init__(self, nbt = None):
         # 方块应该带有的属性
@@ -224,7 +244,7 @@ class Block(ABC):
         from resources.server.materials import get_block_item
         if self.drops is None:
             return [ItemStack(get_block_item(self), 1)]
-        return self.drops
+        return [drop.create_stack() for drop in self.drops]
 
     def get_experience(self, material) -> int:
         if not self.can_harvest(material):

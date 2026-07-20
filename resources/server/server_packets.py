@@ -129,7 +129,9 @@ def decode_packet(packet: dict, player: Player):
         player.on_ground = packet.get('on_ground', False)
         # Integrated clients simulate survival locally; clamp state on receipt
         # so it persists safely and cannot corrupt the save format.
-        player.health = max(0.0, min(player.max_health, float(packet.get('health', player.health))))
+        health_lock_until = int(getattr(player, '_server_health_lock_until', 0))
+        if getattr(player.world.server, 'server_ticks', 0) >= health_lock_until:
+            player.health = max(0.0, min(player.max_health, float(packet.get('health', player.health))))
         player.food_level = max(0, min(20, int(packet.get('food_level', getattr(player, 'food_level', 20)))))
         player.saturation = max(0.0, min(float(player.food_level), float(packet.get('saturation', getattr(player, 'saturation', 5.0)))))
         player.on_moving()
@@ -176,9 +178,9 @@ def decode_packet(packet: dict, player: Player):
         # }
         world = player.world
         held = player.inventory[player.selected_slot]
-        target_block = getattr(held.material, 'target_block', None)
-        if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT and not held.is_empty() and callable(target_block):
-            block = target_block()
+        create_block = getattr(held.material, 'create_block', None)
+        if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT and not held.is_empty() and callable(create_block):
+            block = create_block()
             if isinstance(packet.get('nbt'), dict):
                 apply_placement_nbt = getattr(block, 'apply_placement_nbt', None)
                 if callable(apply_placement_nbt):

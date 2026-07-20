@@ -1,18 +1,20 @@
 import math
 import time
 
-import pygame
-
-from resources.client.entity_skeleton import FallingBlockSkeleton, PlayerSkeleton
+from resources.client.entity_skeleton import PlayerSkeleton
+from resources.server.entities.falling_block import FallingBlockSkeleton
+from resources.server.entities.zombie import ZombieSkeleton
 from resources.server.blocks import get_block_by_id
 from resources.server.item_class import ItemStack
 from resources.server.location import Location, Vector
 from resources.server.materials import get_material_by_id
+from resources.server.utils import client_method
 
 
 class ItemEntityRenderer:
     """Small, bobbing world item renderer for server-synchronised drops."""
-    def __init__(self, client, entity):
+    @client_method
+    def __init__(self, entity, client = None):
         self.client = client
         self.entity = entity
         self.created_at = time.perf_counter()
@@ -52,6 +54,9 @@ class ClientEntity:
         self.on_ground = bool(packet.get('on_ground', False))
         self.health = float(packet.get('health', 20))
         self.hurt_time = int(packet.get('hurt_time', 0))
+        self.aggressive = bool(packet.get('aggressive', False))
+        self.look_angle = float(packet.get('look_angle', 0.0))
+        self.attack_animation_ticks = int(packet.get('attack_animation_ticks', 0))
         self.name = packet.get('name', self.uuid[:8])
         self.block = None
         self.skeleton = None
@@ -76,6 +81,11 @@ class ClientEntity:
         self.on_ground = bool(packet.get('on_ground', self.on_ground))
         self.health = float(packet.get('health', self.health))
         self.hurt_time = int(packet.get('hurt_time', self.hurt_time))
+        self.aggressive = bool(packet.get('aggressive', self.aggressive))
+        self.look_angle = float(packet.get('look_angle', self.look_angle))
+        self.attack_animation_ticks = int(packet.get(
+            'attack_animation_ticks', self.attack_animation_ticks
+        ))
         self.name = packet.get('name', self.name)
 
         block_data = packet.get('block_data')
@@ -109,8 +119,10 @@ class ClientEntity:
         if self.skeleton is not None:
             return
         if self.entity_id == "player":
-            self.skeleton = PlayerSkeleton(self.client, self, pinned=False)
+            self.skeleton = PlayerSkeleton(self, pinned=False)
         elif self.entity_id == "falling_block":
-            self.skeleton = FallingBlockSkeleton(self.client, self)
+            self.skeleton = FallingBlockSkeleton(self)
         elif self.entity_id == "item":
-            self.skeleton = ItemEntityRenderer(self.client, self)
+            self.skeleton = ItemEntityRenderer(self)
+        elif self.entity_id == "zombie":
+            self.skeleton = ZombieSkeleton(self)

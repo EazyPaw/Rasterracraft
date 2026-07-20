@@ -105,10 +105,10 @@ class CreativeMode(GameMode):
         location = self.player.choosing_block.location
         item = self.player.inventory[self.player.selected_slot]
         # 空手、食物或其它非方块物品对着空气右键不应伪造 AIR 放置包。
-        target_block = getattr(item.material, 'target_block', None)
-        if item.is_empty() or not callable(target_block):
+        create_block = getattr(item.material, 'create_block', None)
+        if item.is_empty() or not callable(create_block):
             return
-        new_block = target_block()
+        new_block = create_block()
         if self.player.choosing_block.on_right_click():
             return
         place_location = self.get_block_placement_location(new_block)
@@ -271,10 +271,10 @@ class SurvivalMode(GameMode):
             return
 
         location = self.player.choosing_block.location if self.player.choosing_block else None
-        target_block = getattr(item.material, 'target_block', None)
-        if location is None or item.is_empty() or not callable(target_block):
+        create_block = getattr(item.material, 'create_block', None)
+        if location is None or item.is_empty() or not callable(create_block):
             return
-        new_block = target_block()
+        new_block = create_block()
         if self.player.choosing_block.on_right_click():
             return
         place_location = self.get_block_placement_location(new_block)
