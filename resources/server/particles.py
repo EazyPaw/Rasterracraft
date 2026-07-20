@@ -372,8 +372,8 @@ class HEART(TextureParticle):
     linear_drag = 0.01
 
 
-class BlockParticle(Particle):
-    """方块碎片粒子基类，材质来自方块本身而不是粒子贴图。"""
+class FragmentParticle(Particle):
+    """从方块或物品现有贴图切片的可复用碎屑粒子。"""
 
     particle_id = None
     _texture_path = None
@@ -382,35 +382,68 @@ class BlockParticle(Particle):
     gravity = 0.035
     linear_drag = 0.035
     collision = CollisionSettings(enabled=True, radius=0.035, drag=0.55, restitution=0.16)
+    default_position_spread = (0.0, 0.0)
+    default_motion_spread = (0.0, 0.0)
+
+    @client_method
+    def _resolve_fragments(self, manager: 'ParticleManager', client=None):
+        location = Location(
+            client.client_world, math.floor(self.x), math.floor(self.y), self.z
+        )
+        block_id = self.data.get('block_id')
+        item_id = self.data.get('item_id')
+        if isinstance(block_id, str):
+            from resources.server.blocks import get_block_by_id
+            try:
+                source = get_block_by_id(block_id)
+            except ValueError:
+                return ()
+            source.location = location
+            return manager.get_source_fragments(source, location=location)
+        if isinstance(item_id, str):
+            from resources.server.materials import get_material_by_id
+            try:
+                source = get_material_by_id(item_id)
+            except ValueError:
+                return ()
+            return manager.get_source_fragments(source, location=location)
+        logging.warning('Fragment particle is missing block_id/item_id')
+        return ()
 
     @client_method
     def spawn_from_packet(self, manager: 'ParticleManager', client=None) -> None:
-        """从方块 ID 还原方块材质，并生成方块破碎碎片。"""
-        from resources.server.blocks import get_block_by_id
-
-        block_id = self.data.get("block_id")
-        if not isinstance(block_id, str):
-            logging.warning(f"Invalid Block ID {block_id}")
+        fragments = self._resolve_fragments(manager, client=client)
+        if not fragments:
             return
-
+        position_spread = self.data.get('position_spread', self.default_position_spread)
+        motion_spread = self.data.get('motion_spread', self.default_motion_spread)
         try:
-            block = get_block_by_id(block_id)
-        except ValueError:
-            return
+            spread_x, spread_y = float(position_spread[0]), float(position_spread[1])
+            motion_x, motion_y = float(motion_spread[0]), float(motion_spread[1])
+        except (IndexError, TypeError, ValueError):
+            spread_x = spread_y = motion_x = motion_y = 0.0
+        for _ in range(self.count):
+            particle = type(self).from_values(
+                self.x + random.uniform(-spread_x, spread_x),
+                self.y + random.uniform(-spread_y, spread_y),
+                self.z,
+                motion=(
+                    self.motion[0] + random.uniform(-motion_x, motion_x),
+                    self.motion[1] + random.uniform(-motion_y, motion_y),
+                ),
+                data=dict(self.data),
+            )
+            if particle.setup_client_state(manager, texture=random.choice(fragments)):
+                manager.add_particle(particle)
 
-        location = Location(client.client_world, math.floor(self.x), math.floor(self.y), self.z)
-        block.location = location
-        manager.spawn_block_break(block, location, count=self.count)
 
 
-
-class SPRINT_STEP(BlockParticle):
+class SPRINT_STEP(FragmentParticle):
     """疾跑脚步扬起的灰尘粒子。
 
     使用脚下方块的碎片材质，短寿命、小尺寸、轻微上浮，
-    模拟玩家疾跑时脚底扬起的尘土效果。
-    重写 spawn_from_packet 以在服务端传来的实际坐标处生成粒子，
-    而不是被吸附到整数方块格。
+    模拟玩家疾跑时脚底扬起的尘土效果。实际坐标和纹理切片由
+    FragmentParticle 的方块/物品通用实现处理。
     """
     particle_id = "minecraft:sprint_step"
     name = "sprint_step"
@@ -420,6 +453,7 @@ class SPRINT_STEP(BlockParticle):
     gravity = 0.02
     collision = CollisionSettings(enabled=True, radius=0.025, drag=0.45, restitution=0.05)
     linear_drag = 0.025
+    default_position_spread = (0.05, 0.04)
 
     def __init__(
         self,
@@ -440,51 +474,21 @@ class SPRINT_STEP(BlockParticle):
             data=data,
         )
 
-    @client_method
-    def spawn_from_packet(self, manager: 'ParticleManager', client=None) -> None:
-        """在服务端传来的实际坐标处生成方块碎片粒子。
+class ITEM(FragmentParticle):
+    """Small crumbs cut from an inventory item's own texture."""
 
-        与 BlockParticle 不同，不会把坐标吸附到整数格——
-        疾跑粒子应该在玩家脚底（浮点坐标）生成。
-        """
-        from resources.server.blocks import get_block_by_id
-
-        block_id = self.data.get("block_id")
-        if not isinstance(block_id, str):
-            return
-
-        try:
-            block = get_block_by_id(block_id)
-        except ValueError:
-            return
-
-        # 草方块等需要世界/生物群系信息的纹理必须拥有位置，否则
-        # get_texture 会在访问 location.x 时失败，导致疾跑粒子整批消失。
-        block.location = Location(
-            client.client_world,
-            math.floor(self.x),
-            math.floor(self.y),
-            int(self.z),
-        )
-        fragments = manager._get_block_fragments(block)
-        if not fragments:
-            return
-
-        for _ in range(self.count):
-            # 在服务端坐标基础上加微量随机偏移，让粒子看起来更自然
-            px = self.x + random.uniform(-0.05, 0.05)
-            py = self.y + random.uniform(-0.02, 0.04)
-            particle = SPRINT_STEP.from_values(
-                px, py, self.z,
-                motion=self.motion,
-                data=dict(self.data),
-            )
-            if particle.setup_client_state(manager, texture=random.choice(fragments)):
-                manager.add_particle(particle)
+    particle_id = 'minecraft:item'
+    name = 'item'
+    lifetime_ticks = (8, 14)
+    size = (0.16, 0.22)
+    gravity = 0.028
+    linear_drag = 0.03
+    collision = CollisionSettings(enabled=True, radius=0.02, drag=0.45, restitution=0.08)
+    default_position_spread = (0.04, 0.025)
+    default_motion_spread = (0.025, 0.018)
 
 
-
-class BLOCK(BlockParticle):
+class BLOCK(FragmentParticle):
     particle_id = "minecraft:block"
     name = "block"
 
@@ -517,6 +521,24 @@ class BLOCK(BlockParticle):
             motion=motion,
             data=data,
         )
+
+    @client_method
+    def spawn_from_packet(self, manager: 'ParticleManager', client=None) -> None:
+        from resources.server.blocks import get_block_by_id
+        block_id = self.data.get('block_id')
+        if not isinstance(block_id, str):
+            return
+        try:
+            block = get_block_by_id(block_id)
+        except ValueError:
+            return
+        location = Location(client.client_world, math.floor(self.x), math.floor(self.y), self.z)
+        block.location = location
+        manager.spawn_block_break(block, location, count=self.count)
+
+
+# Compatibility name for extensions which imported the old block-only base.
+BlockParticle = FragmentParticle
 
 
 

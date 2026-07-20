@@ -512,6 +512,14 @@ class PlayerSkeleton(EntitySkeleton):
 
     def _update_facing(self):
         """先由基类根据水平速度决定朝向，站立不动时再根据鼠标指向调整。"""
+        if not self._pinned:
+            # Remote players must use the facing authored by their own client
+            # and accepted by the server.  Reading this client's hovered block
+            # made every remote avatar turn toward the local mouse.
+            facing = int(getattr(self.entity, "facing", self.facing))
+            if facing in (self.LEFT, self.RIGHT):
+                self.facing = facing
+            return
         super()._update_facing()
 
         # 站立不动时，让玩家朝向当前鼠标选中的方块，挖掘/放置会更自然。
@@ -523,7 +531,7 @@ class PlayerSkeleton(EntitySkeleton):
                 center_x = self.entity.x + getattr(self.entity, "width", 1.0) * 0.5
                 if abs(target_x - center_x) > 0.35:
                     self.facing = self.RIGHT if target_x > center_x else self.LEFT
-                    self.entity.facing = self.facing
+        self.entity.facing = self.facing
 
     # ---------- 公开触发方法 ----------
 
@@ -564,6 +572,11 @@ class PlayerSkeleton(EntitySkeleton):
         """玩家骨架每帧先计算目标姿态，再交给基类做平滑和绘制准备。"""
         self._update_facing()
         self._update_animation_clocks()
+        if not self._pinned and (
+            getattr(self.entity, "breaking", False)
+            or getattr(self.entity, "eating", False)
+        ):
+            self.trigger_swing()
 
         # 检测潜行状态切换，变化时瞬间跳变到目标姿态
         is_sneaking = getattr(self.entity, "sneaking", False)
@@ -701,6 +714,13 @@ class PlayerSkeleton(EntitySkeleton):
         移动时：鼠标在玩家前方时主要跟随鼠标，鼠标在后方时主要跟随运动方向。
                 两者通过 sigmoid 平滑混合，过渡自然无跳变。
         """
+        if not self._pinned:
+            try:
+                synced = float(getattr(self.entity, "look_angle", 0.0))
+            except (TypeError, ValueError):
+                synced = 0.0
+            return max(-45.0, min(80.0, synced))
+
         motion = getattr(self.entity, "motion", None)
         motion_x = getattr(motion, "x", 0.0) if motion else 0.0
         moving = abs(motion_x) > 0.025
@@ -708,6 +728,7 @@ class PlayerSkeleton(EntitySkeleton):
         mouse_angle = self._calc_head_mouse_angle(direction)
 
         if not moving:
+            self.entity.look_angle = mouse_angle
             return mouse_angle
 
         # ── 移动时：鼠标与运动方向混合 ──
@@ -726,7 +747,9 @@ class PlayerSkeleton(EntitySkeleton):
         #   1.5 控制过渡区宽度（格），值越小过渡越陡
         alignment = 1.0 / (1.0 + math.exp(-dx_ahead / 1.5))
 
-        return mouse_angle * alignment + motion_angle * (1.0 - alignment)
+        result = mouse_angle * alignment + motion_angle * (1.0 - alignment)
+        self.entity.look_angle = result
+        return result
 
     def _calc_sneak_angles(self, direction: int, base: dict) -> dict:
         """潜行姿态覆盖：身体压低、前倾，手脚在潜行基础角度上叠加减弱版行走摆动。"""

@@ -1,7 +1,7 @@
 import logging
+import math
 
 from resources.server.entity import Entity
-from resources.server.damange_type import FALL, PLAYER_ATTACK, STARVE
 from resources.server.location import Location
 from resources.server.inventory import payload_to_stack, serialize_inventory, stack_to_payload
 from resources.server.item_class import EmptyItemStack
@@ -129,17 +129,62 @@ def _can_player_reach_entity(player: Player, target: Entity) -> bool:
 
 
 def _can_player_reach_block(player: Player, x: int, y: int, z: int) -> bool:
-    if z not in (0, 1):
+    return player.can_reach_block(x, y, z)
+
+
+def _read_block_position(packet: dict) -> tuple[int, int, int] | None:
+    try:
+        values = packet.get('x'), packet.get('y'), packet.get('z')
+        if any(isinstance(value, bool) for value in values):
+            return None
+        numeric = tuple(float(value) for value in values)
+        if not all(math.isfinite(value) and value.is_integer() for value in numeric):
+            return None
+        return tuple(int(value) for value in numeric)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _reject_player_move(player: Player) -> None:
+    # A Teleport confirmation gates stale movement already queued by the
+    # client, so one correction cannot immediately be overwritten.
+    player.teleport_to(player.x, player.y)
+
+
+def _allow_action_this_tick(player: Player, action: str) -> bool:
+    current_tick = int(getattr(player.world.server, 'server_ticks', 0))
+    action_ticks = getattr(player, '_last_action_ticks', None)
+    if action_ticks is None:
+        action_ticks = {}
+        player._last_action_ticks = action_ticks
+    if action_ticks.get(action) == current_tick:
         return False
-    mode = getattr(getattr(player, "gamemode", None), "name_id", "survival")
-    if mode == "spectator":
+    action_ticks[action] = current_tick
+    return True
+
+
+def _block_intersects_entity(world, block, x: int, y: int, z: int) -> bool:
+    get_shape = getattr(block, 'get_collision_box', None)
+    shape = get_shape() if callable(get_shape) else None
+    if not shape:
         return False
-    player_center_x = player.x + player.width * 0.5
-    player_center_y = player.y + player.height * 0.5
-    dx = x + 0.5 - player_center_x
-    dy = y + 0.5 - player_center_y
-    reach = max(0.0, float(getattr(player, "interact_range", 5.0)))
-    return dx * dx + dy * dy <= (reach + 0.75) ** 2
+    entities = list(getattr(world, 'entities', {}).values())
+    entities.extend(getattr(world.server, 'players', ()))
+    seen = set()
+    for entity in entities:
+        identity = id(entity)
+        if identity in seen or getattr(entity, 'removed', False):
+            continue
+        seen.add(identity)
+        if int(getattr(entity, 'z', 0)) != z:
+            continue
+        min_x = float(entity.x)
+        min_y = float(entity.y)
+        max_x = min_x + float(getattr(entity, 'width', 1.0))
+        max_y = min_y + float(getattr(entity, 'height', 1.0))
+        if any(box.translated(x, y).overlaps(min_x, min_y, max_x, max_y) for box in shape):
+            return True
+    return False
 
 
 def decode_packet(packet: dict, player: Player):
@@ -166,26 +211,77 @@ def decode_packet(packet: dict, player: Player):
         # packets the client had already sent before it received Teleport.
         if player.is_awaiting_teleport_confirmation:
             return
-        destination_rx = int(float(packet['x']) // 16)
+        if player.health <= 0:
+            return
+        try:
+            new_x = float(packet.get('x'))
+            new_y = float(packet.get('y'))
+        except (TypeError, ValueError, OverflowError):
+            _reject_player_move(player)
+            return
+        if not math.isfinite(new_x) or not math.isfinite(new_y):
+            _reject_player_move(player)
+            return
+        if not -64.0 <= new_y <= player.world.attribute.MAX_BUILD_HEIGHT + 64.0:
+            _reject_player_move(player)
+            return
+        destination_rx = int(new_x // 16)
         if (
             not player.world.is_chunk_loaded(destination_rx)
             or destination_rx not in player.client_loaded_regions
         ):
-            player.teleport_to(player.x, player.y)
+            _reject_player_move(player)
             return
-        player.x = packet['x']
-        player.y = packet['y']
-        player.sneaking = packet.get('sneaking', False)
-        player.sprinting = packet.get('sprinting', False)
-        player.facing = packet.get('facing', 0)
-        player.on_ground = packet.get('on_ground', False)
-        # Integrated clients simulate survival locally; clamp state on receipt
-        # so it persists safely and cannot corrupt the save format.
-        health_lock_until = int(getattr(player, '_server_health_lock_until', 0))
-        if getattr(player.world.server, 'server_ticks', 0) >= health_lock_until:
-            player.health = max(0.0, min(player.max_health, float(packet.get('health', player.health))))
-        player.food_level = max(0, min(20, int(packet.get('food_level', getattr(player, 'food_level', 20)))))
-        player.saturation = max(0.0, min(float(player.food_level), float(packet.get('saturation', getattr(player, 'saturation', 5.0)))))
+
+        current_tick = int(getattr(player.world.server, 'server_ticks', 0))
+        last_tick = int(getattr(player, '_last_move_tick', -1))
+        if last_tick == current_tick:
+            return
+        elapsed_ticks = 1 if last_tick < 0 else max(1, current_tick - last_tick)
+        mode = getattr(getattr(player, 'gamemode', None), 'name_id', 'survival')
+        max_horizontal = (4.0 if mode == 'creative' else 2.0) * elapsed_ticks
+        max_vertical = (6.0 if mode == 'creative' else 3.0) * elapsed_ticks
+        dx = new_x - player.x
+        dy = new_y - player.y
+        if abs(dx) > max_horizontal or abs(dy) > max_vertical:
+            _reject_player_move(player)
+            return
+        # A player who is already intersecting a block (piston/world edit,
+        # legacy save, etc.) must still be able to move and mine their way
+        # out.  Only reject movement that enters collision from a free state.
+        if (
+            player._check_collision_at(new_x, new_y)
+            and not player._check_collision_at(player.x, player.y)
+        ):
+            _reject_player_move(player)
+            return
+
+        previous_y = player.y
+        was_on_ground = bool(player.on_ground)
+        player.x = new_x
+        player.y = new_y
+        player.motion.x = dx
+        player.motion.y = dy
+        player.sneaking = packet.get('sneaking') is True
+        player.sprinting = packet.get('sprinting') is True
+        try:
+            facing = int(packet.get('facing', player.facing))
+        except (TypeError, ValueError):
+            facing = player.facing
+        if facing in (0, 1):
+            player.facing = facing
+        try:
+            look_angle = float(packet.get('look_angle', player.look_angle))
+        except (TypeError, ValueError, OverflowError):
+            look_angle = player.look_angle
+        if math.isfinite(look_angle):
+            player.look_angle = max(-45.0, min(80.0, look_angle))
+        player.flying = mode == 'creative' and packet.get('flying') is True
+        player.in_fluid = bool(player._get_fluid_interaction()[0])
+        player.in_water = player.in_fluid
+        player.on_ground = bool(player._check_support_at())
+        player._last_move_tick = current_tick
+        player.record_server_movement(previous_y, was_on_ground, abs(dx))
         player.on_moving()
         forward_packet_to_others(player, player, mode="entity_update")
     elif packet['__class__'] == 'TeleportConfirm':
@@ -197,40 +293,52 @@ def decode_packet(packet: dict, player: Player):
             return
         if rx in player.loading_regions and rx in player.world.regions:
             player.client_loaded_regions.add(rx)
+    elif packet['__class__'] == 'PlayerAction':
+        action = packet.get('action')
+        if action == 'abort_breaking':
+            player.clear_breaking()
+            return
+        if action == 'continue_eating':
+            player.request_eating()
+            return
+        if action == 'stop_eating':
+            player.clear_eating()
+            return
+        if action != 'continue_breaking':
+            return
+        position = _read_block_position(packet)
+        if position is not None:
+            player.request_breaking(*position)
+
     elif packet['__class__'] == 'BreakBlock':
-        # {
-        #     '__class__': 'BreakBlock',
-        #     'x': location.x,
-        #     'y': location.y,
-        #     'z': location.z,
-        # }
-        world = player.world
-        if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT:
-            tool = player.inventory[player.selected_slot].material
-            experience = world.break_block(packet['x'], packet['y'], packet['z'], tool=tool)
-            if experience:
-                player.experience += experience
-                player.world.server.send_client_socket(
-                    player, {'__class__': 'Experience', 'amount': experience}, 'Forward'
-                )
+        position = _read_block_position(packet)
+        if position is not None:
+            player.finish_breaking(*position)
 
     elif packet['__class__'] == 'UseBlock':
-        try:
-            x = int(packet.get('x'))
-            y = int(packet.get('y'))
-            z = int(packet.get('z'))
-        except (TypeError, ValueError):
+        if not _allow_action_this_tick(player, 'use_block'):
             return
+        position = _read_block_position(packet)
+        if position is None:
+            return
+        x, y, z = position
         world = player.world
         if not (0 <= y < world.attribute.MAX_BUILD_HEIGHT):
             return
-        if not _can_player_reach_block(player, x, y, z):
+        if (
+            x // 16 not in player.client_loaded_regions
+            or not world.is_chunk_loaded(x // 16)
+            or not _can_player_reach_block(player, x, y, z)
+        ):
             return
         held = player.inventory[player.selected_slot]
         if held.is_empty():
             return
         block = world.get_block(x, y, z)
+        player.clear_eating()
         block.on_use(player, held.material)
+        player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
+        forward_packet_to_others(player, player, mode="entity_update")
 
     elif packet['__class__'] == 'PickupItem':
         from resources.server.entities.item import Item
@@ -247,16 +355,15 @@ def decode_packet(packet: dict, player: Player):
             and _can_player_reach_entity(player, target)
         ):
             player._last_attack_tick = current_tick
-            player.attack(target, damage_type=PLAYER_ATTACK)
+            player.clear_eating()
+            player.attack_animation_ticks = player.attack_animation_duration
+            player.attack(target)
+            forward_packet_to_others(player, player, mode="entity_update")
 
     elif packet['__class__'] == 'SelfDamage':
-        damage_type = {"fall": FALL, "starvation": STARVE}.get(packet.get('cause'))
-        try:
-            amount = min(1000.0, max(0.0, float(packet.get('amount', 0.0))))
-        except (TypeError, ValueError):
-            amount = 0.0
-        if damage_type is not None and amount > 0:
-            player.apply_damage(amount, damage_type, source=None)
+        # Fall, hunger and regeneration are advanced by Player.tick_server().
+        # Never accept a client-authored damage amount.
+        return
 
     elif packet['__class__'] == 'PlaceBlock':
         # {
@@ -266,10 +373,25 @@ def decode_packet(packet: dict, player: Player):
         #     'z': location.z,
         #     'block_id': obj.block_id,
         # }
+        position = _read_block_position(packet)
+        if position is None:
+            return
+        if not _allow_action_this_tick(player, 'place_block'):
+            return
+        x, y, z = position
         world = player.world
         held = player.inventory[player.selected_slot]
         create_block = getattr(held.material, 'create_block', None)
-        if 0 <= packet['y'] < world.attribute.MAX_BUILD_HEIGHT and not held.is_empty() and callable(create_block):
+        if (
+            0 <= y < world.attribute.MAX_BUILD_HEIGHT
+            and z in (0, 1)
+            and x // 16 in player.client_loaded_regions
+            and world.is_chunk_loaded(x // 16)
+            and _can_player_reach_block(player, x, y, z)
+            and not held.is_empty()
+            and callable(create_block)
+        ):
+            player.clear_eating()
             block = create_block()
             if isinstance(packet.get('nbt'), dict):
                 apply_placement_nbt = getattr(block, 'apply_placement_nbt', None)
@@ -280,10 +402,15 @@ def decode_packet(packet: dict, player: Player):
                         return
             # Ignore the client-provided block id; the selected server slot is
             # the only authority for what can be placed.
-            if block.place_at(Location(world, packet['x'], packet['y'], packet['z'])) is not False:
+            if _block_intersects_entity(world, block, x, y, z):
+                player.sync_inventory()
+                return
+            if block.place_at(Location(world, x, y, z)) is not False:
                 if getattr(player.gamemode, 'name_id', 'survival') != 'creative':
                     held.reduce_amount(1)
                 player.sync_inventory()
+                player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
+                forward_packet_to_others(player, player, mode="entity_update")
 
     elif packet['__class__'] == 'ChatMessage':
         # 客户端发送的聊天消息
@@ -375,19 +502,18 @@ def decode_packet(packet: dict, player: Player):
     elif packet['__class__'] == 'CraftingClose':
         player.crafting_close()
     elif packet['__class__'] == 'SelectHotbarSlot':
+        old_slot = player.selected_slot
         try:
             player.selected_slot = max(0, min(8, int(packet.get('slot'))))
         except (TypeError, ValueError):
             pass
+        if player.selected_slot != old_slot:
+            player.clear_breaking()
+            player.clear_eating()
         player.sync_inventory()
     elif packet['__class__'] == 'ConsumeItem':
-        held = player.inventory[player.selected_slot]
-        food = int(getattr(held.material, 'food_value', 0))
-        if food > 0 and player.food_level < 20 and not held.is_empty():
-            saturation = float(getattr(held.material, 'saturation_modifier', 0.0))
-            player.food_level = min(20, player.food_level + food)
-            player.saturation = min(float(player.food_level), player.saturation + food * saturation * 2)
-            held.reduce_amount(1)
+        # Legacy instant-consume claims are not authoritative.  New clients
+        # keep the eating action alive and Player.tick_eating performs it.
         player.sync_inventory()
     elif packet['__class__'] == 'RequestRespawn':
         if player.health > 0:
@@ -402,6 +528,12 @@ def decode_packet(packet: dict, player: Player):
         player.motion.y = 0.0
         player.food_level = 20
         player.saturation = 5.0
+        player.exhaustion = 0.0
+        player.regen_timer = 0
+        player.starvation_timer = 0
+        player.fall_distance = 0.0
+        player.clear_breaking()
+        player.clear_eating()
         block = player.world.find_top_block(player.spawn_point, 0)
         if block is not None:
             player.teleport_to(0.0, block.location.y + 1)

@@ -40,6 +40,7 @@ class ClientWorld:
         self._pending_chunk_block_updates: dict[int, dict[tuple[int, int, int], Block]] = {}
         self.entities: dict[str, ClientEntity] = {}
         self._entities_lock = threading.RLock()
+        self._break_progress: dict[str, dict[str, Any]] = {}
         self._last_fluid_sound_tick = -10_000
         # (chunk version, surface height, is_water).  Surface height is a float
         # because a flowing water block can expose a partial-height surface.
@@ -370,6 +371,9 @@ class ClientWorld:
             for uuid, entity in list(self.entities.items()):
                 if int(entity.x // 16) == x:
                     self.entities.pop(uuid, None)
+            for miner_uuid, state in list(self._break_progress.items()):
+                if int(state['x']) // 16 == x:
+                    self._break_progress.pop(miner_uuid, None)
         self._mark_render_chunk_dirty(x)
 
     def update_entity(self, packet: dict):
@@ -382,17 +386,76 @@ class ClientWorld:
         with self._entities_lock:
             entity = self.entities.get(entity_uuid)
             if entity is None:
-                self.entities[entity_uuid] = ClientEntity(self.client, packet)
+                entity = ClientEntity(self.client, packet)
+                self.entities[entity_uuid] = entity
             else:
                 entity.apply_packet(packet)
+            if entity.entity_id == 'player' and entity.breaking and entity.break_target is not None:
+                x, y, z = entity.break_target
+                self._break_progress[entity_uuid] = {
+                    'miner_uuid': entity_uuid,
+                    'x': int(x), 'y': int(y), 'z': int(z),
+                    'progress': max(0.0, min(1.0, float(entity.break_progress))),
+                }
+            elif entity.entity_id == 'player':
+                self._break_progress.pop(entity_uuid, None)
 
     def remove_entity(self, entity_uuid: str):
         with self._entities_lock:
             self.entities.pop(str(entity_uuid), None)
+            self._break_progress.pop(str(entity_uuid), None)
 
     def iter_entities(self):
         with self._entities_lock:
             return list(self.entities.values())
+
+    def update_break_progress(self, packet: dict) -> None:
+        miner_uuid = str(packet.get('miner_uuid', ''))
+        if not miner_uuid:
+            return
+        active = packet.get('active') is True
+        with self._entities_lock:
+            entity = self.entities.get(miner_uuid)
+            if not active:
+                self._break_progress.pop(miner_uuid, None)
+                if entity is not None:
+                    entity.breaking = False
+                    entity.break_progress = 0.0
+                    entity.break_target = None
+                return
+            try:
+                x = int(packet.get('x'))
+                y = int(packet.get('y'))
+                z = int(packet.get('z'))
+                progress = max(0.0, min(1.0, float(packet.get('progress', 0.0))))
+            except (TypeError, ValueError, OverflowError):
+                return
+            state = {
+                'miner_uuid': miner_uuid,
+                'x': x, 'y': y, 'z': z,
+                'progress': progress,
+            }
+            self._break_progress[miner_uuid] = state
+            if entity is not None:
+                entity.breaking = True
+                entity.break_progress = progress
+                entity.break_target = (x, y, z)
+
+    def iter_break_progress(self) -> list[dict[str, Any]]:
+        with self._entities_lock:
+            return [dict(state) for state in self._break_progress.values()]
+
+    def clear_break_progress_at(self, x: int, y: int, z: int) -> None:
+        target = int(x), int(y), int(z)
+        with self._entities_lock:
+            for miner_uuid, state in list(self._break_progress.items()):
+                if (state['x'], state['y'], state['z']) == target:
+                    self._break_progress.pop(miner_uuid, None)
+                    entity = self.entities.get(miner_uuid)
+                    if entity is not None:
+                        entity.breaking = False
+                        entity.break_progress = 0.0
+                        entity.break_target = None
 
     def get_block(self, x_loc: int | Location, y: int | None = None, z: int | None = None) -> Block:
         x, y, z = decide_x_or_loc(x_loc, y, z)

@@ -1,8 +1,8 @@
 import ast
 import logging
-import re
 import traceback
 import time
+import re
 from typing import TYPE_CHECKING, Callable, List, Dict
 
 from resources.client.game_mode import get_gamemode_by_id
@@ -36,6 +36,7 @@ class CommandExecutor:
         "kick": self.kick_command,
         "locate": self.locate_command,
         "summon": self.summon_command,
+        "stop": self.stop_server
     }
 
     def python_execute(self, args, executor: Player | str):
@@ -50,6 +51,10 @@ class CommandExecutor:
         end_time = time.time()
         execution_time = end_time - start_time
         return f"Done in {execution_time*1000} ms."
+    
+    def stop_server(self, args, executor: Player | str):
+        self.server.close_server()
+        return 'Stopping server..'
 
     def switch_gamemode(self, args, executor: Player | str):
         if not isinstance(executor, Player) or len(args) != 1:

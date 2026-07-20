@@ -1,4 +1,5 @@
 import logging
+import logging
 from typing import TYPE_CHECKING
 
 from resources.client.GUI.chat import ChatGUI
@@ -112,7 +113,20 @@ class CreativeMode(GameMode):
         location = self.player.choosing_block.location
         block = self.player.client.client_world.get_block(location)
         if block.breakable:
-            self.player.client.sent_packet(block, 'BreakBlock')
+            self.player.client.sent_packet({
+                '__class__': 'PlayerAction',
+                'action': 'continue_breaking',
+                'x': location.x,
+                'y': location.y,
+                'z': location.z,
+            })
+            self.player.client.client_world.break_block(location)
+            self.player.client.sent_packet({
+                '__class__': 'BreakBlock',
+                'x': location.x,
+                'y': location.y,
+                'z': location.z,
+            })
 
 
     def right_click_on_block(self, block: Block):
@@ -204,9 +218,11 @@ class SurvivalMode(GameMode):
     def __init__(self, player: 'ClientPlayer'):
         self.break_target = None
         self.break_progress = 0.0
+        self._breaking_request_active = False
         self.pending_break_target = None
         self.eat_progress = 0
         self.eating_slot = None
+        self._eating_request_active = False
         super().__init__(player)
         self.player.flyable = False
         self.inv = Backpack(self.player.client.render)
@@ -227,60 +243,97 @@ class SurvivalMode(GameMode):
             return None
         return int(location.x), int(location.y), int(location.z), block.block_id
 
-    def _destroy_delta(self, block: Block) -> float:
-        """Java-edition destroy progress per game tick.
+    def reset_breaking(self, *, notify_server: bool = False):
+        old_target = self.break_target
+        if notify_server and self._breaking_request_active:
+            self.player.client.sent_packet({
+                '__class__': 'PlayerAction',
+                'action': 'abort_breaking',
+            })
+        self.break_target = None
+        self.break_progress = 0.0
+        self._breaking_request_active = False
+        if old_target is not None:
+            miner_uuid = str(
+                getattr(self.player.client, 'server_player_uuid', None)
+                or self.player.uuid
+            )
+            self.player.client.client_world.update_break_progress({
+                'miner_uuid': miner_uuid,
+                'active': False,
+            })
 
-        progress = speed / hardness / (30 when harvestable, otherwise 100).
-        The result is deliberately accumulated once per 20 TPS game tick,
-        matching the rounded timings documented by the Minecraft Wiki.
-        """
-        hardness = float(getattr(block, "hardness", 1.5))
+    def _destroy_delta(self, block: Block) -> float:
+        hardness = float(getattr(block, 'hardness', 1.5))
         if hardness < 0:
             return 0.0
         material = self.player.inventory[self.player.selected_slot].material
         speed = 1.0
-        if getattr(material, "tool_type", None) == getattr(block, "preferred_tool", None):
-            speed = float(getattr(material, "mining_speed", 1.0))
-        if self.player.in_fluid:
-            speed /= 5.0
-        if not self.player.on_ground:
-            speed /= 5.0
+        if getattr(material, 'tool_type', None) == getattr(block, 'preferred_tool', None):
+            speed = max(0.0, float(getattr(material, 'mining_speed', 1.0)))
+        inside_block = bool(self.player._check_collision_at(self.player.x, self.player.y))
+        if not inside_block:
+            if self.player.in_fluid:
+                speed /= 5.0
+            if not self.player.on_ground:
+                speed /= 5.0
         divisor = 30.0 if block.can_harvest(material) else 100.0
         return 1.0 if hardness == 0 else speed / hardness / divisor
 
-    def reset_breaking(self):
-        self.break_target = None
-        self.break_progress = 0.0
+    def _publish_local_break_progress(self) -> None:
+        if self.break_target is None:
+            return
+        x, y, z = self.break_target[:3]
+        miner_uuid = str(
+            getattr(self.player.client, 'server_player_uuid', None)
+            or self.player.uuid
+        )
+        self.player.client.client_world.update_break_progress({
+            'miner_uuid': miner_uuid,
+            'x': x, 'y': y, 'z': z,
+            'progress': self.break_progress,
+            'active': True,
+        })
 
-    def get_destroy_stage(self):
-        if self.break_target is None or self.break_progress <= 0:
-            return None
-        return min(9, max(0, int(self.break_progress * 10)))
+    def handle_break_result(self, x: int, y: int, z: int) -> None:
+        if self.pending_break_target is not None and self.pending_break_target[:3] == (x, y, z):
+            self.pending_break_target = None
 
     def left_click_on_block(self, block: Block):
         target = self.player.choosing_block
         if target is None or not target.breakable or isinstance(target, AIR):
-            self.pending_break_target = None
-            self.reset_breaking()
+            self.reset_breaking(notify_server=True)
             return
         key = self._target_key(target)
-        if key == self.pending_break_target:
+        if (
+            self.pending_break_target is not None
+            and self.pending_break_target[:3] == key[:3]
+        ):
             return
-        if key != self.break_target:
+        if self.break_target is None or tuple(self.break_target[:3]) != key[:3]:
+            self.reset_breaking()
             self.break_target = key
             self.break_progress = 0.0
-        self.break_progress += self._destroy_delta(target)
+        self._breaking_request_active = True
+        self.break_progress = min(1.0, self.break_progress + self._destroy_delta(target))
+        self.player.client.sent_packet({
+            '__class__': 'PlayerAction',
+            'action': 'continue_breaking',
+            'x': target.location.x,
+            'y': target.location.y,
+            'z': target.location.z,
+        })
+        self._publish_local_break_progress()
         self.player.skeleton.trigger_swing()
         if self.break_progress < 1.0:
             return
 
-        # The server removes the block and creates its physical dropped item.
+        x, y, z, _block_id = key
         self.pending_break_target = key
+        self.player.client.client_world.break_block(x, y, z)
         self.player.client.sent_packet({
             '__class__': 'BreakBlock',
-            'x': target.location.x,
-            'y': target.location.y,
-            'z': target.location.z,
+            'x': x, 'y': y, 'z': z,
         })
         self.reset_breaking()
 
@@ -312,6 +365,11 @@ class SurvivalMode(GameMode):
 
     def _eat_selected_item(self, item):
         if self.player.food_level >= 20:
+            if self._eating_request_active:
+                self.player.client.sent_packet({
+                    '__class__': 'PlayerAction', 'action': 'stop_eating'
+                })
+            self._eating_request_active = False
             self.eating_slot = None
             self.eat_progress = 0
             return
@@ -320,23 +378,26 @@ class SurvivalMode(GameMode):
             self.eating_slot = slot
             self.eat_progress = 0
         self.eat_progress += 1
+        self._eating_request_active = True
+        self.player.client.sent_packet({
+            '__class__': 'PlayerAction',
+            'action': 'continue_eating',
+        })
         self.player.skeleton.trigger_swing()
         if self.eat_progress < 16:  # 0.8 seconds at 20 TPS
             return
-        self.player.client.resources_manager.play_sound("random.eat")
-        self.player.client.sent_packet({"__class__": "ConsumeItem"})
         self.eating_slot = None
         self.eat_progress = 0
 
     def tick(self):
-        if self.pending_break_target is not None:
-            x, y, z, block_id = self.pending_break_target
-            current = self.player.client.client_world.get_block(x, y, z)
-            if current.block_id != block_id:
-                self.pending_break_target = None
         if not self.player.client.hold_mouse_buttons[0]:
-            self.reset_breaking()
+            self.reset_breaking(notify_server=True)
         if not self.player.client.hold_mouse_buttons[2]:
+            if self._eating_request_active:
+                self.player.client.sent_packet({
+                    '__class__': 'PlayerAction', 'action': 'stop_eating'
+                })
+            self._eating_request_active = False
             self.eating_slot = None
             self.eat_progress = 0
 

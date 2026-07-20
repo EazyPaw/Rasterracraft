@@ -102,7 +102,6 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         # old downward velocity into the respawn position.
         client.client_player.motion.x = 0
         client.client_player.motion.y = 0
-        client.client_player.fall_distance = 0.0
         if client.client_player is not None:
             for key in (
                 'health', 'hurt_time', 'last_hurt_damage', 'food_level',
@@ -138,7 +137,31 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         # }
         world = client.client_world
         if 0 <= packet['y'] < world.y_max:
+            world.clear_break_progress_at(packet['x'], packet['y'], packet['z'])
             world.break_block(packet['x'], packet['y'], packet['z'])
+            game_mode = getattr(getattr(client, 'client_player', None), 'game_mode', None)
+            handle_result = getattr(game_mode, 'handle_break_result', None)
+            if callable(handle_result):
+                handle_result(int(packet['x']), int(packet['y']), int(packet['z']))
+    elif packet['__class__'] == 'BlockBreakProgress':
+        if str(packet.get('miner_uuid', '')) != str(getattr(client, 'server_player_uuid', '')):
+            client.client_world.update_break_progress(packet)
+    elif packet['__class__'] == 'BlockBreakCorrection':
+        world = client.client_world
+        try:
+            x, y, z = int(packet['x']), int(packet['y']), int(packet['z'])
+            block_data = packet['block_data']
+            block = get_block_by_id(block_data['id'])
+            if isinstance(block_data.get('nbt'), dict):
+                block.write_nbt(block_data['nbt'])
+        except (KeyError, TypeError, ValueError):
+            return
+        world.set_block(block, x, y, z)
+        world.clear_break_progress_at(x, y, z)
+        game_mode = getattr(getattr(client, 'client_player', None), 'game_mode', None)
+        handle_result = getattr(game_mode, 'handle_break_result', None)
+        if callable(handle_result):
+            handle_result(x, y, z)
     elif packet['__class__'] == 'PlaceBlock':
         # {
         #     '__class__': 'PlaceBlock',
@@ -171,6 +194,11 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             if 'nbt' in block_data:
                 block.write_nbt(block_data['nbt'])
             world.set_block(block, x, y, z)
+            world.clear_break_progress_at(x, y, z)
+            game_mode = getattr(getattr(client, 'client_player', None), 'game_mode', None)
+            handle_result = getattr(game_mode, 'handle_break_result', None)
+            if callable(handle_result):
+                handle_result(int(x), int(y), int(z))
             if (
                 getattr(previous, 'block_id', None) == 'lava'
                 and getattr(block, 'block_id', None) in {'stone', 'cobblestone', 'obsidian'}
@@ -317,9 +345,8 @@ def encode_packet(obj, obj_type = None, args = None) -> dict:
             'sprinting': obj.sprinting,
             'facing': obj.facing,
             'on_ground': obj.on_ground,
-            'health': obj.health,
-            'food_level': obj.food_level,
-            'saturation': obj.saturation,
+            'flying': obj.flying,
+            'look_angle': obj.look_angle,
         }
     elif  isinstance(obj, Block) and obj_type == 'BreakBlock':
         location: Location = obj.location

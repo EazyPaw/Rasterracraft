@@ -5,7 +5,7 @@ import pygame
 
 from resources.client.entity_skeleton import PlayerSkeleton
 from resources.client.game_mode import CreativeMode, SurvivalMode
-from resources.server.damange_type import FALL, GENERIC, STARVE, DamageType
+from resources.server.damange_type import GENERIC, DamageType
 from resources.server.entity import Entity
 from resources.server.inventory import Inventory
 
@@ -33,11 +33,7 @@ class ClientPlayer(Entity):
         self.health = self.max_health
         self.food_level = 20
         self.saturation = 5.0
-        self.exhaustion = 0.0
         self.hurt_time = 0
-        self.regen_timer = 0
-        self.starvation_timer = 0
-        self.fall_distance = 0.0
         self.dead = False
         self.experience = 0
         self.experience_level = 0
@@ -66,7 +62,6 @@ class ClientPlayer(Entity):
         if not self.client.can_simulate_player(self):
             self.motion.x = 0
             self.motion.y = 0
-            self.fall_distance = 0.0
             return
         if self.client.game_manager.gameplay_input_blocked():
             # 这些状态原先绕过事件队列直接轮询键盘，导致 GUI 已经吃掉
@@ -78,69 +73,20 @@ class ClientPlayer(Entity):
             self.sneaking = (keys[pygame.K_LSHIFT] or keys[pygame.K_s]) and not self.flying
             self.swimming_up = keys[pygame.K_SPACE] and not self.flying
 
-        previous_y = self.y
-        was_on_ground = self.on_ground
         super().move_update()
-        self._update_survival_state(previous_y, was_on_ground)
+        self._update_survival_state()
 
         self.client.sent_packet(self, 'PlayerMove')
 
-    def _update_survival_state(self, previous_y: float, was_on_ground: bool):
+    def _update_survival_state(self):
+        # The client predicts movement for responsiveness, but health, hunger,
+        # fall damage and regeneration are owned by the server.  Incoming
+        # PlayerHurt/InventoryUpdate packets update the local HUD/state.
         self.tick_damage_state()
         if not isinstance(self.game_mode, SurvivalMode):
             return
-        fallen = previous_y - self.y
-        if not self.in_fluid and not self.flying and fallen > 0:
-            self.fall_distance += fallen
-        if self.on_ground and not was_on_ground:
-            if self.fall_distance > 3.0:
-                amount = int(self.fall_distance - 3.0 + 0.999)
-                self._send_self_damage(amount, "fall")
-                self.apply_damage(amount, FALL, source=None)
-            self.fall_distance = 0.0
-        elif self.in_fluid or self.flying:
-            self.fall_distance = 0.0
-
-        moving = abs(self.motion.x) > 0.02
-        if moving:
-            self.exhaustion += 0.006 if self.sprinting else 0.001
-        self._consume_exhaustion()
-        self._natural_regeneration()
         self._request_nearby_item_pickups()
         self.game_mode.tick()
-
-    def _consume_exhaustion(self):
-        while self.exhaustion >= 4.0:
-            self.exhaustion -= 4.0
-            if self.saturation > 0:
-                self.saturation = max(0.0, self.saturation - 1.0)
-            elif self.food_level > 0:
-                self.food_level -= 1
-
-    def _natural_regeneration(self):
-        if self.food_level >= 18 and self.health < self.max_health:
-            self.regen_timer += 1
-            if self.regen_timer >= 80:
-                self.health = min(self.max_health, self.health + 1)
-                self.exhaustion += 6.0
-                self.regen_timer = 0
-        else:
-            self.regen_timer = 0
-        if self.food_level == 0:
-            self.starvation_timer += 1
-            if self.starvation_timer >= 80:
-                self._send_self_damage(1, "starvation")
-                self.apply_damage(1, STARVE, source=None)
-                self.starvation_timer = 0
-        else:
-            self.starvation_timer = 0
-
-    def _send_self_damage(self, amount: float, cause: str) -> None:
-        self.client.sent_packet({
-            "__class__": "SelfDamage",
-            "amount": float(amount),
-            "cause": cause,
-        })
 
     def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
         return not self.dead and not isinstance(self.game_mode, CreativeMode) and super().can_take_damage(damage_type)

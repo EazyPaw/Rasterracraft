@@ -58,6 +58,11 @@ class ClientEntity:
         self.aggressive = bool(packet.get('aggressive', False))
         self.look_angle = float(packet.get('look_angle', 0.0))
         self.attack_animation_ticks = int(packet.get('attack_animation_ticks', 0))
+        self.breaking = bool(packet.get('breaking', False))
+        self.eating = bool(packet.get('eating', False))
+        self.break_progress = float(packet.get('break_progress', 0.0))
+        raw_break_target = packet.get('break_target')
+        self.break_target = tuple(raw_break_target[:3]) if isinstance(raw_break_target, (list, tuple)) else None
         self.fuse = int(packet.get('fuse', 0))
         self.initial_fuse = int(packet.get('initial_fuse', self.fuse))
         self.name = packet.get('name', self.uuid[:8])
@@ -66,6 +71,7 @@ class ClientEntity:
         self.apply_packet(packet, initial=True)
 
     def apply_packet(self, packet: dict, *, initial: bool = False):
+        old_attack_animation_ticks = self.attack_animation_ticks
         new_x = float(packet.get('x', self.x))
         new_y = float(packet.get('y', self.y))
 
@@ -89,6 +95,18 @@ class ClientEntity:
         self.attack_animation_ticks = int(packet.get(
             'attack_animation_ticks', self.attack_animation_ticks
         ))
+        self.breaking = bool(packet.get('breaking', self.breaking))
+        self.eating = bool(packet.get('eating', self.eating))
+        self.break_progress = float(packet.get('break_progress', self.break_progress))
+        if 'break_target' in packet:
+            raw_break_target = packet.get('break_target')
+            self.break_target = (
+                tuple(raw_break_target[:3])
+                if isinstance(raw_break_target, (list, tuple)) and len(raw_break_target) >= 3
+                else None
+            )
+        elif not self.breaking:
+            self.break_target = None
         self.fuse = int(packet.get('fuse', self.fuse))
         self.initial_fuse = int(packet.get('initial_fuse', self.initial_fuse))
         self.name = packet.get('name', self.name)
@@ -119,6 +137,15 @@ class ClientEntity:
                 held_item_data.get('nbt', {}),
             )
         self._ensure_skeleton()
+        if (
+            self.entity_id == "player"
+            and self.skeleton is not None
+            and (
+                (initial and self.attack_animation_ticks > 0)
+                or self.attack_animation_ticks > old_attack_animation_ticks
+            )
+        ):
+            self.skeleton.trigger_swing()
 
     def _ensure_skeleton(self):
         if self.skeleton is not None:

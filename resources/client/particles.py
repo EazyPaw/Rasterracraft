@@ -99,7 +99,7 @@ class ParticleManager:
         if block is None or getattr(block, "block_id", None) == "air":
             return
 
-        fragments = self._get_block_fragments(block)
+        fragments = self.get_source_fragments(block, location=location)
         if not fragments:
             return
 
@@ -284,14 +284,32 @@ class ParticleManager:
             return True
         return abs(particle.x - player.x) < 96 and abs(particle.y - player.y) < 64
 
-    def _get_block_fragments(self, block: 'Block') -> tuple[pygame.Surface, ...]:
-        """将方块纹理切成小碎片，并缓存结果。"""
+    def get_source_fragments(self, source, *, location=None) -> tuple[pygame.Surface, ...]:
+        """Cut any block/material/texture into reusable non-empty fragments."""
         try:
-            texture = block.get_texture(32)
+            if isinstance(source, pygame.Surface):
+                texture = source
+            elif hasattr(source, 'block_id'):
+                if location is not None:
+                    source.location = location
+                texture = source.get_texture(32)
+            else:
+                # Inventory item textures are authored at 16px; 2x gives the
+                # same fragment resolution as a 32px block texture.
+                texture = source.get_texture(2.0)
         except Exception:
             texture = None
         if texture is None:
             return ()
+
+        return self._get_texture_fragments(texture)
+
+    def _get_block_fragments(self, block: 'Block') -> tuple[pygame.Surface, ...]:
+        """Compatibility wrapper for older block-only particle callers."""
+        return self.get_source_fragments(block, location=getattr(block, 'location', None))
+
+    def _get_texture_fragments(self, texture: pygame.Surface) -> tuple[pygame.Surface, ...]:
+        """Cut a texture into cached fragments, omitting transparent cells."""
 
         grid = 4
         key = (texture, texture.get_width(), texture.get_height(), grid)
@@ -309,7 +327,9 @@ class ParticleManager:
                 rect = pygame.Rect(gx * cell_w, gy * cell_h, cell_w, cell_h)
                 rect = rect.clip(texture.get_rect())
                 if rect.width > 0 and rect.height > 0:
-                    fragments.append(texture.subsurface(rect).copy().convert_alpha())
+                    fragment = texture.subsurface(rect).copy().convert_alpha()
+                    if fragment.get_bounding_rect(min_alpha=1).width > 0:
+                        fragments.append(fragment)
 
         result = tuple(fragments)
         self._block_fragment_cache[key] = result

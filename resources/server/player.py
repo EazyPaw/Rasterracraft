@@ -2,12 +2,12 @@ import math as _math
 import random as _random
 
 from resources.client.game_mode import SurvivalMode
-from resources.server.damange_type import DamageType, FALL, GENERIC
+from resources.server.damange_type import DamageType, FALL, GENERIC, STARVE
 from resources.server.entity import Entity
 from resources.server.inventory import Inventory, serialize_inventory, stack_to_payload
 from resources.server.item_class import EmptyItemStack, ItemStack
 from resources.server.location import Location, decide_x_or_loc
-from resources.server.particles import SPRINT_STEP
+from resources.server.particles import ITEM, SPRINT_STEP
 from resources.server.world_class import World
 
 
@@ -46,6 +46,24 @@ class Player(Entity):
         self.cursor_stack = EmptyItemStack()
         self._initialize_inventory()
         self.selected_slot = 0
+        # The miner predicts progress locally.  The 20 TPS server keeps an
+        # independent verifier timeline and broadcasts it to observers; a
+        # premature finish request is rejected with an authoritative block.
+        self.breaking_target: tuple[int, int, int, str] | None = None
+        self.break_progress = 0.0
+        self._breaking_tool_key = None
+        self._last_break_action_tick = -10_000
+        self.eating = False
+        self._eating_slot: int | None = None
+        self._eating_material_id: str | None = None
+        self._eat_progress = 0
+        self._last_eat_action_tick = -10_000
+        self._movement_distance_this_tick = 0.0
+        self._last_move_tick = -1
+        self.exhaustion = 0.0
+        self.regen_timer = 0
+        self.starvation_timer = 0
+        self.fall_distance = 0.0
         # A client may already have PlayerMove packets queued when the server
         # teleports it.  Do not let one of those stale packets overwrite the
         # authoritative destination before the client has received the
@@ -106,6 +124,339 @@ class Player(Entity):
 
     def sync_inventory(self) -> None:
         self.world.server.send_client_socket(self, self.inventory_packet(), "Forward")
+
+    def can_reach_block(self, x: int, y: int, z: int) -> bool:
+        """Return whether a block action is valid from the server position."""
+        if self.health <= 0 or z not in (0, 1):
+            return False
+        if getattr(self.gamemode, "name_id", "survival") == "spectator":
+            return False
+        center_x = self.x + self.width * 0.5
+        center_y = self.y + self.height * 0.5
+        dx = x + 0.5 - center_x
+        dy = y + 0.5 - center_y
+        reach = max(0.0, float(self.interact_range)) + 0.75
+        return dx * dx + dy * dy <= reach * reach
+
+    def _send_break_progress(self, target, progress: float, active: bool) -> None:
+        if target is None:
+            return
+        x, y, z, _block_id = target
+        packet = {
+            "__class__": "BlockBreakProgress",
+            "miner_uuid": str(self.uuid),
+            "x": x,
+            "y": y,
+            "z": z,
+            "progress": max(0.0, min(1.0, float(progress))),
+            "active": bool(active),
+        }
+        for observer in tuple(self.world.server.players):
+            if observer.world is self.world and observer.is_loading_position(x, y, z):
+                self.world.server.send_client_socket(observer, packet, "Forward")
+
+    def _broadcast_action_state(self) -> None:
+        for observer in tuple(self.world.server.players):
+            if observer is self or observer.world is not self.world:
+                continue
+            if observer.is_loading_position(int(self.x), int(self.y), getattr(self, 'z', 0)):
+                self.world.server.send_client_socket(observer, self, "EntityUpdate")
+
+    def clear_breaking(self, *, notify: bool = True) -> None:
+        old_target = self.breaking_target
+        self.breaking_target = None
+        self.break_progress = 0.0
+        self._breaking_tool_key = None
+        if notify and old_target is not None:
+            self._send_break_progress(old_target, 0.0, False)
+
+    def request_breaking(self, x: int, y: int, z: int) -> bool:
+        """Accept one keepalive for a server-authoritative mining action."""
+        if self.eating:
+            self.clear_eating()
+        world = self.world
+        if not (0 <= y < world.attribute.MAX_BUILD_HEIGHT and z in (0, 1)):
+            self.clear_breaking()
+            return False
+        if x // 16 not in self.client_loaded_regions or not world.is_chunk_loaded(x // 16):
+            self.clear_breaking()
+            return False
+        if not self.can_reach_block(x, y, z):
+            self.clear_breaking()
+            return False
+        block = world.get_block(x, y, z)
+        if not getattr(block, "breakable", False) or getattr(block, "block_id", "air") == "air":
+            self.clear_breaking()
+            return False
+
+        held = self.inventory[self.selected_slot]
+        tool_key = (
+            getattr(held.material, 'name_id', 'air'),
+            repr(getattr(held, 'nbt', {})),
+        )
+        target = (x, y, z, str(block.block_id))
+        if target != self.breaking_target or tool_key != self._breaking_tool_key:
+            self.clear_breaking()
+            self.breaking_target = target
+            self.break_progress = 0.0
+            self._breaking_tool_key = tool_key
+            self._send_break_progress(target, 0.0, True)
+        self._last_break_action_tick = int(getattr(world.server, "server_ticks", 0))
+        return True
+
+    def _destroy_delta(self, block) -> float:
+        if getattr(self.gamemode, "name_id", "survival") == "creative":
+            return 1.0
+        hardness = float(getattr(block, "hardness", 1.5))
+        if hardness < 0:
+            return 0.0
+        held = self.inventory[self.selected_slot].material
+        speed = 1.0
+        if getattr(held, "tool_type", None) == getattr(block, "preferred_tool", None):
+            speed = max(0.0, float(getattr(held, "mining_speed", 1.0)))
+        # Do not trust the client's in-fluid/on-ground flags for mining speed.
+        inside_block = bool(self._check_collision_at(self.x, self.y))
+        if not inside_block:
+            if self._get_fluid_interaction()[0]:
+                speed /= 5.0
+            if not self._check_support_at():
+                speed /= 5.0
+        divisor = 30.0 if block.can_harvest(held) else 100.0
+        return 1.0 if hardness == 0 else speed / hardness / divisor
+
+    def tick_breaking(self) -> None:
+        target = self.breaking_target
+        if target is None:
+            return
+        current_tick = int(getattr(self.world.server, "server_ticks", 0))
+        # A short grace period absorbs socket/server thread scheduling jitter;
+        # the client still has to keep sending the same target while held.
+        if current_tick - self._last_break_action_tick > 2:
+            self.clear_breaking()
+            return
+        x, y, z, block_id = target
+        block = self.world.get_block(x, y, z)
+        if (
+            getattr(block, "block_id", "air") != block_id
+            or not getattr(block, "breakable", False)
+            or not self.can_reach_block(x, y, z)
+        ):
+            self.clear_breaking()
+            return
+
+        self.break_progress = min(1.0, self.break_progress + self._destroy_delta(block))
+        self._send_break_progress(target, self.break_progress, True)
+
+    def finish_breaking(self, x: int, y: int, z: int) -> bool:
+        """Verify a predicted client break and either accept or correct it."""
+        world = self.world
+        if (
+            not (0 <= y < world.attribute.MAX_BUILD_HEIGHT)
+            or z not in (0, 1)
+            or x // 16 not in self.client_loaded_regions
+            or not world.is_chunk_loaded(x // 16)
+        ):
+            self.clear_breaking()
+            return False
+        target = self.breaking_target
+        block = world.get_block(x, y, z)
+        held_stack = self.inventory[self.selected_slot]
+        current_tool_key = (
+            getattr(held_stack.material, 'name_id', 'air'),
+            repr(getattr(held_stack, 'nbt', {})),
+        )
+        valid_target = (
+            target is not None
+            and target[:3] == (x, y, z)
+            and getattr(block, 'block_id', 'air') == target[3]
+            and getattr(block, 'breakable', False)
+            and self.can_reach_block(x, y, z)
+            and current_tool_key == self._breaking_tool_key
+        )
+        # The finish packet can arrive just before this server tick advances
+        # mining.  Permit exactly one authoritative tick of scheduling slack.
+        enough_progress = valid_target and (
+            self.break_progress + self._destroy_delta(block) >= 1.0 - 1.0e-9
+        )
+        if not enough_progress:
+            self.clear_breaking()
+            world.server.send_client_socket(self, {
+                '__class__': 'BlockBreakCorrection',
+                'x': x, 'y': y, 'z': z,
+                'block_data': block.to_dict(),
+            }, 'Forward')
+            return False
+
+        tool = held_stack.material
+        self.clear_breaking(notify=False)
+        experience = world.break_block(x, y, z, tool=tool)
+        self._send_break_progress(target, 0.0, False)
+        if experience:
+            self.experience += experience
+            world.server.send_client_socket(
+                self, {'__class__': 'Experience', 'amount': experience}, 'Forward'
+            )
+        return True
+
+    def request_eating(self) -> bool:
+        if self.breaking_target is not None:
+            self.clear_breaking()
+        held = self.inventory[self.selected_slot]
+        material_id = getattr(held.material, 'name_id', 'air')
+        food = int(getattr(held.material, 'food_value', 0))
+        if self.health <= 0 or self.food_level >= 20 or held.is_empty() or food <= 0:
+            self.clear_eating()
+            return False
+        if self._eating_slot != self.selected_slot or self._eating_material_id != material_id:
+            self.clear_eating()
+            self.eating = True
+            self._eating_slot = self.selected_slot
+            self._eating_material_id = material_id
+            self._eat_progress = 0
+            self._broadcast_action_state()
+        self._last_eat_action_tick = int(getattr(self.world.server, 'server_ticks', 0))
+        return True
+
+    def clear_eating(self) -> None:
+        was_eating = self.eating
+        self.eating = False
+        self._eating_slot = None
+        self._eating_material_id = None
+        self._eat_progress = 0
+        if was_eating:
+            self._broadcast_action_state()
+
+    def _mouth_position(self) -> tuple[float, float, int]:
+        direction = 1.0 if int(self.facing) == 1 else -1.0
+        angle = _math.radians(float(self.look_angle))
+        forward = 0.27 * direction
+        down = -0.06
+        return (
+            self.x + self.width * 0.5 + forward * _math.cos(angle) - down * _math.sin(angle),
+            self.y + 1.55 + forward * _math.sin(angle) + down * _math.cos(angle),
+            int(getattr(self, 'z', 0)),
+        )
+
+    def _spawn_eating_particles(self, material_id: str) -> None:
+        mouth_x, mouth_y, z = self._mouth_position()
+        direction = 1.0 if int(self.facing) == 1 else -1.0
+        self.world.spawn_particle(ITEM(
+            mouth_x,
+            mouth_y,
+            z,
+            count=3,
+            motion=(-0.018 * direction, -0.035),
+            data={
+                'item_id': material_id,
+                'position_spread': (0.04, 0.025),
+                'motion_spread': (0.025, 0.018),
+            },
+        ))
+
+    def tick_eating(self) -> None:
+        if not self.eating:
+            return
+        current_tick = int(getattr(self.world.server, 'server_ticks', 0))
+        if current_tick - self._last_eat_action_tick > 2:
+            self.clear_eating()
+            return
+        held = self.inventory[self.selected_slot]
+        material_id = getattr(held.material, 'name_id', 'air')
+        food = int(getattr(held.material, 'food_value', 0))
+        if (
+            self.selected_slot != self._eating_slot
+            or material_id != self._eating_material_id
+            or held.is_empty()
+            or food <= 0
+            or self.food_level >= 20
+        ):
+            self.clear_eating()
+            return
+        self._eat_progress += 1
+        if self._eat_progress % 4 == 0:
+            self._spawn_eating_particles(material_id)
+        if self._eat_progress < 16:
+            return
+        saturation = float(getattr(held.material, 'saturation_modifier', 0.0))
+        self.food_level = min(20, self.food_level + food)
+        self.saturation = min(
+            float(self.food_level), self.saturation + food * saturation * 2
+        )
+        held.reduce_amount(1)
+        mouth_x, mouth_y, z = self._mouth_position()
+        self.world.server.broadcast_sound('random.eat', mouth_x, mouth_y, z)
+        self.sync_inventory()
+        self.clear_eating()
+
+    def record_server_movement(self, previous_y: float, was_on_ground: bool,
+                               horizontal_distance: float) -> None:
+        """Update server-owned fall and exhaustion state after an accepted move."""
+        self._movement_distance_this_tick += max(0.0, float(horizontal_distance))
+        if getattr(self.gamemode, "name_id", "survival") != "survival":
+            self.fall_distance = 0.0
+            return
+        if self.in_fluid or self.flying:
+            self.fall_distance = 0.0
+            return
+        fallen = previous_y - self.y
+        if fallen > 0:
+            self.fall_distance += fallen
+        if self.on_ground and not was_on_ground:
+            if self.fall_distance > 3.0:
+                self.apply_damage(int(self.fall_distance - 3.0 + 0.999), FALL, source=None)
+            self.fall_distance = 0.0
+
+    def _tick_survival_state(self) -> None:
+        if getattr(self.gamemode, "name_id", "survival") != "survival":
+            self._movement_distance_this_tick = 0.0
+            return
+        if self.health <= 0:
+            self._movement_distance_this_tick = 0.0
+            return
+        if self._movement_distance_this_tick > 0.02:
+            self.exhaustion += 0.006 if self.sprinting else 0.001
+        self._movement_distance_this_tick = 0.0
+
+        food_changed = False
+        while self.exhaustion >= 4.0:
+            self.exhaustion -= 4.0
+            if self.saturation > 0:
+                self.saturation = max(0.0, self.saturation - 1.0)
+                food_changed = True
+            elif self.food_level > 0:
+                self.food_level -= 1
+                food_changed = True
+
+        if self.food_level >= 18 and self.health < self.max_health:
+            self.regen_timer += 1
+            if self.regen_timer >= 80:
+                self.health = min(self.max_health, self.health + 1)
+                self.exhaustion += 6.0
+                self.regen_timer = 0
+                food_changed = True
+        else:
+            self.regen_timer = 0
+
+        if self.food_level == 0:
+            self.starvation_timer += 1
+            if self.starvation_timer >= 80:
+                self.apply_damage(1, STARVE, source=None)
+                self.starvation_timer = 0
+        else:
+            self.starvation_timer = 0
+        if food_changed:
+            self.sync_inventory()
+
+    def tick_server(self) -> None:
+        """Advance state which must never be supplied by a client packet."""
+        self.tick_damage_state()
+        if self.attack_cooldown_ticks > 0:
+            self.attack_cooldown_ticks -= 1
+        if self.attack_animation_ticks > 0:
+            self.attack_animation_ticks -= 1
+        self._tick_survival_state()
+        self.tick_breaking()
+        self.tick_eating()
 
     def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
         mode = getattr(self.gamemode, "name_id", "survival")
@@ -434,6 +785,12 @@ class Player(Entity):
         self.y = y
         if world:
             self.world = world
+        self.motion.x = 0.0
+        self.motion.y = 0.0
+        self.fall_distance = 0.0
+        self._last_move_tick = -1
+        self.clear_breaking()
+        self.clear_eating()
         self._teleport_id += 1
         self._pending_teleport_id = self._teleport_id
         self.world.server.send_client_socket(self, self, "Teleport")

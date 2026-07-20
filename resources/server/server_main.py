@@ -18,6 +18,7 @@ from resources.server.inventory import (
     Inventory, normalize_inventory_payload, payload_to_stack,
     restore_inventory, serialize_inventory, stack_to_payload,
 )
+from resources.server.crafting import load_recipes
 from resources.server.player import Player
 from resources.server.server_packets import encode_packet, decode_packet
 from resources.server.text import Text
@@ -264,7 +265,9 @@ class Server:
             self.ticks += 1
 
     def init(self):
+        t_start = time.perf_counter()
         logging.info("Initializing server")
+        load_recipes()
         seed = random.randint(-23767, 23767)
         world_time = 0
         if self.save_id:
@@ -293,12 +296,14 @@ class Server:
             )
         self.initialized = True
         self.ready.set()  # 通知 socket 线程服务器已就绪
+        elapsed = time.perf_counter() - t_start
+        logging.info(f"Server startup completed in {elapsed:.2f}s")
         self.run()
 
     def tick(self):
         self.server_ticks += 1
         for player in tuple(self.players):
-            player.tick_damage_state()
+            player.tick_server()
         for world in self.worlds.values():
             world.world_time = (world.world_time + 1) % 24000
             world.tick_weather()
@@ -763,6 +768,8 @@ class Server:
     def on_player_disconnect(self, player: Player):
         if player not in self.players and player not in self.socket_server.connections:
             return
+        player.clear_breaking()
+        player.clear_eating()
         self.save_all(player, force=True)
         # 广播离开消息（黄色，排除已离开的玩家）
         self.broadcast_chat(f"{player.name} left the game", (255, 255, 85), exclude=player)

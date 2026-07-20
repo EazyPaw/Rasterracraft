@@ -153,6 +153,12 @@ class Entity:
                 }
             except (AttributeError, TypeError, ValueError, IndexError):
                 pass
+            breaking_target = getattr(self, 'breaking_target', None)
+            data['breaking'] = breaking_target is not None
+            data['break_progress'] = float(getattr(self, 'break_progress', 0.0))
+            data['eating'] = bool(getattr(self, 'eating', False))
+            if breaking_target is not None:
+                data['break_target'] = list(breaking_target[:3])
         return data
 
     def apply_summon_nbt(self, nbt: dict) -> None:

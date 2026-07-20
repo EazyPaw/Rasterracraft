@@ -1,6 +1,9 @@
 import argparse
 import logging
+import os
 import sys
+
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "1"
 
 try:
     import colorlog

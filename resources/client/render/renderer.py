@@ -671,25 +671,32 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         pygame.draw.rect(self.screen, (0, 0, 0), outline_rect, 1)
 
     def draw_destroy_progress(self) -> None:
-        """Overlay the bundled destroy_stage texture while a survival block is mined."""
-        player = self.client.client_player
-        if player is None:
-            return
-        get_stage = getattr(player.game_mode, "get_destroy_stage", None)
-        if not callable(get_stage):
-            return
-        stage = get_stage()
-        target = getattr(player.game_mode, "break_target", None)
-        if stage is None or target is None:
-            return
-        x, y, _z, _block_id = target
-        texture = self.client.resources_manager.get_texture_img(f"blocks.destroy_stage_{stage}", gta = True)
-        if texture is None:
-            return
-        texture = pygame.transform.scale(texture, (self.block_size, self.block_size))
-        sx = (x - self.camera.x - 0.5) * self.block_size + self.SCREEN_WIDTH // 2
-        sy = self.SCREEN_HEIGHT - (((y + 1) - self.camera.y + 0.5) * self.block_size + self.SCREEN_HEIGHT // 2)
-        self.blit(texture, (round(sx), round(sy)))
+        """Draw server-authoritative destroy stages for every visible miner."""
+        states = self.client_world.iter_break_progress()
+        # Multiple players mining one block share one overlay; render the most
+        # advanced authoritative stage instead of alpha-stacking duplicates.
+        targets: dict[tuple[int, int, int], float] = {}
+        for state in states:
+            progress = max(0.0, min(1.0, float(state.get('progress', 0.0))))
+            if progress <= 0.0:
+                continue
+            target = (int(state['x']), int(state['y']), int(state['z']))
+            targets[target] = max(progress, targets.get(target, 0.0))
+
+        for (x, y, _z), progress in targets.items():
+            stage = min(9, max(0, int(progress * 10)))
+            texture = self.client.resources_manager.get_texture_img(
+                f"blocks.destroy_stage_{stage}", gta=True
+            )
+            if texture is None:
+                continue
+            texture = pygame.transform.scale(texture, (self.block_size, self.block_size))
+            sx = (x - self.camera.x - 0.5) * self.block_size + self.SCREEN_WIDTH // 2
+            sy = self.SCREEN_HEIGHT - (
+                ((y + 1) - self.camera.y + 0.5) * self.block_size
+                + self.SCREEN_HEIGHT // 2
+            )
+            self.blit(texture, (round(sx), round(sy)))
 
     # ===================== 调试 =====================
 
