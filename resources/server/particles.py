@@ -306,6 +306,45 @@ class FLAME(TextureParticle):
     linear_drag = 0.01
 
 
+class EXPLOSION(TextureParticle):
+    particle_id = "minecraft:explosion"
+    name = "explosion"
+    _texture_paths = tuple(f"particle.explosion_{i}" for i in range(16))
+    lifetime_ticks = (16, 16)
+    size = (1.0, 1.35)
+    gravity = 0.0
+    rotation_speed_range = (0.0, 0.0)
+    animation_frame_ticks = 1
+    animation_loop = False
+
+
+class EXPLOSION_EMITTER(Particle):
+    particle_id = "minecraft:explosion_emitter"
+    name = "explosion_emitter"
+    _texture_path = None
+
+    @client_method
+    def spawn_from_packet(self, manager: 'ParticleManager', client=None) -> None:
+        power = max(0.1, float(self.data.get("power", 4.0)))
+        particle_count = max(8, min(32, round(power * 5)))
+        for _ in range(particle_count):
+            angle = random.uniform(0.0, math.tau)
+            radius = math.sqrt(random.random()) * power * 0.65
+            particle = EXPLOSION.from_values(
+                self.x + math.cos(angle) * radius,
+                self.y + math.sin(angle) * radius,
+                self.z,
+            )
+            if particle.setup_client_state(
+                manager,
+                size_=random.uniform(0.75, 1.45),
+                lifetime=16,
+                rotation_speed=0.0,
+                client=client,
+            ):
+                manager.add_particle(particle)
+
+
 class SPLASH(TextureParticle):
     particle_id = "minecraft:splash"
     name = "splash"

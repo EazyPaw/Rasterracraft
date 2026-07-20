@@ -59,7 +59,10 @@ class Player(Entity):
 
     def _initialize_inventory(self) -> None:
         """Create the same starter inventory as the client for new worlds."""
-        from resources.server.materials import APPLE, BREAD, GLOWSTONE, SAND, WATER
+        from resources.server.materials import (
+            APPLE, BREAD, FLINT_AND_STEEL, GLOWSTONE, SAND, WATER,
+            get_material_by_id,
+        )
         if getattr(self.gamemode, "name_id", "survival") == "creative":
             for i in range(4):
                 self.inventory[i] = ItemStack(GLOWSTONE(), 64)
@@ -67,6 +70,8 @@ class Player(Entity):
                 self.inventory[i] = ItemStack(SAND(), 64)
             for i in range(4, 8):
                 self.inventory[i] = ItemStack(WATER(), 64)
+            self.inventory[9] = ItemStack(get_material_by_id("tnt"), 64)
+            self.inventory[10] = ItemStack(FLINT_AND_STEEL(), 1)
         else:
             self.inventory[0] = ItemStack(APPLE(), 3)
             self.inventory[1] = ItemStack(BREAD(), 2)

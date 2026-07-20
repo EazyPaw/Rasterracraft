@@ -128,6 +128,20 @@ def _can_player_reach_entity(player: Player, target: Entity) -> bool:
     return horizontal_gap * horizontal_gap + vertical_gap * vertical_gap <= reach * reach
 
 
+def _can_player_reach_block(player: Player, x: int, y: int, z: int) -> bool:
+    if z not in (0, 1):
+        return False
+    mode = getattr(getattr(player, "gamemode", None), "name_id", "survival")
+    if mode == "spectator":
+        return False
+    player_center_x = player.x + player.width * 0.5
+    player_center_y = player.y + player.height * 0.5
+    dx = x + 0.5 - player_center_x
+    dy = y + 0.5 - player_center_y
+    reach = max(0.0, float(getattr(player, "interact_range", 5.0)))
+    return dx * dx + dy * dy <= (reach + 0.75) ** 2
+
+
 def decode_packet(packet: dict, player: Player):
     if '__class__' not in packet:
         logging.warning("Received unknown packet")
@@ -199,6 +213,24 @@ def decode_packet(packet: dict, player: Player):
                 player.world.server.send_client_socket(
                     player, {'__class__': 'Experience', 'amount': experience}, 'Forward'
                 )
+
+    elif packet['__class__'] == 'UseBlock':
+        try:
+            x = int(packet.get('x'))
+            y = int(packet.get('y'))
+            z = int(packet.get('z'))
+        except (TypeError, ValueError):
+            return
+        world = player.world
+        if not (0 <= y < world.attribute.MAX_BUILD_HEIGHT):
+            return
+        if not _can_player_reach_block(player, x, y, z):
+            return
+        held = player.inventory[player.selected_slot]
+        if held.is_empty():
+            return
+        block = world.get_block(x, y, z)
+        block.on_use(player, held.material)
 
     elif packet['__class__'] == 'PickupItem':
         from resources.server.entities.item import Item

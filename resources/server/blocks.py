@@ -1,6 +1,7 @@
 import os
 
 import logging
+import random
 
 from resources.server.biome import get_biome_by_id
 
@@ -36,6 +37,7 @@ class STONE(Block):
     block_id = 'stone'
     name = 'tile.stone.stone.name'
     _texture_path = 'blocks.stone'
+    blast_resistance = 6.0
     preferred_tool = 'pickaxe'
     requires_correct_tool = True
     drops = (BlockDrop(COBBLESTONE_ITEM),)
@@ -44,6 +46,7 @@ class COBBLESTONE(Block):
     block_id = 'cobblestone'
     name = 'tile.stonebrick.name'
     _texture_path = 'blocks.cobblestone'
+    blast_resistance = 6.0
     preferred_tool = 'pickaxe'
     requires_correct_tool = True
 
@@ -84,6 +87,7 @@ class BEDROCK(Block):
     _texture_path = 'blocks.bedrock'
     breakable = False
     hardness = -1
+    blast_resistance = 3_600_000.0
 
 class DIRT(Block):
     block_id = 'dirt'
@@ -552,7 +556,7 @@ class SNOW(BottomSupport):
     def get_collision_box(self):
         # Snow layers occupy one to eight sixteenths of a block.  Keep this
         # instance-dependent so NBT/state changes are reflected immediately.
-        return BlockCollisionBox.from_box(0, 0, 1, self.layer / 8)
+        return BlockCollisionBox.from_box(0, 0, 1, max(0, (self.layer - 2) / 8))
 
     @client_method
     def get_texture(self, size, client):
@@ -992,6 +996,40 @@ class TNT(Block):
     block_id = 'tnt'
     name = 'tile.tnt.name'
     _texture_path = 'blocks.tnt_side'
+    hardness = 0.0
+    blast_resistance = 0.0
+    break_sound = 'dig.grass'
+
+    def prime(self, *, fuse: int = 80, igniter=None) -> bool:
+        """Replace this block with a server-authoritative primed TNT entity."""
+        if self.location is None:
+            return False
+        world = self.location.world
+        # Guard against stale block instances (for example two interactions in
+        # the same server tick) spawning duplicate fuses.
+        if world.get_block(self.location) is not self:
+            return False
+        from resources.server.entities.primed_tnt import PrimedTNT
+
+        x, y, z = self.location.x, self.location.y, self.location.z
+        world.set_block(AIR(), self.location)
+        primed = PrimedTNT(x + 0.01, y, z, world, fuse=fuse, owner=igniter)
+        world.spawn_entity(primed)
+        server = getattr(world, "server", None)
+        if server is not None:
+            server.broadcast_sound("game.tnt.primed", x + 0.5, y + 0.5, z)
+        return True
+
+    def on_use(self, player, material) -> bool:
+        if not getattr(material, "ignites_blocks", False):
+            return False
+        return self.prime(fuse=80, igniter=player)
+
+    def on_exploded(self, power: float, source=None) -> bool:
+        # Vanilla shortens the fuse of TNT reached by another blast to a
+        # random 10--30 ticks instead of dropping or deleting the block.
+        self.prime(fuse=random.randint(10, 30), igniter=source)
+        return False
 
 class MYCELIUM(Block):
     block_id = "mycelium"
@@ -1019,6 +1057,12 @@ class FIRE(Block):
     _texture_path = 'blocks.fire_layer_0'
     light_source = 15
     solid = False
+    collision_box = EMPTY
+    replaceable = True
+    suffocating = False
+    redstone_conducting = False
+    blast_resistance = 0.0
+    drops = ()
 
     def get_collision_box(self):
         return EMPTY

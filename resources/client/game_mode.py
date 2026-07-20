@@ -61,6 +61,23 @@ class GameMode(ABC):
             context=context,
         )
 
+    def try_use_selected_item_on_block(self) -> bool:
+        target = self.player.choosing_block
+        if target is None:
+            return False
+        stack = self.player.inventory[self.player.selected_slot]
+        if stack.is_empty() or not getattr(stack.material, "ignites_blocks", False):
+            return False
+        location = target.location
+        self.player.skeleton.trigger_swing()
+        self.player.client.sent_packet({
+            "__class__": "UseBlock",
+            "x": location.x,
+            "y": location.y,
+            "z": location.z,
+        })
+        return True
+
     def mouse_wheel(self, direction):
         pass
 
@@ -106,6 +123,8 @@ class CreativeMode(GameMode):
                 self.player.client.render.show_gui(self.crafting_table)
             return
         if self.player.choosing_block is None:
+            return
+        if self.try_use_selected_item_on_block():
             return
         location = self.player.choosing_block.location
         item = self.player.inventory[self.player.selected_slot]
@@ -270,6 +289,8 @@ class SurvivalMode(GameMode):
         if self.player.choosing_block and self.player.choosing_block.block_id == "crafting_table":
             if self.crafting_table not in self.player.client.render.drawing_GUIs:
                 self.player.client.render.show_gui(self.crafting_table)
+            return
+        if self.try_use_selected_item_on_block():
             return
         if getattr(item.material, "food_value", 0):
             self._eat_selected_item(item)

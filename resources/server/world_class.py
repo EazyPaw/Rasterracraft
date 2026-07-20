@@ -14,10 +14,11 @@ import resources.server.biome as biome
 
 from resources.server import save_manager
 from resources.server.block_class import Block
-from resources.server.blocks import AIR, SNOW
+from resources.server.blocks import AIR, FIRE, SNOW
+from resources.server.damange_type import EXPLOSION, PLAYER_EXPLOSION
 from resources.server.entity import Entity
 from resources.server.generator import Generator
-from resources.server.location import Location, decide_x_or_loc
+from resources.server.location import Location, Vector, decide_x_or_loc
 from resources.server.particles import BlockBreakParticleEffect, Particle, get_particle_by_id
 
 
@@ -771,7 +772,8 @@ class World:
             if callable(on_load):
                 on_load()
 
-    def break_block(self, x_loc: int | Location, y: int = None, z: int = None, tool=None):
+    def break_block(self, x_loc: int | Location, y: int = None, z: int = None,
+                    tool=None, *, explosion_power: float | None = None):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block = self.get_block(x, y, z)
         if isinstance(block, AIR):
@@ -781,7 +783,19 @@ class World:
         block.on_break()
         # Drops exist in the world first; they are never placed directly into
         # the miner's inventory.
-        for stack in block.get_drops(tool):
+        drops = (
+            block.get_drops(tool)
+            if explosion_power is None
+            else block.get_explosion_drops()
+        )
+        drop_chance = (
+            1.0
+            if explosion_power is None
+            else min(1.0, 1.0 / max(1.0, float(explosion_power)))
+        )
+        for stack in drops:
+            if random.random() > drop_chance:
+                continue
             from resources.server.entities.item import Item
             self.spawn_entity(Item(x + 0.5, y + 0.45, self, stack, z))
         experience = block.get_experience(tool)
@@ -800,8 +814,209 @@ class World:
                 return block
         return None
 
-    def spawn_explosion(self, loc, power = 4, break_block = True, catch_fire = False):
-        ...
+    @staticmethod
+    def _explosion_directions() -> tuple[tuple[float, float, float], ...]:
+        """Return Minecraft's 1,352 normalized rays from a 16-cube shell."""
+        directions = []
+        shell_max = 15
+        for ix in range(16):
+            for iy in range(16):
+                for iz in range(16):
+                    if ix not in (0, shell_max) and iy not in (0, shell_max) \
+                            and iz not in (0, shell_max):
+                        continue
+                    dx = ix / shell_max * 2.0 - 1.0
+                    dy = iy / shell_max * 2.0 - 1.0
+                    dz = iz / shell_max * 2.0 - 1.0
+                    length = math.sqrt(dx * dx + dy * dy + dz * dz)
+                    directions.append((dx / length, dy / length, dz / length))
+        return tuple(directions)
+
+    def _collect_explosion_blocks(self, x: float, y: float, z: int,
+                                  power: float) -> set[tuple[int, int, int]]:
+        """Ray-march blast energy through the two-layer block world."""
+        affected: set[tuple[int, int, int]] = set()
+        center_z = int(z) + 0.5
+        for dx, dy, dz in self._explosion_directions():
+            strength = float(power) * random.uniform(0.7, 1.3)
+            px, py, pz = x, y, center_z
+            while strength > 0.0:
+                bx, by, bz = math.floor(px), math.floor(py), math.floor(pz)
+                if 0 <= by < self.attribute.MAX_BUILD_HEIGHT and bz in (0, 1):
+                    block = self.get_block(bx, by, bz)
+                    if not isinstance(block, AIR):
+                        resistance = max(0.0, float(getattr(block, "blast_resistance", 0.0)))
+                        strength -= (resistance + 0.3) * 0.3
+                    if strength > 0.0:
+                        affected.add((bx, by, bz))
+                px += dx * 0.3
+                py += dy * 0.3
+                pz += dz * 0.3
+                strength -= 0.225
+        return affected
+
+    def _explosion_ray_clear(self, start: tuple[float, float, float],
+                             end: tuple[float, float, float]) -> bool:
+        dx, dy, dz = (end[index] - start[index] for index in range(3))
+        distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+        steps = max(1, math.ceil(distance / 0.2))
+        for step in range(1, steps):
+            amount = step / steps
+            px = start[0] + dx * amount
+            py = start[1] + dy * amount
+            pz = start[2] + dz * amount
+            bx, by, bz = math.floor(px), math.floor(py), math.floor(pz)
+            if bz not in (0, 1) or not (0 <= by < self.attribute.MAX_BUILD_HEIGHT):
+                continue
+            block = self.get_block(bx, by, bz)
+            shape = block.get_collision_box()
+            local_x, local_y = px - bx, py - by
+            if any(
+                box.min_x <= local_x <= box.max_x
+                and box.min_y <= local_y <= box.max_y
+                for box in shape
+            ):
+                return False
+        return True
+
+    def _explosion_exposure(self, entity, center: tuple[float, float, float]) -> float:
+        width = max(0.01, float(getattr(entity, "width", 1.0)))
+        height = max(0.01, float(getattr(entity, "height", 1.0)))
+        x_samples = max(2, math.floor(width * 2.0) + 1)
+        y_samples = max(2, math.floor(height * 2.0) + 1)
+        visible = 0
+        total = x_samples * y_samples
+        for ix in range(x_samples):
+            sample_x = entity.x + width * ((ix + 0.5) / x_samples)
+            for iy in range(y_samples):
+                sample_y = entity.y + height * ((iy + 0.5) / y_samples)
+                sample = (sample_x, sample_y, int(getattr(entity, "z", 0)) + 0.5)
+                if self._explosion_ray_clear(center, sample):
+                    visible += 1
+        return visible / total
+
+    def _damage_entities_from_explosion(self, center: tuple[float, float, float],
+                                        power: float, source=None) -> None:
+        radius = power * 2.0
+        if radius <= 0:
+            return
+        candidates = list(self.entities.values())
+        candidates.extend(getattr(self.server, "players", ()))
+        seen: set[str] = set()
+        for entity in candidates:
+            entity_key = str(getattr(entity, "uuid", id(entity)))
+            if entity_key in seen or getattr(entity, "removed", False):
+                continue
+            seen.add(entity_key)
+            entity_x = float(entity.x) + float(getattr(entity, "width", 1.0)) * 0.5
+            entity_y = float(entity.y) + float(getattr(entity, "height", 1.0)) * 0.5
+            entity_z = int(getattr(entity, "z", 0)) + 0.5
+            delta_x = entity_x - center[0]
+            delta_y = entity_y - center[1]
+            delta_z = entity_z - center[2]
+            distance = math.sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z)
+            if distance > radius:
+                continue
+            exposure = self._explosion_exposure(entity, center)
+            impact = (1.0 - distance / radius) * exposure
+            if impact <= 0.0:
+                continue
+            damage = math.floor(7.0 * (impact * impact + impact) * power + 1.0)
+            horizontal_length = math.hypot(delta_x, delta_y)
+            if horizontal_length < 1.0e-8:
+                knockback = Vector(0.0, impact)
+            else:
+                knockback = Vector(
+                    delta_x / horizontal_length * impact,
+                    delta_y / horizontal_length * impact,
+                )
+
+            damage_type = (
+                PLAYER_EXPLOSION
+                if getattr(source, "entity_id", None) == "player"
+                else EXPLOSION
+            )
+            apply_damage = getattr(entity, "apply_damage", None)
+            actual_damage = 0.0
+            if callable(apply_damage):
+                actual_damage = apply_damage(
+                    damage,
+                    damage_type,
+                    source=source,
+                    knockback=knockback,
+                )
+            if actual_damage <= 0.0:
+                # Explosion impulse is independent from damage immunity.  This
+                # also lets primed TNT and creative players be pushed.
+                apply_knockback = getattr(entity, "apply_knockback", None)
+                if callable(apply_knockback):
+                    apply_knockback(knockback)
+                if entity in getattr(self.server, "players", ()):
+                    self.server.send_client_socket(entity, {
+                        "__class__": "PlayerVelocity",
+                        "motion": {
+                            "x": float(entity.motion.x),
+                            "y": float(entity.motion.y),
+                        },
+                    }, "Forward")
+
+    def _ignite_explosion_fires(self, affected: set[tuple[int, int, int]]) -> None:
+        positions = list(affected)
+        random.shuffle(positions)
+        for x, y, z in positions:
+            if random.randrange(3) != 0 or y <= 0:
+                continue
+            if not isinstance(self.get_block(x, y, z), AIR):
+                continue
+            support = self.get_block(x, y - 1, z)
+            if support.has_collision_box():
+                self.set_block(FIRE(), x, y, z)
+
+    def spawn_explosion(self, loc, power=4, break_block=True, catch_fire=False,
+                        source=None):
+        """Create a Minecraft-style ray-marched explosion.
+
+        Entity exposure is measured before blocks are removed, then affected
+        blocks run their polymorphic explosion hook.  This is what allows TNT
+        to turn into a short-fuse entity instead of dropping as an item.
+        """
+        x, y, z = decide_x_or_loc(loc)
+        power = max(0.0, float(power))
+        z = int(z)
+        if power <= 0.0 or z not in (0, 1):
+            return set()
+
+        affected = self._collect_explosion_blocks(float(x), float(y), z, power)
+        center = (float(x), float(y), z + 0.5)
+        self._damage_entities_from_explosion(center, power, source=source)
+
+        if break_block:
+            positions = list(affected)
+            random.shuffle(positions)
+            for bx, by, bz in positions:
+                block = self.get_block(bx, by, bz)
+                if isinstance(block, AIR):
+                    continue
+                if block.on_exploded(power, source=source):
+                    self.break_block(
+                        bx, by, bz,
+                        explosion_power=power,
+                    )
+
+        if catch_fire:
+            self._ignite_explosion_fires(affected)
+
+        self.play_particle(
+            (
+                "minecraft:explosion_emitter"
+                if power >= 2.0 and break_block
+                else "minecraft:explosion"
+            ),
+            float(x), float(y), z,
+            data={"power": power},
+        )
+        self.server.broadcast_sound("random.explode", float(x), float(y), z)
+        return affected
 
 
 

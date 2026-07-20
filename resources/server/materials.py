@@ -76,6 +76,14 @@ class STICK(Material):
     _texture_path = "items.stick"
 
 
+class FLINT_AND_STEEL(Material):
+    name_id = "flint_and_steel"
+    name = "item.flintAndSteel.name"
+    _texture_path = "items.flint_and_steel"
+    max_stack_size = 1
+    ignites_blocks = True
+
+
 class Tool(Material):
     tool_type = None
     tier = "wood"
@@ -159,7 +167,7 @@ def get_material_by_id(material_id: str):
         "cobblestone": COBBLESTONE, "water": WATER, "lava": LAVA,
         "glowstone": GLOWSTONE, "apple": APPLE, "bread": BREAD,
         "cooked_beef": COOKED_BEEF, "rotten_flesh": ROTTEN_FLESH,
-        "stick": STICK,
+        "stick": STICK, "flint_and_steel": FLINT_AND_STEEL,
         "torch": TORCH,
         "wooden_pickaxe": WOODEN_PICKAXE, "stone_pickaxe": STONE_PICKAXE,
         "iron_pickaxe": IRON_PICKAXE, "diamond_pickaxe": DIAMOND_PICKAXE,

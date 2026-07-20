@@ -3,6 +3,7 @@ import time
 
 from resources.client.entity_skeleton import PlayerSkeleton
 from resources.server.entities.falling_block import FallingBlockSkeleton
+from resources.server.entities.primed_tnt import PrimedTNTSkeleton
 from resources.server.entities.zombie import ZombieSkeleton
 from resources.server.blocks import get_block_by_id
 from resources.server.item_class import ItemStack
@@ -57,6 +58,8 @@ class ClientEntity:
         self.aggressive = bool(packet.get('aggressive', False))
         self.look_angle = float(packet.get('look_angle', 0.0))
         self.attack_animation_ticks = int(packet.get('attack_animation_ticks', 0))
+        self.fuse = int(packet.get('fuse', 0))
+        self.initial_fuse = int(packet.get('initial_fuse', self.fuse))
         self.name = packet.get('name', self.uuid[:8])
         self.block = None
         self.skeleton = None
@@ -86,6 +89,8 @@ class ClientEntity:
         self.attack_animation_ticks = int(packet.get(
             'attack_animation_ticks', self.attack_animation_ticks
         ))
+        self.fuse = int(packet.get('fuse', self.fuse))
+        self.initial_fuse = int(packet.get('initial_fuse', self.initial_fuse))
         self.name = packet.get('name', self.name)
 
         block_data = packet.get('block_data')
@@ -126,3 +131,5 @@ class ClientEntity:
             self.skeleton = ItemEntityRenderer(self)
         elif self.entity_id == "zombie":
             self.skeleton = ZombieSkeleton(self)
+        elif self.entity_id == "primed_tnt":
+            self.skeleton = PrimedTNTSkeleton(self)

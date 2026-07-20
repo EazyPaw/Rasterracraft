@@ -249,6 +249,12 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             player.motion.y = float(motion.get('y', player.motion.y))
             if player.health <= 0:
                 client.show_death_screen(packet.get('death_message'))
+    elif packet['__class__'] == 'PlayerVelocity':
+        player = client.client_player
+        if player is not None:
+            motion = packet.get('motion', {})
+            player.motion.x = float(motion.get('x', player.motion.x))
+            player.motion.y = float(motion.get('y', player.motion.y))
     elif packet['__class__'] == 'Experience':
         if client.client_player is not None:
             client.client_player.add_experience(int(packet.get('amount', 0)))

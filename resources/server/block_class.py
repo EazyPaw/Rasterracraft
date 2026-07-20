@@ -246,6 +246,19 @@ class Block(ABC):
             return [ItemStack(get_block_item(self), 1)]
         return [drop.create_stack() for drop in self.drops]
 
+    def get_explosion_drops(self):
+        """Return loot candidates without applying tool harvest requirements.
+
+        Explosion survival is decided by ``World.break_block`` from the blast
+        power.  Keeping the loot construction here lets concrete blocks retain
+        declarative ``BlockDrop`` data while avoiding a fake mining tool.
+        """
+        from resources.server.item_class import ItemStack
+        from resources.server.materials import get_block_item
+        if self.drops is None:
+            return [ItemStack(get_block_item(self), 1)]
+        return [drop.create_stack() for drop in self.drops]
+
     def get_experience(self, material) -> int:
         if not self.can_harvest(material):
             return 0
@@ -259,6 +272,14 @@ class Block(ABC):
         :return:
         """
         return False # 返回此方块能否被交互
+
+    def on_use(self, player, material) -> bool:
+        """Server-side item-on-block interaction hook."""
+        return False
+
+    def on_exploded(self, power: float, source=None) -> bool:
+        """React to a blast and report whether the world should destroy it."""
+        return self.breakable
 
     def on_left_click(self):
         pass
