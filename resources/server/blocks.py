@@ -1013,6 +1013,16 @@ class BROWN_MUSHROOM_BLOCK(Block):
     name = 'tile.brown_mushroom_block.name'
     _texture_path = 'blocks.mushroom_block_skin_brown'
 
+class FIRE(Block):
+    block_id = 'fire'
+    name = 'tile.fire.name'
+    _texture_path = 'blocks.fire_layer_0'
+    light_source = 15
+    solid = False
+
+    def get_collision_box(self):
+        return EMPTY
+
 # ---- block_id → Block 子类 缓存 ----
 _BLOCK_REGISTRY: dict[str, type] = None  # None = 尚未构建
 

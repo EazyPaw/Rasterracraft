@@ -127,24 +127,26 @@ class ResourcesManager:
 
         return "".join(result)
 
-    def get_texture_img(self, key: str, cft=False) -> Surface:
+    def get_texture_img(self, key: str, cft=False, gta = False) -> Surface:
         """
         获取指定纹理的 Surface 对象。自带缓存，可直接调用
         :param cft: 是否切除材质中完全透明的多余边缘
         :param key: 纹理的键，格式为 "类别.子路径.文件名"
                    例如："blocks.stone" -> assets/minecraft/textures/blocks/stone.png
                         "gui.sprites.hud.hotbar" -> assets/minecraft/textures/gui/sprites/hud/hotbar.png
+        :param gta: 是否将灰度图转化为alpha图像
         :return: Surface 对象，如果没有找到则返回缺失纹理
         此方法本身带有缓存优化。
         """
         # 检查缓存
-        if key in self.textures:
-            r = self.textures[key]
+        ckey = (key, cft, gta)
+        if ckey in self.textures:
+            r = self.textures[ckey]
             if isinstance(r, pygame.Surface):
-                return self.textures[key]
+                return self.textures[ckey]
             if isinstance(r, dict):
                 n = self._get_animation_frame_index(r)
-                return self.textures[key]["textures"][n]
+                return self.textures[ckey]["textures"][n]
 
         # 解析路径
         parts = key.split('.')
@@ -164,7 +166,7 @@ class ResourcesManager:
         try:
             if not os.path.exists(full_path):
                 logging.warning(f"Texture file not found: '{full_path}'")
-                self.textures[key] = self.missing_texture
+                self.textures[ckey] = self.missing_texture
                 return self.missing_texture
             if os.path.exists(meta_path):
                 with open(meta_path, 'r', encoding='utf-8') as f:
@@ -182,17 +184,17 @@ class ResourcesManager:
                 height = texture.get_size()[1]
                 if height % width != 0:
                     logging.warning(f"Texture height is not a multiple of width: {width}")
-                    self.textures[key] = self.missing_texture
+                    self.textures[ckey] = self.missing_texture
                     return self.missing_texture
                 strips = self.split_horizontal_strips(texture)
                 frame_indices = self._parse_animation_frames(animation, len(strips))
-                self.textures[key] = {
+                self.textures[ckey] = {
                     "textures": strips,
                     "frame_time": max(1, int(frame_time)),
                     "frame_indices": frame_indices,
                 }
                 # 首次加载也计算当前帧（与缓存命中分支逻辑一致）
-                n = self._get_animation_frame_index(self.textures[key])
+                n = self._get_animation_frame_index(self.textures[ckey])
                 return strips[n]
 
 
@@ -200,12 +202,15 @@ class ResourcesManager:
             if cft:
                 texture = self._crop_transparent_edges(texture)
 
-            self.textures[key] = texture
+            if gta:
+                texture = self.grayscale_to_alpha(texture)
+
+            self.textures[ckey] = texture
             return texture
 
         except (pygame.error, IOError) as e:
             logging.warning(f"Failed to load texture '{key}' from '{full_path}': {e}")
-            self.textures[key] = self.missing_texture
+            self.textures[ckey] = self.missing_texture
             return self.missing_texture
 
     def get_texture_animation_key(self, key: str):
@@ -523,6 +528,42 @@ class ResourcesManager:
         del alpha_arr
         return result
 
+    @staticmethod
+    def grayscale_to_alpha(surface):
+        """
+        将带 alpha 的灰度 Surface 转换为纯黑半透明遮罩：
+        - RGB 全部设为 0（纯黑）
+        - Alpha 由灰度值决定：黑色(0) → 255 不透明，白色(255) → 0 完全透明
+        - 原有的 alpha 通道被忽略，完全由灰度重新计算
+
+        参数：
+            surface (pygame.Surface): 输入的 Surface，应为灰度图（R=G=B），且最好已有 alpha 通道。
+
+        返回：
+            pygame.Surface: 新的纯黑半透明 Surface。
+        """
+        # 确保 Surface 有 alpha 通道（若无则添加）
+        if surface.get_alpha() is None:
+            surface = surface.convert_alpha()
+
+        # 复制一份，避免影响原始图像
+        result = surface.copy()
+
+        w, h = result.get_size()
+        pixels = pygame.PixelArray(result)  # 锁定像素
+
+        for x in range(w):
+            for y in range(h):
+                color = pixels[x, y]
+                # 提取红色通道（灰度图 R=G=B）
+                gray = (color >> 16) & 0xFF
+                # 计算新 alpha：灰色越亮，alpha 越小（越透明）
+                new_alpha = 255 - gray
+                # 设置 RGB 为 0，并应用新 alpha
+                pixels[x, y] = (0, 0, 0, new_alpha)
+
+        del pixels  # 解锁
+        return result
 @client_method
 def transkey(key: str, *args, client = None):
     return client.resources_manager.get_translation_key(key, *args)

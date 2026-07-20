@@ -638,7 +638,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         if stage is None or target is None:
             return
         x, y, _z, _block_id = target
-        texture = self.client.resources_manager.get_texture_img(f"blocks.destroy_stage_{stage}")
+        texture = self.client.resources_manager.get_texture_img(f"blocks.destroy_stage_{stage}", gta = True)
         if texture is None:
             return
         texture = pygame.transform.scale(texture, (self.block_size, self.block_size))

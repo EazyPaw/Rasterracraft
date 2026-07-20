@@ -138,13 +138,12 @@ class MoveControl:
         entity.facing = 1 if direction > 0 else 0
         entity.motion.x += entity.get_move_acceleration() * self.speed_modifier * direction
 
-        # Only a real collision in the raised probe requests a jump.  The
-        # supporting floor is below the probe, so flat pursuit never jumps.
-        probe_x = entity.x + direction * 0.16
-        if (
-            entity.on_ground
-            and entity._check_collision_at(probe_x, entity.y + 0.05)
-        ):
+        # Request a jump only when the horizontal path is genuinely blocked
+        # and the common movement layer cannot step onto that obstacle.  Low
+        # slabs/snow/custom shapes are crossed directly via max_step_height.
+        probe_dx = direction * max(abs(entity.motion.x), 0.16)
+        _, blocked = entity._sweep_x(probe_dx)
+        if entity.on_ground and blocked and not entity.can_step_up(probe_dx):
             self.ai.jump_control.jump()
 
 
@@ -313,13 +312,6 @@ class MeleeAttackGoal(Goal):
         self.ai.look_control.look_at(target_x, target_y)
         self.ai.move_control.move_to(target_x, 1.0)
 
-        # A target on the next block level requires a jump.  A small vertical
-        # physics fluctuation while both mobs run on one floor does not.
-        if (
-            self.entity.on_ground
-            and target.y - self.entity.y > max(0.9, self.entity.height * 0.45)
-        ):
-            self.ai.jump_control.jump()
         if self.ai.is_in_attack_reach(target):
             self.ai.try_attack(target)
 

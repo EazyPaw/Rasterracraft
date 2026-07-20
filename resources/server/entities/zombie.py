@@ -32,7 +32,7 @@ class Zombie(Entity):
         self.health = self.max_health
         # ``get_move_acceleration`` now scales from this attribute, so changing
         # move_speed at runtime changes actual horizontal movement immediately.
-        self.move_speed = 0.03
+        self.move_speed = 0.1
         self.movement_acceleration = 0.05
         self.interact_range = 1.5
         self.attack_damage = 3.0

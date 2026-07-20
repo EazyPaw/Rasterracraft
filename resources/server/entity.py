@@ -359,6 +359,108 @@ class Entity:
         final_x = hit_x - self.width - 0.001 if dx > 0 else hit_x + 0.001
         return final_x - self.x, True
 
+    def _step_height_candidates(self, dx: float) -> tuple[float, ...]:
+        """Return lifts that could clear horizontal obstacles in ``dx``.
+
+        Candidate heights come from the actual collision-box tops in the
+        swept path, so slabs, snow layers and custom collision shapes all use
+        the same polymorphic block geometry as ordinary movement.
+        """
+        try:
+            max_step = max(0.0, float(self.max_step_height))
+        except (AttributeError, TypeError, ValueError):
+            return ()
+        if dx == 0 or max_step <= 0:
+            return ()
+
+        y_min, y_max = self.y, self.y + self.height
+        leading_x = self.x + self.width if dx > 0 else self.x
+        low_x, high_x = sorted((leading_x, leading_x + dx))
+        candidates = set()
+        for block_x in range(math.floor(low_x) - 2, math.floor(high_x) + 3):
+            for block_y in range(math.floor(y_min) - 2, math.floor(y_max) + 3):
+                for box in self._get_collision_boxes(block_x, block_y, getattr(self, "z", 0)):
+                    if box.max_y <= y_min + 1e-9 or box.min_y >= y_max - 1e-9:
+                        continue
+                    hit_x = box.min_x if dx > 0 else box.max_x
+                    distance = hit_x - leading_x
+                    in_path = (
+                        dx > 0 and -1e-9 <= distance <= dx + 1e-9
+                    ) or (
+                        dx < 0 and dx - 1e-9 <= distance <= 1e-9
+                    )
+                    if not in_path:
+                        continue
+                    relative_height = box.max_y - self.y
+                    if 1e-9 < relative_height <= max_step + 0.002:
+                        # The extra millimetre keeps the open AABB just above
+                        # the obstacle top during the horizontal sweep.
+                        candidates.add(round(relative_height + 0.001, 9))
+        return tuple(sorted(candidates))
+
+    def _try_step_up(self, dx: float, blocked_dx: float | None = None):
+        """Find a direct step-up route without permanently moving the entity.
+
+        Returns ``(horizontal_delta, vertical_delta, collided_x)`` when a
+        route makes more horizontal progress than the ordinary sweep.
+        """
+        if (
+            dx == 0
+            or not self.on_ground
+            or self.flying
+            or self.in_fluid
+            or self.motion.y > 1e-9
+        ):
+            return None
+
+        if blocked_dx is None:
+            blocked_dx, collided = self._sweep_x(dx)
+            if not collided:
+                return None
+
+        original_x, original_y = self.x, self.y
+        best = None
+        try:
+            for lift in self._step_height_candidates(dx):
+                self.x, self.y = original_x, original_y
+                actual_up, _ = self._sweep_y(lift)
+                if actual_up + 1e-7 < lift:
+                    continue
+                self.y += actual_up
+
+                step_dx, step_collided = self._sweep_x(dx)
+                if abs(step_dx) <= abs(blocked_dx) + 1e-7:
+                    continue
+                self.x += step_dx
+
+                # Settle back down.  This either leaves the feet on the
+                # obstacle top or returns them to the original floor after a
+                # very narrow shape has been crossed.
+                actual_down, landed = self._sweep_y(-(actual_up + 0.02))
+                self.y += actual_down
+                if not landed and not self._check_support_at():
+                    continue
+
+                vertical_delta = self.y - original_y
+                try:
+                    max_step = max(0.0, float(self.max_step_height))
+                except (AttributeError, TypeError, ValueError):
+                    continue
+                if vertical_delta < -0.002 or vertical_delta > max_step + 0.005:
+                    continue
+
+                candidate = (step_dx, vertical_delta, step_collided)
+                if best is None or abs(step_dx) > abs(best[0]) + 1e-7:
+                    best = candidate
+        finally:
+            self.x, self.y = original_x, original_y
+        return best
+
+    def can_step_up(self, dx: float) -> bool:
+        """Return whether ``max_step_height`` allows progress through ``dx``."""
+        blocked_dx, collided = self._sweep_x(dx)
+        return bool(collided and self._try_step_up(dx, blocked_dx) is not None)
+
     def _sweep_y(self, dy: float):
         if dy == 0:
             return 0.0, False
@@ -385,8 +487,14 @@ class Entity:
         return final_y - self.y, True
 
     def collision_check(self, steps: int = 16):
-        actual_dx, collided_x = self._sweep_x(self.motion.x)
-        actual_dx = self._prevent_edge_fall(actual_dx)
+        requested_dx = self.motion.x
+        actual_dx, collided_x = self._sweep_x(requested_dx)
+        step = self._try_step_up(requested_dx, actual_dx) if collided_x else None
+        if step is not None:
+            actual_dx, step_dy, collided_x = step
+            self.y += step_dy
+        else:
+            actual_dx = self._prevent_edge_fall(actual_dx)
         self.x += actual_dx
         if collided_x:
             self.motion.x = 0

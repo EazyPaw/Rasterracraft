@@ -800,6 +800,9 @@ class World:
                 return block
         return None
 
+    def spawn_explosion(self, loc, power = 4, break_block = True, catch_fire = False):
+        ...
+
 
 
 

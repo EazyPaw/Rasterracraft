@@ -308,6 +308,7 @@ class FluidBlock(Block):
     supported_horizontal_flow_range = 1
     flowing_sound = None
     source_sound = None
+    blast_resistance = 100
 
     def __init__(self, level: int = 0, falling: bool = False, flow_direction: int = 0, nbt=None):
         self.level = max(0, min(self.max_level, int(level)))

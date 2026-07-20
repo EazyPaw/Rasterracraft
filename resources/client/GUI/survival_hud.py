@@ -169,5 +169,6 @@ class SurvivalHUD(HotBar):
             surface = font.render(text, True, (128, 255, 32))
             shadow = font.render(text, True, (0, 0, 0))
             center_x = x + background.get_width() // 2
-            self.render.blit(shadow, shadow.get_rect(center=(center_x + 1, y - 1)))
-            self.render.blit(surface, surface.get_rect(center=(center_x, y - 2)))
+            self.render.render_text(text, (center_x, y - self.render.gui_scale * 5), (128, 255, 32), 28, shadow = True)
+            # self.render.blit(shadow, shadow.get_rect(center=(center_x + 1, y - 1)))
+            # self.render.blit(surface, surface.get_rect(center=(center_x, y - 2)))
