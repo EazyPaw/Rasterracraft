@@ -34,7 +34,12 @@ class GameMode(ABC):
         pass
 
     def left_click_on_entity(self, entity: Entity):
-        pass
+        if entity is None or self.player.client.hold_mouse_buttons[0]:
+            return
+        self.player.client.sent_packet({
+            "__class__": "AttackEntity",
+            "uuid": str(entity.uuid),
+        })
 
     def right_click_on_entity(self, entity: Entity):
         pass

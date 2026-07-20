@@ -297,6 +297,8 @@ class Server:
 
     def tick(self):
         self.server_ticks += 1
+        for player in tuple(self.players):
+            player.tick_damage_state()
         for world in self.worlds.values():
             world.world_time = (world.world_time + 1) % 24000
             world.tick_weather()

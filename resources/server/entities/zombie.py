@@ -7,11 +7,20 @@ import pygame
 from resources.client.entity_skeleton import BodyPart, EntitySkeleton, PlayerSkeleton
 from resources.server.entity import Entity
 from resources.server.entity_AI import ZombieAI
+from resources.server.item_class import ItemStack
+from resources.server.materials import ROTTEN_FLESH
 from resources.server.utils import client_method
 
 
 class Zombie(Entity):
     """Server-authoritative zombie; behavior is supplied by :class:`ZombieAI`."""
+
+    translation_key = "entity.Zombie.name"
+    sounds = {
+        "ambient": "mob.zombie.say",
+        "hurt": "mob.zombie.hurt",
+        "death": "mob.zombie.death",
+    }
 
     def __init__(self, x: float, y: float, world, z: int = 0):
         super().__init__(float(x), float(y), world)
@@ -27,96 +36,16 @@ class Zombie(Entity):
         self.movement_acceleration = 0.05
         self.interact_range = 1.5
         self.attack_damage = 3.0
-        self.follow_range = 35.0
-        self.attack_cooldown_ticks = 0
-        self.attack_animation_ticks = 0
-        self.target_uuid: str | None = None
-        self.look_angle = 0.0
-        self.no_ai = False
-        self.silent = False
-        self.persistence_required = False
+        rotten_flesh = random.randint(0, 2)
+        self.drops = (
+            [ItemStack(ROTTEN_FLESH(), rotten_flesh)]
+            if rotten_flesh > 0
+            else []
+        )
         self.ai = ZombieAI(self)
-        self._ambient_sound_cooldown = random.randint(80, 220)
 
-    def to_entity_data(self) -> dict:
-        data = super().to_entity_data()
-        data.update({
-            "aggressive": self.ai.get_target() is not None,
-            "look_angle": self.look_angle,
-            "attack_animation_ticks": self.attack_animation_ticks,
-        })
-        return data
-
-    def apply_summon_nbt(self, nbt: dict) -> None:
-        aliases = {
-            "Health": "health",
-            "NoAI": "no_ai",
-            "Silent": "silent",
-            "PersistenceRequired": "persistence_required",
-            "CustomName": "name",
-        }
-        for raw_key, value in nbt.items():
-            key = aliases.get(str(raw_key), str(raw_key))
-            if key == "health":
-                self.health = max(0.0, min(self.max_health, float(value)))
-            elif key in {"no_ai", "silent", "persistence_required"}:
-                setattr(self, key, bool(value))
-            elif key == "name" and isinstance(value, str):
-                self.name = value.strip('"')[:64]
-
-    def try_attack(self, target) -> bool:
-        if self.attack_cooldown_ticks > 0:
-            return False
-        self.attack_cooldown_ticks = 20
-        self.attack_animation_ticks = 8
-        target.health = max(0.0, float(target.health) - self.attack_damage)
-        target.hurt_time = 10
-        server = getattr(self.world, "server", None)
-        if server is not None:
-            # Keep a short server-side lock so a queued pre-hit PlayerMove
-            # packet cannot restore the old client health value.
-            target._server_health_lock_until = getattr(server, "server_ticks", 0) + 10
-            server.send_client_socket(target, {
-                "__class__": "PlayerHurt",
-                "health": target.health,
-                "hurt_time": target.hurt_time,
-                "cause": "mob",
-            }, "Forward")
-            server.broadcast_sound("game.player.hurt", target.x, target.y, self.z)
-        sync = getattr(target, "sync_inventory", None)
-        if callable(sync):
-            sync()
-        return True
-
-    def _tick_ambient_sound(self) -> None:
-        if self.silent:
-            return
-        self._ambient_sound_cooldown -= 1
-        if self._ambient_sound_cooldown > 0:
-            return
-        self._ambient_sound_cooldown = random.randint(160, 360)
-        server = getattr(self.world, "server", None)
-        if server is not None:
-            server.broadcast_sound("mob.zombie.say", self.x, self.y, self.z, volume=0.9)
-
-    def update(self) -> None:
-        if self.health <= 0:
-            server = getattr(self.world, "server", None)
-            if server is not None and not self.silent:
-                server.broadcast_sound("mob.zombie.death", self.x, self.y, self.z)
-            self.world.remove_entity(self)
-            return
-
-        if self.hurt_time > 0:
-            self.hurt_time -= 1
-        if self.attack_cooldown_ticks > 0:
-            self.attack_cooldown_ticks -= 1
-        if self.attack_animation_ticks > 0:
-            self.attack_animation_ticks -= 1
-
+    def update_ai(self) -> None:
         self.ai.tick()
-        self._tick_ambient_sound()
-        super().update()
 
 
 class ZombieSkeleton(PlayerSkeleton):

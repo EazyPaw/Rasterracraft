@@ -1,6 +1,7 @@
 import logging
 
 from resources.server.entity import Entity
+from resources.server.damange_type import FALL, PLAYER_ATTACK, STARVE
 from resources.server.location import Location
 from resources.server.inventory import payload_to_stack, serialize_inventory, stack_to_payload
 from resources.server.item_class import EmptyItemStack
@@ -22,6 +23,8 @@ def encode_packet(obj, obj_type, args) -> dict:
             'uuid': str(obj.uuid),
             'name': obj.name,
             'health': obj.health,
+            'hurt_time': obj.hurt_time,
+            'last_hurt_damage': obj.last_hurt_damage,
             'food_level': getattr(obj, 'food_level', 20),
             'saturation': getattr(obj, 'saturation', 5.0),
             'experience': getattr(obj, 'experience', 0),
@@ -89,6 +92,41 @@ def encode_packet(obj, obj_type, args) -> dict:
         }
     logging.warning("Unknown packet type to encode")
     return {}
+
+def _find_attack_target(player: Player, target_uuid: str):
+    target_uuid = str(target_uuid)
+    target = player.world.entities.get(target_uuid)
+    if target is not None:
+        return target
+    for candidate in tuple(player.world.server.players):
+        if str(getattr(candidate, "uuid", "")) == target_uuid:
+            return candidate
+    return None
+
+
+def _can_player_reach_entity(player: Player, target: Entity) -> bool:
+    if target is player or getattr(target, "world", None) is not player.world:
+        return False
+    if getattr(target, "removed", False) or getattr(target, "health", 0) <= 0:
+        return False
+    if int(getattr(player, "z", 0)) != int(getattr(target, "z", 0)):
+        return False
+    mode = getattr(getattr(player, "gamemode", None), "name_id", "survival")
+    if mode == "spectator":
+        return False
+    horizontal_gap = max(
+        target.x - (player.x + player.width),
+        player.x - (target.x + target.width),
+        0.0,
+    )
+    vertical_gap = max(
+        target.y - (player.y + player.height),
+        player.y - (target.y + target.height),
+        0.0,
+    )
+    reach = max(0.0, float(getattr(player, "interact_range", 5.0)))
+    return horizontal_gap * horizontal_gap + vertical_gap * vertical_gap <= reach * reach
+
 
 def decode_packet(packet: dict, player: Player):
     if '__class__' not in packet:
@@ -167,6 +205,26 @@ def decode_packet(packet: dict, player: Player):
         entity = player.world.entities.get(str(packet.get('uuid', '')))
         if isinstance(entity, Item):
             entity.pick_up(player)
+
+    elif packet['__class__'] == 'AttackEntity':
+        target = _find_attack_target(player, packet.get('uuid', ''))
+        current_tick = int(getattr(player.world.server, 'server_ticks', 0))
+        if (
+            target is not None
+            and current_tick != int(getattr(player, '_last_attack_tick', -1))
+            and _can_player_reach_entity(player, target)
+        ):
+            player._last_attack_tick = current_tick
+            player.attack(target, damage_type=PLAYER_ATTACK)
+
+    elif packet['__class__'] == 'SelfDamage':
+        damage_type = {"fall": FALL, "starvation": STARVE}.get(packet.get('cause'))
+        try:
+            amount = min(1000.0, max(0.0, float(packet.get('amount', 0.0))))
+        except (TypeError, ValueError):
+            amount = 0.0
+        if damage_type is not None and amount > 0:
+            player.apply_damage(amount, damage_type, source=None)
 
     elif packet['__class__'] == 'PlaceBlock':
         # {
@@ -300,7 +358,16 @@ def decode_packet(packet: dict, player: Player):
             held.reduce_amount(1)
         player.sync_inventory()
     elif packet['__class__'] == 'RequestRespawn':
+        if player.health > 0:
+            return
         player.health = player.max_health
+        player.hurt_time = 0
+        player.last_hurt_damage = 0.0
+        player.last_damage_source = None
+        player.last_damage_type = None
+        player._death_handled = False
+        player.motion.x = 0.0
+        player.motion.y = 0.0
         player.food_level = 20
         player.saturation = 5.0
         block = player.world.find_top_block(player.spawn_point, 0)

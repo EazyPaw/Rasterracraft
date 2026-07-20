@@ -488,6 +488,38 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             -(self.mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + self.camera.y - 0.5,
         )
 
+    def get_hovered_entity(self):
+        """Return the closest damageable entity under the cursor and in reach."""
+        player = self.client.client_player
+        if player is None:
+            return None
+        mouse_x, mouse_y = self.get_mouse_world_position()
+        player_center_x = player.x + player.width * 0.5
+        player_center_y = player.y + player.height * 0.5
+        reach_sq = max(0.0, float(player.interact_range)) ** 2
+        candidates = []
+        for entity in self.client_world.iter_entities():
+            if getattr(entity, "health", 0) <= 0:
+                continue
+            if int(getattr(entity, "z", 0)) != int(getattr(player, "z", 0)):
+                continue
+            if not (
+                entity.x <= mouse_x <= entity.x + entity.width
+                and entity.y <= mouse_y <= entity.y + entity.height
+            ):
+                continue
+            nearest_x = min(max(player_center_x, entity.x), entity.x + entity.width)
+            nearest_y = min(max(player_center_y, entity.y), entity.y + entity.height)
+            distance_sq = (
+                (nearest_x - player_center_x) ** 2
+                + (nearest_y - player_center_y) ** 2
+            )
+            if distance_sq <= reach_sq:
+                candidates.append((distance_sq, entity))
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: item[0])[1]
+
     def get_hovered_block_position(self) -> tuple[int | None, int | None]:
         """获取鼠标当前悬停的方块世界坐标。
 

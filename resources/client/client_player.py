@@ -5,6 +5,7 @@ import pygame
 
 from resources.client.entity_skeleton import PlayerSkeleton
 from resources.client.game_mode import CreativeMode, SurvivalMode
+from resources.server.damange_type import FALL, GENERIC, STARVE, DamageType
 from resources.server.entity import Entity
 from resources.server.inventory import Inventory
 
@@ -41,6 +42,7 @@ class ClientPlayer(Entity):
         self.experience = 0
         self.experience_level = 0
         self.choosing_block = None
+        self.choosing_entity = None
         self.flyable = False
         self.inventory = Inventory(36)
         self.skeleton = PlayerSkeleton(self)
@@ -78,6 +80,7 @@ class ClientPlayer(Entity):
         self.client.sent_packet(self, 'PlayerMove')
 
     def _update_survival_state(self, previous_y: float, was_on_ground: bool):
+        self.tick_damage_state()
         if not isinstance(self.game_mode, SurvivalMode):
             return
         fallen = previous_y - self.y
@@ -85,7 +88,9 @@ class ClientPlayer(Entity):
             self.fall_distance += fallen
         if self.on_ground and not was_on_ground:
             if self.fall_distance > 3.0:
-                self.damage(int(self.fall_distance - 3.0 + 0.999), "fall")
+                amount = int(self.fall_distance - 3.0 + 0.999)
+                self._send_self_damage(amount, "fall")
+                self.apply_damage(amount, FALL, source=None)
             self.fall_distance = 0.0
         elif self.in_fluid or self.flying:
             self.fall_distance = 0.0
@@ -93,8 +98,6 @@ class ClientPlayer(Entity):
         moving = abs(self.motion.x) > 0.02
         if moving:
             self.exhaustion += 0.006 if self.sprinting else 0.001
-        if self.hurt_time > 0:
-            self.hurt_time -= 1
         self._consume_exhaustion()
         self._natural_regeneration()
         self._request_nearby_item_pickups()
@@ -120,22 +123,33 @@ class ClientPlayer(Entity):
         if self.food_level == 0:
             self.starvation_timer += 1
             if self.starvation_timer >= 80:
-                self.damage(1, "starvation")
+                self._send_self_damage(1, "starvation")
+                self.apply_damage(1, STARVE, source=None)
                 self.starvation_timer = 0
         else:
             self.starvation_timer = 0
 
-    def damage(self, amount: float, cause: str = "generic"):
-        if self.dead or amount <= 0:
-            return
-        self.health = max(0.0, self.health - amount)
-        self.hurt_time = self.HURT_FLASH_TICKS
-        sound = "game.player.hurt.fall.big" if cause == "fall" and amount >= 5 else "game.player.hurt"
-        self.client.resources_manager.play_sound(sound)
+    def _send_self_damage(self, amount: float, cause: str) -> None:
+        self.client.sent_packet({
+            "__class__": "SelfDamage",
+            "amount": float(amount),
+            "cause": cause,
+        })
+
+    def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
+        return not self.dead and not isinstance(self.game_mode, CreativeMode) and super().can_take_damage(damage_type)
+
+    def on_damage_applied(self, actual_damage: float, raw_damage: float,
+                          damage_type: type[DamageType], source) -> None:
         if self.health <= 0:
             self.dead = True
-            self.client.add_chat_message("You died!", (255, 85, 85))
-            self.client.sent_packet({'__class__': 'RequestRespawn'})
+            args = [getattr(self, "name", "Player")]
+            if source is not None:
+                args.append(getattr(source, "name", str(source)))
+            self.client.show_death_screen({
+                "key": f"death.attack.{getattr(damage_type, 'message_id', 'generic')}",
+                "args": args,
+            })
 
     def add_experience(self, amount: int):
         self.experience += max(0, int(amount))

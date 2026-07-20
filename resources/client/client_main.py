@@ -21,6 +21,7 @@ from resources.client.GUI.pause_menu import PauseMenu
 from resources.client.GUI.saves_menu import SavesMenu
 from resources.client.GUI.loading_screen import LoadingScreen
 from resources.client.GUI.disconnect_screen import DisconnectScreen
+from resources.client.GUI.death_screen import DeathScreen
 from resources.client.particles import ParticleManager
 from resources.client.resources_manager import ResourcesManager
 from resources.server import save_manager
@@ -65,6 +66,7 @@ class Client:
         self.world_loading = False
         self.loading_screen: LoadingScreen | None = None
         self.disconnect_screen: DisconnectScreen | None = None
+        self.death_screen: DeathScreen | None = None
         self.loaded_chunk_regions: set[int] = set()
         self.required_spawn_regions: set[int] = set()
         self.pending_teleport_id: int | None = None
@@ -196,6 +198,7 @@ class Client:
         self.hold_mouse_buttons = [False, False, False]
         for gui in self.render.drawing_GUIs[:]:
             self.render.close_gui(gui)
+        self.death_screen = None
         self.disconnect_screen = DisconnectScreen(self.render, title_key, reason)
         self.render.show_gui(self.disconnect_screen)
 
@@ -259,6 +262,7 @@ class Client:
             )["id"]
         self.current_save_id = save_id
         self.disconnect_screen = None
+        self.death_screen = None
         self.save_complete_event.clear()
         self.game_started = True
         self.in_game = False
@@ -365,13 +369,33 @@ class Client:
         return all(int(x // 16) in self.loaded_chunk_regions for x in x_values)
 
     def open_pause_menu(self):
-        if not self.in_game:
+        if not self.in_game or self.death_screen is not None:
             return
         for gui in self.render.drawing_GUIs:
             if isinstance(gui, PauseMenu):
                 return
         self.capture_save_icon()
         self.render.show_gui(PauseMenu(self.render))
+
+    def show_death_screen(self, death_message: dict | None = None) -> None:
+        if self.client_player is None:
+            return
+        self.client_player.dead = True
+        if self.death_screen is not None:
+            self.death_screen.update_death_message(death_message)
+            return
+        for gui in self.render.drawing_GUIs[:]:
+            self.render.close_gui(gui)
+        self.death_screen = DeathScreen(self.render, death_message, score=0)
+        self.render.show_gui(self.death_screen)
+
+    def close_death_screen(self) -> None:
+        if self.death_screen is None:
+            return
+        self.render.close_gui(self.death_screen)
+        self.death_screen = None
+        if self.client_player is not None:
+            self.client_player.game_mode.update_gui()
 
     def capture_save_icon(self):
         if not self.current_save_id or self.render.screen is None:
@@ -403,6 +427,7 @@ class Client:
         self.world_loading = False
         self.loading_screen = None
         self.disconnect_screen = None
+        self.death_screen = None
         self.loaded_chunk_regions.clear()
         self.required_spawn_regions.clear()
         self.pending_teleport_id = None

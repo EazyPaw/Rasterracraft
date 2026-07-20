@@ -104,7 +104,10 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         client.client_player.motion.y = 0
         client.client_player.fall_distance = 0.0
         if client.client_player is not None:
-            for key in ('health', 'food_level', 'saturation', 'experience', 'experience_level'):
+            for key in (
+                'health', 'hurt_time', 'last_hurt_damage', 'food_level',
+                'saturation', 'experience', 'experience_level',
+            ):
                 if key in packet:
                     setattr(client.client_player, key, packet[key])
             if 'inventory' in packet:
@@ -120,6 +123,7 @@ def decode_packet(packet: dict, client: 'Client') -> None:
                 except (TypeError, ValueError):
                     client.client_player.selected_slot = 0
             client.client_player.dead = False
+            client.close_death_screen()
         # Do not acknowledge until the destination and its immediate neighbours
         # are fully installed.  This is the actual client-ready handshake; a
         # received TCP packet alone does not mean collision data is usable yet.
@@ -239,10 +243,12 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         if player is not None:
             player.health = max(0.0, min(player.max_health, float(packet.get('health', player.health))))
             player.hurt_time = max(player.hurt_time, int(packet.get('hurt_time', player.HURT_FLASH_TICKS)))
-            if player.health <= 0 and not player.dead:
-                player.dead = True
-                client.add_chat_message("You died!", (255, 85, 85))
-                client.sent_packet({'__class__': 'RequestRespawn'})
+            player.last_hurt_damage = float(packet.get('last_hurt_damage', player.last_hurt_damage))
+            motion = packet.get('motion', {})
+            player.motion.x = float(motion.get('x', player.motion.x))
+            player.motion.y = float(motion.get('y', player.motion.y))
+            if player.health <= 0:
+                client.show_death_screen(packet.get('death_message'))
     elif packet['__class__'] == 'Experience':
         if client.client_player is not None:
             client.client_player.add_experience(int(packet.get('amount', 0)))

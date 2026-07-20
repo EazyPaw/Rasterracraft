@@ -61,26 +61,32 @@ class GameManager:
             else:
                 self.client.client_player.fore_place = False
 
-        if self.client.client_player is None or self.client.client_player.choosing_block is None:
+        if self.client.client_player is None:
             return
 
         if self.ing_mouse_lock == 0:
+            player = self.client.client_player
+            player.choosing_entity = self.client.render.get_hovered_entity()
             if mouse_button[0]:
-                if (loc := self.client.client_player.choosing_block.location) is not None:
+                if player.choosing_entity is not None:
+                    player.game_mode.left_click_on_entity(player.choosing_entity)
+                    self.client.hold_mouse_buttons[0] = True
+                    player.skeleton.trigger_swing()
+                elif player.choosing_block is not None and (loc := player.choosing_block.location) is not None:
                     x = loc.x
                     y = loc.y
                     self.client.hold_key_map["mouse_left"](self.client.client_world.get_block(x, y, 0))
                     self.client.hold_mouse_buttons[0] = True
-                    self.client.client_player.skeleton.trigger_swing()
+                    player.skeleton.trigger_swing()
             else:
                 self.client.hold_mouse_buttons[0] = False
             if mouse_button[2]:
-                if (loc := self.client.client_player.choosing_block.location) is not None:
+                if player.choosing_block is not None and (loc := player.choosing_block.location) is not None:
                     x = loc.x
                     y = loc.y
                     self.client.hold_key_map["mouse_right"](self.client.client_world.get_block(x, y, 0))
                     self.client.hold_mouse_buttons[2] = True
-                    self.client.client_player.skeleton.trigger_swing()
+                    player.skeleton.trigger_swing()
             else:
                 self.client.hold_mouse_buttons[2] = False
 

@@ -1,16 +1,23 @@
 import ast
 import logging
 import math
+import random
 import uuid
 from uuid import UUID
 
-from resources.server.damange_type import DamageType
+from resources.server.damange_type import DamageType, GENERIC, MOB_ATTACK, PLAYER_ATTACK
 from resources.server.location import Vector
+from resources.server.tags import DamageTag
 from resources.server.utils import is_safe_value
 from resources.server.block_collision import EMPTY, coerce_collision_shape
 
 
 class Entity:
+    sounds = {}
+    translation_key: str | None = None
+    ambient_sound_interval = (160, 360)
+    initial_ambient_sound_interval = (80, 220)
+
     def __init__(self, x, y, world):
         self.uuid = uuid.uuid4()
         self.entity_id = "null"
@@ -57,7 +64,24 @@ class Entity:
         self._jumped_this_tick = False
         self.fire_ticks = 0
         self.last_damage_type = None
+        self.last_damage_source = None
+        self.last_hurt_damage = 0.0
+        self.knockback_resistance = 0.0
+        self.attack_damage = 1.0
+        self.follow_range = 35.0
+        self.attack_cooldown_ticks = 0
+        self.attack_interval_ticks = 20
+        self.attack_animation_ticks = 0
+        self.attack_animation_duration = 8
+        self.target_uuid: str | None = None
+        self.look_angle = 0.0
+        self.no_ai = False
+        self.silent = False
+        self.persistence_required = False
         self.max_step_height = 0.5
+        self.drops = []
+        self._death_handled = False
+        self._ambient_sound_cooldown = self._new_ambient_sound_delay(initial=True)
 
     def teleport_to(self, x, y, world = None):
         self.x = x
@@ -95,6 +119,9 @@ class Entity:
             'on_ground': self.on_ground,
             'health': self.health,
             'hurt_time': self.hurt_time,
+            'aggressive': self.get_target() is not None,
+            'look_angle': self.look_angle,
+            'attack_animation_ticks': self.attack_animation_ticks,
         }
         if hasattr(self, 'z'):
             data['z'] = getattr(self, 'z')
@@ -127,6 +154,24 @@ class Entity:
             except (AttributeError, TypeError, ValueError, IndexError):
                 pass
         return data
+
+    def apply_summon_nbt(self, nbt: dict) -> None:
+        """Apply common living-entity summon data before subtype-specific data."""
+        aliases = {
+            "Health": "health",
+            "NoAI": "no_ai",
+            "Silent": "silent",
+            "PersistenceRequired": "persistence_required",
+            "CustomName": "name",
+        }
+        for raw_key, value in nbt.items():
+            key = aliases.get(str(raw_key), str(raw_key))
+            if key == "health":
+                self.health = max(0.0, min(self.max_health, float(value)))
+            elif key in {"no_ai", "silent", "persistence_required"}:
+                setattr(self, key, bool(value))
+            elif key == "name" and isinstance(value, str):
+                self.name = value.strip('"')[:64]
 
     def write_nbt(self, nbt: str):
         nbt = ast.literal_eval(nbt)
@@ -468,11 +513,274 @@ class Entity:
         self._jumped_this_tick = False
 
     def update(self):
+        self.tick_damage_state()
+        if self.health <= 0:
+            self.die()
+            return
+        if self.attack_cooldown_ticks > 0:
+            self.attack_cooldown_ticks -= 1
+        if self.attack_animation_ticks > 0:
+            self.attack_animation_ticks -= 1
+        self.update_ai()
+        self._tick_ambient_sound()
         self.move_update()
 
-    def apply_damage(self, hearts: int, damage_type: DamageType):
+    def update_ai(self) -> None:
+        """Subtype hook for one AI tick."""
+
+    def get_target(self):
+        ai = getattr(self, "ai", None)
+        getter = getattr(ai, "get_target", None)
+        return getter() if callable(getter) else None
+
+    def _new_ambient_sound_delay(self, *, initial: bool = False) -> int:
+        interval = (
+            self.initial_ambient_sound_interval
+            if initial
+            else self.ambient_sound_interval
+        )
+        low, high = int(interval[0]), int(interval[1])
+        return random.randint(min(low, high), max(low, high))
+
+    def _tick_ambient_sound(self) -> None:
+        sound = self.get_sound("ambient")
+        if self.silent or not sound:
+            return
+        self._ambient_sound_cooldown -= 1
+        if self._ambient_sound_cooldown > 0:
+            return
+        self._ambient_sound_cooldown = self._new_ambient_sound_delay()
+        server = getattr(self.world, "server", None)
+        if server is not None:
+            server.broadcast_sound(sound, self.x, self.y, getattr(self, "z", 0), volume=0.9)
+
+    def tick_damage_state(self) -> None:
+        """Advance the shared post-hit immunity state by one game tick."""
+        if self.hurt_time <= 0:
+            self.hurt_time = 0
+            self.last_hurt_damage = 0.0
+            return
+        self.hurt_time -= 1
+        if self.hurt_time <= 0:
+            self.hurt_time = 0
+            self.last_hurt_damage = 0.0
+
+    def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
+        return not self.removed and self.health > 0
+
+    @staticmethod
+    def _damage_type_has_tag(damage_type, tag: DamageTag) -> bool:
+        checker = getattr(damage_type, "has_tag", None)
+        if callable(checker):
+            return bool(checker(tag))
+        tags = getattr(damage_type, "tags", ())
+        return tag in tags or tag.value in tags
+
+    @staticmethod
+    def calculate_armor_reduction(damage: float, armor: float, toughness: float) -> float:
+        """Apply Java's armor/toughness formula, capped at 80% reduction."""
+        damage = max(0.0, float(damage))
+        armor = max(0.0, min(30.0, float(armor)))
+        toughness = max(0.0, min(20.0, float(toughness)))
+        effective_armor = min(
+            20.0,
+            max(armor * 0.2, armor - damage / (2.0 + toughness * 0.25)),
+        )
+        return damage * (1.0 - effective_armor / 25.0)
+
+    def modify_damage_for_armor(self, damage: float, damage_type: type[DamageType]) -> float:
+        if self._damage_type_has_tag(damage_type, DamageTag.BYPASSES_ARMOR):
+            return max(0.0, float(damage))
+        try:
+            armor, toughness = self.get_armor_attr()
+            return self.calculate_armor_reduction(damage, armor, toughness)
+        except (TypeError, ValueError):
+            return max(0.0, float(damage))
+
+    def apply_knockback(self, knockback: Vector) -> None:
+        """Apply a directional knockback vector after resistance."""
+        if not isinstance(knockback, Vector):
+            raise TypeError("knockback must be a Vector")
+        resistance = max(
+            0.0,
+            min(1.0, float(getattr(self, "knockback_resistance", 0.0))),
+        )
+        adjusted = knockback * (1.0 - resistance)
+        self.motion.x += adjusted.x
+        self.motion.y = max(self.motion.y, adjusted.y)
+
+    def apply_damage(self, amount: float, damage_type: type[DamageType] = GENERIC,
+                     source=None, knockback: Vector | None = None) -> float:
+        """Apply one damage event and return the amount of health actually lost.
+
+        During the ten-tick post-hit immunity window, only the amount by which
+        a stronger raw hit exceeds the previous raw hit is processed. Armor is
+        applied after that comparison, matching Java's ordering.
+        """
+        try:
+            raw_damage = max(0.0, float(amount))
+        except (TypeError, ValueError):
+            return 0.0
+        if raw_damage <= 0 or not self.can_take_damage(damage_type):
+            return 0.0
+
+        bypasses_cooldown = self._damage_type_has_tag(
+            damage_type, DamageTag.BYPASSES_COOLDOWN
+        )
+        already_hurt = self.hurt_time > 0 and not bypasses_cooldown
+        if already_hurt:
+            if raw_damage <= self.last_hurt_damage:
+                return 0.0
+            damage_to_process = raw_damage - self.last_hurt_damage
+            self.last_hurt_damage = raw_damage
+        else:
+            damage_to_process = raw_damage
+            self.last_hurt_damage = raw_damage
+            self.hurt_time = 10
+
+        reduced_damage = self.modify_damage_for_armor(damage_to_process, damage_type)
+        old_health = float(self.health)
+        self.health = max(0.0, old_health - reduced_damage)
+        actual_damage = old_health - self.health
+        if actual_damage <= 0:
+            return 0.0
+
         self.last_damage_type = damage_type
-        self.health -= hearts
+        self.last_damage_source = source
+        if knockback is not None:
+            self.apply_knockback(knockback)
+        self.on_damage_applied(actual_damage, raw_damage, damage_type, source)
+        return actual_damage
+
+    def on_damage_applied(self, actual_damage: float, raw_damage: float,
+                          damage_type: type[DamageType], source) -> None:
+        sound = self.get_hurt_sound(damage_type, actual_damage)
+        server = getattr(self.world, "server", None)
+        if sound and server is not None:
+            server.broadcast_sound(sound, self.x, self.y, getattr(self, "z", 0))
+
+    def get_hurt_sound(self, damage_type: type[DamageType], actual_damage: float) -> str | None:
+        return None if self.health <= 0 else self.get_sound("hurt")
+
+    def get_sound(self, event: str) -> str | None:
+        sound = self.sounds.get(event)
+        return str(sound) if sound else None
+
+    def get_attack_damage(self, target=None) -> float:
+        return max(0.0, float(getattr(self, "attack_damage", 1.0)))
+
+    def get_attack_knockback(self, target) -> Vector:
+        source_center = self.x + self.width * 0.5
+        target_center = target.x + target.width * 0.5
+        delta_x = target_center - source_center
+        if abs(delta_x) < 1e-8:
+            delta_x = 1.0 if int(getattr(self, "facing", 1)) == 1 else -1.0
+        return Vector(0.4 if delta_x > 0 else -0.4, 0.2)
+
+    def attack(self, target, damage_type: type[DamageType] | None = None,
+               amount: float | None = None, knockback: Vector | None = None) -> float:
+        if target is self or not hasattr(target, "apply_damage"):
+            return 0.0
+        if damage_type is None:
+            damage_type = PLAYER_ATTACK if self.entity_id == "player" else MOB_ATTACK
+        if amount is None:
+            amount = self.get_attack_damage(target)
+        if knockback is None:
+            knockback = self.get_attack_knockback(target)
+        return target.apply_damage(amount, damage_type, source=self, knockback=knockback)
+
+    def try_attack(self, target) -> bool:
+        if self.attack_cooldown_ticks > 0:
+            return False
+        self.attack_cooldown_ticks = self.attack_interval_ticks
+        self.attack_animation_ticks = self.attack_animation_duration
+        return self.attack(target) > 0
+
+    def get_display_name_data(self):
+        custom_name = getattr(self, "name", None)
+        if custom_name:
+            return str(custom_name)
+        if self.translation_key:
+            return {"translate": self.translation_key}
+        return self.entity_id.replace("_", " ").title()
+
+    def get_death_message(self) -> dict:
+        damage_type = self.last_damage_type or GENERIC
+        message_id = getattr(damage_type, "message_id", "generic") or "generic"
+        args = [self.get_display_name_data()]
+        source = self.last_damage_source
+        if source is not None:
+            name_getter = getattr(source, "get_display_name_data", None)
+            args.append(name_getter() if callable(name_getter) else str(source))
+        builder = getattr(damage_type, "get_death_info", None)
+        if callable(builder):
+            return builder(*args)
+        return {"key": f"death.attack.{message_id}", "args": args}
+
+    def die(self) -> None:
+        """Run shared death effects, drops and removal exactly once."""
+        if not self.emit_death_effects():
+            return
+        remover = getattr(self.world, "remove_entity", None)
+        if callable(remover):
+            remover(self)
+
+    def emit_death_effects(self) -> bool:
+        """Play shared death effects once without deciding entity removal."""
+        if self._death_handled or self.removed:
+            return False
+        self._death_handled = True
+        server = getattr(self.world, "server", None)
+        death_sound = self.get_sound("death")
+        if death_sound and not self.silent and server is not None:
+            server.broadcast_sound(
+                death_sound, self.x, self.y, getattr(self, "z", 0)
+            )
+        self.spawn_death_particles()
+        self.spawn_drops()
+        return True
+
+    def spawn_death_particles(self) -> None:
+        spawn_particle = getattr(self.world, "spawn_particle", None)
+        if not callable(spawn_particle):
+            return
+        from resources.server.particles import GENERIC
+
+        spawn_particle(GENERIC(
+            self.x + self.width * 0.5,
+            self.y + self.height * 0.5,
+            getattr(self, "z", 0),
+            count=20,
+            motion=(0.0, 0.025),
+            data={
+                "position_spread": [self.width * 0.65, self.height * 0.65],
+                "motion_spread": [0.07, 0.05],
+            },
+        ))
+
+    def spawn_drops(self) -> None:
+        spawn_entity = getattr(self.world, "spawn_entity", None)
+        if not callable(spawn_entity):
+            return
+        from resources.server.entities.item import Item
+
+        for stack in self.get_drops():
+            if stack is None or stack.is_empty() or stack.amount <= 0:
+                continue
+            spawn_entity(Item(
+                self.x + self.width * 0.5,
+                self.y + min(self.height * 0.5, 0.5),
+                self.world,
+                stack,
+                getattr(self, "z", 0),
+            ))
+
+    def get_armor_attr(self):
+        """
+        返回实体的护甲值和盔甲韧性
+        :return:
+        """
+        return 0, 0
 
     def calc_entity_distance(self, other: UUID | str) -> float:
         """
@@ -488,3 +796,17 @@ class Entity:
         yd = self.y - other.y
         distance = math.sqrt(xd ** 2 + yd ** 2)
         return distance
+
+    def get_drops(self):
+        from resources.server.item_class import ItemStack
+
+        result = []
+        for stack in self.drops:
+            if stack is None or getattr(stack, "amount", 0) <= 0:
+                continue
+            result.append(ItemStack(
+                stack.material,
+                int(stack.amount),
+                dict(getattr(stack, "nbt", {})),
+            ))
+        return result

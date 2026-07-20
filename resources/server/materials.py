@@ -62,6 +62,14 @@ class COOKED_BEEF(Material):
     saturation_modifier = 0.8
 
 
+class ROTTEN_FLESH(Material):
+    name_id = "rotten_flesh"
+    name = "item.rottenFlesh.name"
+    _texture_path = "items.rotten_flesh"
+    food_value = 4
+    saturation_modifier = 0.1
+
+
 class STICK(Material):
     name_id = "stick"
     name = "item.stick.name"
@@ -150,7 +158,8 @@ def get_material_by_id(material_id: str):
         "air": AIR, "dirt": DIRT, "sand": SAND,
         "cobblestone": COBBLESTONE, "water": WATER, "lava": LAVA,
         "glowstone": GLOWSTONE, "apple": APPLE, "bread": BREAD,
-        "cooked_beef": COOKED_BEEF, "stick": STICK,
+        "cooked_beef": COOKED_BEEF, "rotten_flesh": ROTTEN_FLESH,
+        "stick": STICK,
         "torch": TORCH,
         "wooden_pickaxe": WOODEN_PICKAXE, "stone_pickaxe": STONE_PICKAXE,
         "iron_pickaxe": IRON_PICKAXE, "diamond_pickaxe": DIAMOND_PICKAXE,

@@ -14,6 +14,7 @@ class Material:
     _original_texture = None
     _last_scaled = None
     _scaled_texture_cache = {}
+    name_space_key = "minecraft"
 
     def __init__(self):
         self.texture_cache = {}

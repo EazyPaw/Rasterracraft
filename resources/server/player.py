@@ -2,6 +2,7 @@ import math as _math
 import random as _random
 
 from resources.client.game_mode import SurvivalMode
+from resources.server.damange_type import DamageType, FALL, GENERIC
 from resources.server.entity import Entity
 from resources.server.inventory import Inventory, serialize_inventory, stack_to_payload
 from resources.server.item_class import EmptyItemStack, ItemStack
@@ -11,6 +12,13 @@ from resources.server.world_class import World
 
 
 class Player(Entity):
+    sounds = {
+        "hurt": "game.player.hurt",
+        "fall_big": "game.player.hurt.fall.big",
+        "fall_small": "game.player.hurt.fall.small",
+        "death": "game.player.die",
+    }
+
     def __init__(self, x, y, world, gamemode = None):
         super().__init__(x, y, world)
         self.world: World = world
@@ -26,6 +34,8 @@ class Player(Entity):
         self.height = 1.8
         self.max_health = 20
         self.health = self.max_health
+        self.attack_damage = 1.0
+        self.interact_range = 5.0
         self.food_level = 20
         self.saturation = 5.0
         self.experience = 0
@@ -91,6 +101,55 @@ class Player(Entity):
 
     def sync_inventory(self) -> None:
         self.world.server.send_client_socket(self, self.inventory_packet(), "Forward")
+
+    def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
+        mode = getattr(self.gamemode, "name_id", "survival")
+        return mode not in {"creative", "spectator"} and super().can_take_damage(damage_type)
+
+    def get_attack_damage(self, target=None) -> float:
+        try:
+            held = self.inventory[self.selected_slot]
+            held_damage = getattr(held.material, "attack_damage", None)
+            if held_damage is not None:
+                return max(0.0, float(held_damage))
+        except (AttributeError, IndexError, TypeError, ValueError):
+            pass
+        return super().get_attack_damage(target)
+
+    def get_hurt_sound(self, damage_type: type[DamageType], actual_damage: float) -> str | None:
+        if self.health <= 0:
+            return None
+        if damage_type is FALL:
+            return self.get_sound("fall_big" if actual_damage >= 5 else "fall_small")
+        return self.get_sound("hurt")
+
+    def on_damage_applied(self, actual_damage: float, raw_damage: float,
+                          damage_type: type[DamageType], source) -> None:
+        super().on_damage_applied(actual_damage, raw_damage, damage_type, source)
+        server = getattr(self.world, "server", None)
+        if server is None:
+            return
+        # Ignore queued pre-hit PlayerMove health until the client has received
+        # and begun reporting the authoritative result.
+        self._server_health_lock_until = server.server_ticks + self.hurt_time
+        packet = {
+            "__class__": "PlayerHurt",
+            "health": self.health,
+            "hurt_time": self.hurt_time,
+            "last_hurt_damage": self.last_hurt_damage,
+            "cause": getattr(damage_type, "message_id", "generic"),
+            "damage": actual_damage,
+            "motion": {"x": self.motion.x, "y": self.motion.y},
+        }
+        if self.health <= 0:
+            self.emit_death_effects()
+            packet["death_message"] = self.get_death_message()
+        server.send_client_socket(self, packet, "Forward")
+        for other in tuple(server.players):
+            if other is self or other.world is not self.world:
+                continue
+            if other.is_loading_position(int(self.x), int(self.y), getattr(self, "z", 0)):
+                server.send_client_socket(other, self, "EntityUpdate")
 
     def _click_inventory(self, slot: int, button: int) -> None:
         self._click_container(self.inventory, slot, button)

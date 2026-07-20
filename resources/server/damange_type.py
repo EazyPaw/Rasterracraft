@@ -1,16 +1,22 @@
 from abc import ABC
 
-from resources.client.resources_manager import transkey
+from resources.server.tags import DamageTag
 
 
 class DamageType(ABC):
     exhaustion = 0.1
     message_id = ''
     scaling = 'when_caused_by_living_non_player'
+    tags = ()
 
     @classmethod
-    def get_death_info(cls):
-        return transkey(f'death.attack.{cls.message_id}')
+    def has_tag(cls, tag: DamageTag) -> bool:
+        return tag in cls.tags or tag.value in cls.tags
+
+    @classmethod
+    def get_death_info(cls, *args):
+        """Return a language-independent parameterized death message payload."""
+        return {"key": f"death.attack.{cls.message_id}", "args": list(args)}
 
 class ARROW(DamageType):
     exhaustion = 0.1
@@ -32,22 +38,26 @@ class CRAMMING(DamageType):
     exhaustion = 0.0
     message_id = 'cramming'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class DRAGON_BREATH(DamageType):
     exhaustion = 0.0
     message_id = 'dragonBreath'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class DROWN(DamageType):
     effects = 'drowning'
     exhaustion = 0.0
     message_id = 'drown'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class DRY_OUT(DamageType):
     exhaustion = 0.1
     message_id = 'dryout'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class EXPLOSION(DamageType):
     exhaustion = 0.1
@@ -59,6 +69,7 @@ class FALL(DamageType):
     exhaustion = 0.0
     message_id = 'fall'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class FALLING_ANVIL(DamageType):
     exhaustion = 0.1
@@ -90,12 +101,14 @@ class FLY_INTO_WALL(DamageType):
     exhaustion = 0.0
     message_id = 'flyIntoWall'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class FREEZE(DamageType):
     effects = 'freezing'
     exhaustion = 0.0
     message_id = 'freeze'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class GENERIC(DamageType):
     exhaustion = 0.0
@@ -107,28 +120,33 @@ class HOT_FLOOR(DamageType):
     exhaustion = 0.1
     message_id = 'hotFloor'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class IN_FIRE(DamageType):
     effects = 'burning'
     exhaustion = 0.1
     message_id = 'inFire'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class IN_WALL(DamageType):
     exhaustion = 0.0
     message_id = 'inWall'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class INDIRECT_MAGIC(DamageType):
     exhaustion = 0.0
     message_id = 'indirectMagic'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class LAVA(DamageType):
     effects = 'burning'
     exhaustion = 0.1
     message_id = 'lava'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class LIGHTNING_BOLT(DamageType):
     exhaustion = 0.1
@@ -139,6 +157,7 @@ class MAGIC(DamageType):
     exhaustion = 0.0
     message_id = 'magic'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class MOB_ATTACK(DamageType):
     exhaustion = 0.1
@@ -160,11 +179,13 @@ class ON_FIRE(DamageType):
     exhaustion = 0.0
     message_id = 'onFire'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class OUT_OF_WORLD(DamageType):
     exhaustion = 0.0
     message_id = 'outOfWorld'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR, DamageTag.BYPASSES_COOLDOWN)
 
 class PLAYER_ATTACK(DamageType):
     exhaustion = 0.1
@@ -180,16 +201,19 @@ class SONIC_BOOM(DamageType):
     exhaustion = 0.0
     message_id = 'sonic_boom'
     scaling = 'always'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class STALAGMITE(DamageType):
     exhaustion = 0.0
     message_id = 'stalagmite'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class STARVE(DamageType):
     exhaustion = 0.0
     message_id = 'starve'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class STING(DamageType):
     exhaustion = 0.1
@@ -228,6 +252,7 @@ class WITHER(DamageType):
     exhaustion = 0.0
     message_id = 'wither'
     scaling = 'when_caused_by_living_non_player'
+    tags = (DamageTag.BYPASSES_ARMOR,)
 
 class WITHER_SKULL(DamageType):
     exhaustion = 0.1

@@ -196,12 +196,22 @@ class Particle:
     @client_method
     def spawn_from_packet(self, manager: 'ParticleManager', client=None) -> None:
         """按网络包中的 count 在客户端生成粒子实体。"""
+        position_spread = self.data.get("position_spread", (0.0, 0.0))
+        motion_spread = self.data.get("motion_spread", (0.0, 0.0))
+        try:
+            spread_x, spread_y = float(position_spread[0]), float(position_spread[1])
+            motion_x, motion_y = float(motion_spread[0]), float(motion_spread[1])
+        except (IndexError, TypeError, ValueError):
+            spread_x = spread_y = motion_x = motion_y = 0.0
         for _ in range(self.count):
             particle = type(self).from_values(
-                self.x,
-                self.y,
+                self.x + random.uniform(-spread_x, spread_x),
+                self.y + random.uniform(-spread_y, spread_y),
                 self.z,
-                motion=self.motion,
+                motion=(
+                    self.motion[0] + random.uniform(-motion_x, motion_x),
+                    self.motion[1] + random.uniform(-motion_y, motion_y),
+                ),
                 data=dict(self.data),
             )
             if particle.setup_client_state(manager, client=client):
