@@ -22,6 +22,9 @@ class ClientWorld:
         self.light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
         self.sky_light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
         self.block_light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
+        # Renderer-facing copy-on-write snapshots.  Publishing one tuple keeps
+        # sky and block light from different updates out of the same frame.
+        self._light_snapshots: dict[int, tuple[Any, Any, Any]] = {}
         self.biome_map: dict[int, np.ndarray[Any, np.dtype[np.str_]]] = {}
         self.y_max = 256
         self.world_time = 0
@@ -145,6 +148,7 @@ class ClientWorld:
             self.light_map[rx] = light
             self.sky_light_map[rx] = sky
             self.block_light_map[rx] = block_light
+            self._light_snapshots[rx] = (light, sky, block_light)
             self.biome_map[rx] = biomes
             self._loading_chunks.discard(rx)
             self._mark_render_chunk_dirty(rx)
@@ -191,6 +195,11 @@ class ClientWorld:
                 self.sky_light_map[rx] = sky_array
             if block_array is not None:
                 self.block_light_map[rx] = block_array
+            self._light_snapshots[rx] = (
+                self.light_map.get(rx),
+                self.sky_light_map.get(rx),
+                self.block_light_map.get(rx),
+            )
             self._mark_render_chunk_dirty(rx)
 
     def update_lights(self, rx: int, light_map: dict[str, int],
@@ -199,20 +208,50 @@ class ClientWorld:
         """
         增量更新光照数据（只更新变化的部分）
         """
-        # 如果该区块的光照数组不存在，先创建
-        if rx not in self.light_map:
-            self.light_map[rx] = np.full((16, self.y_max), 0, dtype=np.uint8)
-
-        light_array = self.light_map[rx]
+        # Build every replacement off to the side.  The render thread keeps
+        # using the previous complete tuple until all new arrays are ready.
+        previous_light = self.light_map.get(rx)
+        light_array = (
+            previous_light.copy()
+            if previous_light is not None
+            else np.zeros((16, self.y_max), dtype=np.uint8)
+        )
         for key, value in light_map.items():
             x, y = key.split(",")
             x, y = int(x), int(y)
             light_array[x][y] = value
-        if sky_light_map is not None:
-            self.sky_light_map[rx] = self._dict_to_light_array(sky_light_map)
-        if block_light_map is not None:
-            self.block_light_map[rx] = self._dict_to_light_array(block_light_map)
-        self._mark_render_chunk_dirty(rx)
+        sky_array = (
+            self._dict_to_light_array(sky_light_map)
+            if sky_light_map is not None
+            else self.sky_light_map.get(rx)
+        )
+        block_array = (
+            self._dict_to_light_array(block_light_map)
+            if block_light_map is not None
+            else self.block_light_map.get(rx)
+        )
+        if sky_array is not None and block_array is not None:
+            light_array = np.maximum(sky_array, block_array)
+
+        with self._chunk_state_lock:
+            self.light_map[rx] = light_array
+            if sky_array is not None:
+                self.sky_light_map[rx] = sky_array
+            if block_array is not None:
+                self.block_light_map[rx] = block_array
+            self._light_snapshots[rx] = (light_array, sky_array, block_array)
+            self._mark_render_chunk_dirty(rx)
+
+    def get_light_snapshot(self, rx: int):
+        """Return one internally consistent light state for a render pass."""
+        snapshot = self._light_snapshots.get(rx)
+        if snapshot is not None:
+            return snapshot
+        return (
+            self.light_map.get(rx),
+            self.sky_light_map.get(rx),
+            self.block_light_map.get(rx),
+        )
 
     def _dict_to_light_array(self, light_map: dict[str, int]):
         light_array = np.full((16, self.y_max), 0, dtype=np.uint8)
@@ -319,6 +358,7 @@ class ClientWorld:
             self.light_map.pop(x, None)
             self.sky_light_map.pop(x, None)
             self.block_light_map.pop(x, None)
+            self._light_snapshots.pop(x, None)
             self.biome_map.pop(x, None)
             self._loading_chunks.discard(x)
             self._chunk_load_versions.pop(x, None)

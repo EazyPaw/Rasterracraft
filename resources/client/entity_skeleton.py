@@ -442,7 +442,10 @@ class PlayerSkeleton(EntitySkeleton):
             stack = getattr(self.entity, "held_item", None)
 
         item_id = getattr(getattr(stack, "material", None), "name_id", "air")
-        key = (item_id, bool(stack and not stack.is_empty()))
+        animation_key = None
+        if stack is not None and not stack.is_empty():
+            animation_key = stack.material.get_texture_animation_key()
+        key = (item_id, bool(stack and not stack.is_empty()), animation_key)
         part = self.body["held_item"]
         if key != self._held_item_key:
             texture = None

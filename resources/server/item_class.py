@@ -68,7 +68,8 @@ class ItemStack:
 
     @client_method
     def get_texture(self, scale: float, client, shadow=False, multiply=1):
-        cache_key = (round(scale, 4), shadow, multiply)
+        animation_key = self.material.get_texture_animation_key()
+        cache_key = (round(scale, 4), shadow, multiply, animation_key)
         if cache_key in self.material.texture_cache:
             return self.material.texture_cache[cache_key]
 
@@ -84,14 +85,13 @@ class ItemStack:
             # 创建一个更大的surface来容纳阴影偏移
             result = pygame.Surface((width + px_scale, height + px_scale), pygame.SRCALPHA)
             
-            # 创建阴影层：复制原纹理并设置为半透明黑色
+            # Vectorised alpha-preserving shadow tint.  The old nested Python
+            # pixel loop ran again for every animated frame.
             shadow_surface = res.copy()
-            # 将所有像素设置为黑色，保持alpha通道
-            for x in range(width):
-                for y in range(height):
-                    pixel = shadow_surface.get_at((x, y))
-                    if pixel.a > 0:  # 只处理非透明像素
-                        shadow_surface.set_at((x, y), (0, 0, 0, int(255 * 0.5)))
+            shadow_surface.fill(
+                (0, 0, 0, 128),
+                special_flags=pygame.BLEND_RGBA_MULT,
+            )
             
             # 将阴影绘制到结果surface（向右下偏移1px）
             result.blit(shadow_surface, (px_scale, px_scale))
@@ -102,6 +102,8 @@ class ItemStack:
             result.convert_alpha()
 
             self.material.texture_cache[cache_key] = result
+            if len(self.material.texture_cache) > 128:
+                self.material.texture_cache.pop(next(iter(self.material.texture_cache)))
             
             return result
         

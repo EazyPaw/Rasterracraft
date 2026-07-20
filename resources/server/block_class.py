@@ -1,17 +1,14 @@
 from abc import ABC
 
-import os
 import ast
 import logging
 from dataclasses import dataclass
 
+import pygame
 from pygame import Surface
 
 from resources.client.resources_manager import transkey
 from resources.server.utils import is_safe_value, client_method, server_method
-
-if os.environ.get('PYCRAFT_CLIENT') == '1':
-    import pygame
 
 from resources.server.location import Location
 from resources.server.material_class import Material
@@ -128,6 +125,13 @@ class Block(ABC):
 
     def get_name(self):
         return transkey(self.name)
+
+    def can_precompose_with(self, rear_block: 'Block') -> bool:
+        """Whether two depth layers may be rendered as one texture."""
+        return False
+
+    def get_precomposed_texture(self, size, rear_block: 'Block'):
+        return None
 
     @classmethod
     @client_method
@@ -311,6 +315,8 @@ class FluidBlock(Block):
     # water_flow frames are 32x32: one frame spans a 2x2 block area.
     flow_texture_tile_span = 2
     _texture_cache = {}
+    _scaled_atlas_cache = {}
+    _precomposed_texture_cache = {}
     max_level = 7
     source_level = 0
     flow_speed_ticks = 5
@@ -399,6 +405,41 @@ class FluidBlock(Block):
                 edges.append(own)
         return edges[0], edges[1]
 
+    def can_precompose_with(self, rear_block: Block) -> bool:
+        # Alpha-compositing two equal fluid layers ahead of time preserves the
+        # darker two-layer appearance while avoiding a second world blit.
+        return type(rear_block) is type(self)
+
+    @client_method
+    def get_precomposed_texture(self, size, rear_block: Block, client=None):
+        if not self.can_precompose_with(rear_block):
+            return None
+
+        front = self.get_texture(size, client=client)
+        rear = rear_block.get_texture(size, client=client)
+        if front is None or rear is None:
+            return None
+
+        block_type = type(self)
+        cache = block_type.__dict__.get("_precomposed_texture_cache")
+        if cache is None:
+            cache = {}
+            block_type._precomposed_texture_cache = cache
+        cache_key = (front, rear)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        width = max(front.get_width(), rear.get_width())
+        height = max(front.get_height(), rear.get_height())
+        texture = pygame.Surface((width, height), pygame.SRCALPHA).convert_alpha()
+        texture.blit(rear, (0, height - rear.get_height()))
+        texture.blit(front, (0, height - front.get_height()))
+        cache[cache_key] = texture
+        if len(cache) > 256:
+            cache.pop(next(iter(cache)))
+        return texture
+
     @client_method
     def get_texture(self, size, client=None):
         size = max(1, int(round(size)))
@@ -441,11 +482,22 @@ class FluidBlock(Block):
             return self._texture_cache[cache_key]
 
         atlas_size = size * tile_span
-        scaled = pygame.transform.scale(
-            base_texture, (atlas_size, atlas_size)
-        ).convert_alpha()
-        if self.flow_direction < 0:
-            scaled = pygame.transform.flip(scaled, True, False)
+        block_type = type(self)
+        atlas_cache = block_type.__dict__.get("_scaled_atlas_cache")
+        if atlas_cache is None:
+            atlas_cache = {}
+            block_type._scaled_atlas_cache = atlas_cache
+        atlas_key = (base_texture, atlas_size, self.flow_direction < 0)
+        scaled = atlas_cache.get(atlas_key)
+        if scaled is None:
+            scaled = pygame.transform.scale(
+                base_texture, (atlas_size, atlas_size)
+            ).convert_alpha()
+            if self.flow_direction < 0:
+                scaled = pygame.transform.flip(scaled, True, False)
+            atlas_cache[atlas_key] = scaled
+            if len(atlas_cache) > 128:
+                atlas_cache.pop(next(iter(atlas_cache)))
 
         tile = scaled.subsurface(
             pygame.Rect(phase_x * size, phase_y * size, size, size)

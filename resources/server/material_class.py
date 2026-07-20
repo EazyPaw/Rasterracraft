@@ -32,18 +32,17 @@ class Material:
         if cls._texture_path is None:
             return None
 
-        # 加载原始纹理（如果还未加载）
-        # 必须检查 cls.__dict__ 而非 cls._original_texture，否则
-        # STONE_PICKAXE(WOODEN_PICKAXE) 会沿 MRO 找到木镐已缓存的纹理。
-        if cls.__dict__.get("_original_texture") is None:
-            cls._original_texture = client.resources_manager.get_texture_img(cls._texture_path)
-
-        if cls._original_texture is None:
+        # Always ask the resource manager for the current surface.  Static
+        # textures return the same object, while animated textures return the
+        # current frame surface.
+        original = client.resources_manager.get_texture_img(cls._texture_path)
+        if original is None:
             return None
+        cls._original_texture = original
 
         # 缩放结果必须按尺寸缓存。旧实现只记录最后一次尺寸，但命中时
         # 返回了未缩放原图，导致热栏/背包或全屏切换后苹果、面包等忽然变小。
-        key = round(float(size), 4)
+        key = (round(float(size), 4), original)
         # 每种 Material 必须拥有独立缓存；直接使用继承来的类属性会让
         # 苹果与面包在相同 GUI 缩放下互相复用错误纹理。
         cache = cls.__dict__.get("_scaled_texture_cache")
@@ -54,16 +53,23 @@ class Material:
         if cached is not None:
             return cached
 
-        original_width = cls._original_texture.get_width()
-        original_height = cls._original_texture.get_height()
+        original_width = original.get_width()
+        original_height = original.get_height()
         new_width = max(1, int(round(original_width * size)))
         new_height = max(1, int(round(original_height * size)))
-        texture = pygame.transform.scale(cls._original_texture, (new_width, new_height))
+        texture = pygame.transform.scale(original, (new_width, new_height))
         cls._last_scaled = key
         cache[key] = texture
-        if len(cache) > 16:
+        if len(cache) > 64:
             cache.pop(next(iter(cache)))
         return texture
+
+    @classmethod
+    @client_method
+    def get_texture_animation_key(cls, client):
+        if cls._texture_path is None:
+            return None
+        return client.resources_manager.get_texture_animation_key(cls._texture_path)
 
     def __eq__(self, other):
         """
@@ -127,6 +133,23 @@ class BlockItem(Material):
             0,
         )
         return block.get_texture(block_size, client=client)
+
+    @classmethod
+    @client_method
+    def get_texture_animation_key(cls, client):
+        sentinel = object()
+        texture_path = cls.__dict__.get("_animation_texture_path", sentinel)
+        if texture_path is sentinel:
+            block = cls.create_block()
+            if block is None:
+                texture_path = None
+            else:
+                path_getter = getattr(block, "get_texture_path", None)
+                texture_path = path_getter() if callable(path_getter) else block._texture_path
+            cls._animation_texture_path = texture_path
+        if texture_path is None:
+            return None
+        return client.resources_manager.get_texture_animation_key(texture_path)
 
 class Projectile(Material):
     ...

@@ -117,10 +117,12 @@ class BlockRenderMixin:
         if texture_path in cache:
             return cache[texture_path]
 
-        loaded = getattr(self.client.resources_manager, "textures", {}).get(texture_path)
-        if isinstance(loaded, dict):
-            cache[texture_path] = True
-            return True
+        resource_manager = self.client.resources_manager
+        is_animated = getattr(resource_manager, "is_texture_animated", None)
+        if callable(is_animated):
+            animated = is_animated(texture_path)
+            cache[texture_path] = animated
+            return animated
 
         parts = texture_path.split('.')
         if len(parts) < 2:
@@ -203,6 +205,8 @@ class BlockRenderMixin:
                 if b1 is None or b1.block_id == 'air':
                     continue
                 if self._block_has_partial_alpha(b0) and self._block_has_partial_alpha(b1):
+                    if b0.can_precompose_with(b1):
+                        continue
                     requires_direct = True
                     break
             if requires_direct:
@@ -284,6 +288,7 @@ class BlockRenderMixin:
         light_map = cw.light_map
         sky_light_map = getattr(cw, "sky_light_map", {})
         block_light_map = getattr(cw, "block_light_map", {})
+        get_light_snapshot = getattr(cw, "get_light_snapshot", None)
         get_block = cw.get_block
         ao_mul = self.ao_multiple
         font = self.default_font
@@ -309,6 +314,8 @@ class BlockRenderMixin:
             chunk_light = light_map.get(x // 16)
             chunk_sky_light = sky_light_map.get(x // 16)
             chunk_block_light = block_light_map.get(x // 16)
+            if callable(get_light_snapshot):
+                chunk_light, chunk_sky_light, chunk_block_light = get_light_snapshot(x // 16)
             local_x = x % 16
             for j in range(y_len):
                 y = y_min + j
@@ -435,15 +442,19 @@ class BlockRenderMixin:
                 j = y - y_min
                 b0 = blocks0[i][j]
                 b1 = blocks1[i][j]
+                precomposed_texture = None
 
                 if b1 is not None and b1.block_id != 'air' and b0 is not None and b0.has_transparent_pixels:
-                    self._draw_block_optimized(
-                        target, block_size, cam_x, cam_y, width, height,
-                        x, y, 1, b1,
-                        light_levels, block_info, is_solid, get_light,
-                        get_sky, get_block_l, sky_color,
-                        x_min, y_min, ao_mul, debug, font,
-                    )
+                    if b0.can_precompose_with(b1):
+                        precomposed_texture = b0.get_precomposed_texture(block_size, b1)
+                    if precomposed_texture is None:
+                        self._draw_block_optimized(
+                            target, block_size, cam_x, cam_y, width, height,
+                            x, y, 1, b1,
+                            light_levels, block_info, is_solid, get_light,
+                            get_sky, get_block_l, sky_color,
+                            x_min, y_min, ao_mul, debug, font,
+                        )
 
                 if b0 is not None and b0.block_id != 'air':
                     self._draw_block_optimized(
@@ -452,6 +463,7 @@ class BlockRenderMixin:
                         light_levels, block_info, is_solid, get_light,
                         get_sky, get_block_l, sky_color,
                         x_min, y_min, ao_mul, debug, font,
+                        texture_override=precomposed_texture,
                     )
 
     def _get_block_section_surface(
@@ -713,6 +725,7 @@ class BlockRenderMixin:
         light_map = cw.light_map
         sky_light_map = getattr(cw, "sky_light_map", {})
         block_light_map = getattr(cw, "block_light_map", {})
+        get_light_snapshot = getattr(cw, "get_light_snapshot", None)
         NIGHT_TINT = (36, 48, 128)
 
         # 获取当前天空状态
@@ -771,6 +784,8 @@ class BlockRenderMixin:
             chunk_light = light_map.get(x // 16)
             chunk_sky_light = sky_light_map.get(x // 16)
             chunk_block_light = block_light_map.get(x // 16)
+            if callable(get_light_snapshot):
+                chunk_light, chunk_sky_light, chunk_block_light = get_light_snapshot(x // 16)
             local_x = x % 16
             for j in range(y_len):
                 y = y_min + j
@@ -835,15 +850,19 @@ class BlockRenderMixin:
                 j = y - y_min
                 b0 = blocks0[i][j]
                 b1 = blocks1[i][j]
+                precomposed_texture = None
 
                 if b1 is not None and b1.block_id != 'air' and b0.has_transparent_pixels:
-                    self._draw_block_optimized(
-                        screen, block_size, cam_x, cam_y, width, height,
-                        x, y, 1, b1,
-                        light_levels, block_info, is_solid, get_light,
-                        get_sky, get_block_l, sky_color,
-                        x_min, y_min, ao_mul, debug, font,
-                    )
+                    if b0.can_precompose_with(b1):
+                        precomposed_texture = b0.get_precomposed_texture(block_size, b1)
+                    if precomposed_texture is None:
+                        self._draw_block_optimized(
+                            screen, block_size, cam_x, cam_y, width, height,
+                            x, y, 1, b1,
+                            light_levels, block_info, is_solid, get_light,
+                            get_sky, get_block_l, sky_color,
+                            x_min, y_min, ao_mul, debug, font,
+                        )
 
                 if b0 is not None and b0.block_id != 'air':
                     self._draw_block_optimized(
@@ -852,6 +871,7 @@ class BlockRenderMixin:
                         light_levels, block_info, is_solid, get_light,
                         get_sky, get_block_l, sky_color,
                         x_min, y_min, ao_mul, debug, font,
+                        texture_override=precomposed_texture,
                     )
 
     def _draw_block_optimized(
@@ -878,6 +898,7 @@ class BlockRenderMixin:
         ao_mul: float,
         debug: bool,
         font: pygame.font.Font,
+        texture_override: pygame.Surface | None = None,
     ) -> None:
         """绘制单个方块，应用四角光照 + AO + 纹理缓存。
 
@@ -983,7 +1004,7 @@ class BlockRenderMixin:
             return
 
         # ---- 6. 获取纹理 ----
-        tex = block.get_texture(bs)
+        tex = texture_override if texture_override is not None else block.get_texture(bs)
         if tex is None:
             return
 

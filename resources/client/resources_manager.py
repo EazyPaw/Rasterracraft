@@ -213,12 +213,23 @@ class ResourcesManager:
             self.textures[ckey] = self.missing_texture
             return self.missing_texture
 
-    def get_texture_animation_key(self, key: str):
-        self.get_texture_img(key)
-        texture = self.textures.get(key)
+    def get_texture_animation_key(self, key: str, cft=False, gta=False):
+        """Return the current frame key for an animated texture.
+
+        Texture cache entries are keyed by ``(key, cft, gta)``.  Looking them
+        up with the bare resource key made every animated block section appear
+        static, so it only changed when some unrelated cache key changed.
+        """
+        self.get_texture_img(key, cft=cft, gta=gta)
+        cache_key = (key, cft, gta)
+        texture = self.textures.get(cache_key)
         if not isinstance(texture, dict):
             return None
-        return key, self._get_animation_frame_index(texture)
+        return cache_key, self._get_animation_frame_index(texture)
+
+    def is_texture_animated(self, key: str, cft=False, gta=False) -> bool:
+        self.get_texture_img(key, cft=cft, gta=gta)
+        return isinstance(self.textures.get((key, cft, gta)), dict)
 
     def _get_animation_frame_index(self, animation_data: dict) -> int:
         frame_indices = animation_data.get("frame_indices")

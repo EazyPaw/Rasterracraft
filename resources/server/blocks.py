@@ -601,6 +601,8 @@ class WATER(FluidBlock):
     _texture_path = 'blocks.water_still'
     _flow_texture_path = 'blocks.water_flow'
     _texture_cache = {}
+    _scaled_atlas_cache = {}
+    _precomposed_texture_cache = {}
     horizontal_flow_range = 4
     flowing_sound = 'liquid.water'
     source_sound = 'liquid.water'
@@ -610,6 +612,9 @@ class LAVA(FluidBlock):
     name = 'tile.lava.name'
     _texture_path = 'blocks.lava_still'
     _flow_texture_path = 'blocks.lava_flow'
+    _texture_cache = {}
+    _scaled_atlas_cache = {}
+    _precomposed_texture_cache = {}
     # LEVEL remains the vanilla 0..7 range; the two-level drop-off means
     # normal horizontal spreading uses 0, 2, 4, 6, then stops.
     max_level = 7

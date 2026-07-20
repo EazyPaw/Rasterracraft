@@ -946,7 +946,7 @@ class World:
                     knockback=knockback,
                 )
             if actual_damage <= 0.0:
-                # Explosion impulse is independent from damage immunity.  This
+                # Explosion impulse is independent of damage immunity.  This
                 # also lets primed TNT and creative players be pushed.
                 apply_knockback = getattr(entity, "apply_knockback", None)
                 if callable(apply_knockback):

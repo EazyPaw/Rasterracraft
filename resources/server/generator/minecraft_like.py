@@ -4,6 +4,7 @@
 使用多层 Perlin 噪声实现确定性的地形、生物群系、
 洞穴、矿石和地表装饰物生成。
 """
+import random
 
 from resources.server.blocks import *
 from resources.server.generator.base import Generator
