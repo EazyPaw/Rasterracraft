@@ -1,43 +1,77 @@
+import pygame
+
 from resources.server.material_class import Material, BlockItem
 from resources.server.utils import client_method
 
 
+_material_registry: dict[str, type[Material]] = {}
+
+
+def register_material(cls=None, /, *, aliases: tuple[str, ...] = ()):
+    """Decorator – register *cls* (and optional aliases) in ``_material_registry``.
+
+    Usage::
+
+        @register_material
+        class APPLE(Material):
+            name_id = "apple"
+
+        @register_material(aliases=("seeds",))
+        class WHEAT_SEEDS(Material):
+            name_id = "wheat_seeds"
+    """
+    if cls is None:
+        return lambda c: register_material(c, aliases=aliases)
+    _material_registry[cls.name_id] = cls
+    for alias in aliases:
+        _material_registry[alias] = cls
+    return cls
+
+
+@register_material
 class DIRT(BlockItem):
     name_id = "dirt"
     name = "tile.dirt.name"
     target_block_id = "dirt"
 
+@register_material
 class AIR(BlockItem):
     name_id = "air"
     name = "tile.air.name"
     target_block_id = "air"
 
+@register_material
 class GLOWSTONE(BlockItem):
     name_id = "glowstone"
     name = "tile.lightgem.name"
     target_block_id = "glowstone"
 
+@register_material
 class SAND(BlockItem):
     name_id = "sand"
     name = "tile.sand.name"
     target_block_id = "sand"
 
 
+@register_material
 class COBBLESTONE(BlockItem):
     name_id = "cobblestone"
     name = "tile.stonebrick.name"
     target_block_id = "cobblestone"
 
+@register_material
 class WATER(BlockItem):
     name_id = "water"
     name = "tile.water.name"
     target_block_id = "water"
 
+@register_material
 class LAVA(BlockItem):
     name_id = "lava"
     name = "tile.lava.name"
     target_block_id = "lava"
 
+@register_material
 class APPLE(Material):
     name_id = "apple"
     name = "item.apple.name"
@@ -46,6 +80,7 @@ class APPLE(Material):
     saturation_modifier = 0.3
 
 
+@register_material
 class BREAD(Material):
     name_id = "bread"
     name = "item.bread.name"
@@ -54,6 +89,7 @@ class BREAD(Material):
     saturation_modifier = 0.6
 
 
+@register_material
 class COOKED_BEEF(Material):
     name_id = "cooked_beef"
     name = "item.beefCooked.name"
@@ -62,6 +98,7 @@ class COOKED_BEEF(Material):
     saturation_modifier = 0.8
 
 
+@register_material
 class ROTTEN_FLESH(Material):
     name_id = "rotten_flesh"
     name = "item.rottenFlesh.name"
@@ -70,6 +107,7 @@ class ROTTEN_FLESH(Material):
     saturation_modifier = 0.1
 
 
+@register_material
 class RAW_CHICKEN(Material):
     name_id = "chicken"
     name = "item.chickenRaw.name"
@@ -78,6 +116,7 @@ class RAW_CHICKEN(Material):
     saturation_modifier = 0.3
 
 
+@register_material
 class COOKED_CHICKEN(Material):
     name_id = "cooked_chicken"
     name = "item.chickenCooked.name"
@@ -86,6 +125,7 @@ class COOKED_CHICKEN(Material):
     saturation_modifier = 0.6
 
 
+@register_material
 class RAW_BEEF(Material):
     name_id = "beef"
     name = "item.beefRaw.name"
@@ -94,12 +134,14 @@ class RAW_BEEF(Material):
     saturation_modifier = 0.3
 
 
+@register_material
 class LEATHER(Material):
     name_id = "leather"
     name = "item.leather.name"
     _texture_path = "items.leather"
 
 
+@register_material
 class RAW_PORKCHOP(Material):
     name_id = "porkchop"
     name = "item.porkchopRaw.name"
@@ -108,6 +150,7 @@ class RAW_PORKCHOP(Material):
     saturation_modifier = 0.3
 
 
+@register_material
 class COOKED_PORKCHOP(Material):
     name_id = "cooked_porkchop"
     name = "item.porkchopCooked.name"
@@ -116,6 +159,7 @@ class COOKED_PORKCHOP(Material):
     saturation_modifier = 0.8
 
 
+@register_material
 class RAW_MUTTON(Material):
     name_id = "mutton"
     name = "item.muttonRaw.name"
@@ -124,6 +168,7 @@ class RAW_MUTTON(Material):
     saturation_modifier = 0.3
 
 
+@register_material
 class COOKED_MUTTON(Material):
     name_id = "cooked_mutton"
     name = "item.muttonCooked.name"
@@ -132,54 +177,63 @@ class COOKED_MUTTON(Material):
     saturation_modifier = 0.8
 
 
+@register_material
 class FEATHER(Material):
     name_id = "feather"
     name = "item.feather.name"
     _texture_path = "items.feather"
 
 
+@register_material
 class EGG(Material):
     name_id = "egg"
     name = "item.egg.name"
     _texture_path = "items.egg"
 
 
+@register_material(aliases=("seeds",))
 class WHEAT_SEEDS(Material):
     name_id = "wheat_seeds"
     name = "item.seeds.name"
     _texture_path = "items.seeds_wheat"
 
 
+@register_material
 class PUMPKIN_SEEDS(Material):
     name_id = "pumpkin_seeds"
     name = "item.seeds_pumpkin.name"
     _texture_path = "items.seeds_pumpkin"
 
 
+@register_material
 class MELON_SEEDS(Material):
     name_id = "melon_seeds"
     name = "item.seeds_melon.name"
     _texture_path = "items.seeds_melon"
 
 
+@register_material
 class WHEAT(Material):
     name_id = "wheat"
     name = "item.wheat.name"
     _texture_path = "items.wheat"
 
 
+@register_material
 class CARROT(Material):
     name_id = "carrot"
     name = "item.carrots.name"
     _texture_path = "items.carrot"
 
 
+@register_material
 class POTATO(Material):
     name_id = "potato"
     name = "item.potato.name"
     _texture_path = "items.potato"
 
 
+@register_material
 class CARROT_ON_A_STICK(Material):
     name_id = "carrot_on_a_stick"
     name = "item.carrotOnAStick.name"
@@ -187,6 +241,7 @@ class CARROT_ON_A_STICK(Material):
     max_stack_size = 1
 
 
+@register_material
 class BUCKET(Material):
     name_id = "bucket"
     name = "item.bucket.name"
@@ -194,6 +249,7 @@ class BUCKET(Material):
     max_stack_size = 16
 
 
+@register_material
 class MILK_BUCKET(Material):
     name_id = "milk_bucket"
     name = "item.milk.name"
@@ -201,6 +257,7 @@ class MILK_BUCKET(Material):
     max_stack_size = 1
 
 
+@register_material
 class SHEARS(Material):
     name_id = "shears"
     name = "item.shears.name"
@@ -208,18 +265,21 @@ class SHEARS(Material):
     max_stack_size = 1
 
 
+@register_material
 class WHITE_WOOL(Material):
     name_id = "white_wool"
     name = "tile.cloth.white.name"
     _texture_path = "blocks.wool_colored_white"
 
 
+@register_material
 class STICK(Material):
     name_id = "stick"
     name = "item.stick.name"
     _texture_path = "items.stick"
 
 
+@register_material
 class FLINT_AND_STEEL(Material):
     name_id = "flint_and_steel"
     name = "item.flintAndSteel.name"
@@ -239,9 +299,10 @@ class Tool(Material):
         用于获取渲染时客户端的手持点位，第三个值为缩放倍率，第四个参数为旋转度数（角度制）
         :return:
         """
-        return {'anchor':(0.3,0.7),'offset':(0, 0),'scale':0.8,'rotation':-45}
+        return {'anchor':(0.7,0.7),'offset':(0, 0),'scale':0.8,'rotation':-135}
 
 
+@register_material
 class WOODEN_PICKAXE(Tool):
     name_id = "wooden_pickaxe"
     name = "item.pickaxeWood.name"
@@ -250,6 +311,7 @@ class WOODEN_PICKAXE(Tool):
     mining_speed = 2.0
 
 
+@register_material
 class STONE_PICKAXE(WOODEN_PICKAXE):
     name_id = "stone_pickaxe"
     name = "item.pickaxeStone.name"
@@ -258,6 +320,7 @@ class STONE_PICKAXE(WOODEN_PICKAXE):
     mining_speed = 4.0
 
 
+@register_material
 class IRON_PICKAXE(WOODEN_PICKAXE):
     name_id = "iron_pickaxe"
     name = "item.pickaxeIron.name"
@@ -266,6 +329,7 @@ class IRON_PICKAXE(WOODEN_PICKAXE):
     mining_speed = 6.0
 
 
+@register_material
 class DIAMOND_PICKAXE(WOODEN_PICKAXE):
     name_id = "diamond_pickaxe"
     name = "item.pickaxeDiamond.name"
@@ -273,10 +337,52 @@ class DIAMOND_PICKAXE(WOODEN_PICKAXE):
     tier = "diamond"
     mining_speed = 8.0
 
+@register_material
 class TORCH(BlockItem):
     name_id = "torch"
     name = "tile.torch.name"
     target_block_id = "torch"
+
+@register_material
+class WOODEN_HOE(Tool):
+    name_id = "wooden_hoe"
+    name = "item.hoeWood.name"
+    _texture_path = "items.wood_hoe"
+    tier = "wood"
+    tool_type = "hoe"
+    mining_speed = 2.0
+
+    # @classmethod
+    # @client_method
+    # def get_texture(cls, size: float, client):
+    #     if cls._texture_path is None:
+    #         return None
+    #     original = client.resources_manager.get_texture_img(cls._texture_path, flip=True)
+    #     if original is None:
+    #         return None
+    #     cls._original_texture = original
+    #     key = (round(float(size), 4), original)
+    #     cache = cls.__dict__.get("_scaled_texture_cache")
+    #     if cache is None:
+    #         cache = {}
+    #         cls._scaled_texture_cache = cache
+    #     cached = cache.get(key)
+    #     if cached is not None:
+    #         return cached
+    #     original_width = original.get_width()
+    #     original_height = original.get_height()
+    #     new_width = max(1, int(round(original_width * size)))
+    #     new_height = max(1, int(round(original_height * size)))
+    #     texture = pygame.transform.scale(original, (new_width, new_height))
+    #     cls._last_scaled = key
+    #     cache[key] = texture
+    #     if len(cache) > 64:
+    #         cache.pop(next(iter(cache)))
+    #     return texture
+    #
+    # @client_method
+    # def get_anchor(self, client = None):
+    #     return {'anchor':(0.3,0.7),'offset':(0, 0),'scale':0.8,'rotation':-90}
 
 
 class SNOWBALL(Material):
@@ -304,30 +410,13 @@ def get_block_item(block):
 
 
 def get_material_by_id(material_id: str):
-    """Resolve a wire-format material id, including generated block items."""
+    """Resolve a wire-format material id, including generated block items.
+
+    Material subclasses decorated with :func:`register_material` are looked up
+    automatically — no hand-maintained dictionary is needed.
+    """
     material_id = str(material_id).removeprefix("minecraft:")
-    known = {
-        "air": AIR, "dirt": DIRT, "sand": SAND,
-        "cobblestone": COBBLESTONE, "water": WATER, "lava": LAVA,
-        "glowstone": GLOWSTONE, "apple": APPLE, "bread": BREAD,
-        "cooked_beef": COOKED_BEEF, "rotten_flesh": ROTTEN_FLESH,
-        "chicken": RAW_CHICKEN, "cooked_chicken": COOKED_CHICKEN,
-        "beef": RAW_BEEF, "leather": LEATHER,
-        "porkchop": RAW_PORKCHOP, "cooked_porkchop": COOKED_PORKCHOP,
-        "mutton": RAW_MUTTON, "cooked_mutton": COOKED_MUTTON,
-        "feather": FEATHER, "egg": EGG,
-        "wheat_seeds": WHEAT_SEEDS, "seeds": WHEAT_SEEDS,
-        "pumpkin_seeds": PUMPKIN_SEEDS, "melon_seeds": MELON_SEEDS,
-        "wheat": WHEAT, "carrot": CARROT, "potato": POTATO,
-        "carrot_on_a_stick": CARROT_ON_A_STICK,
-        "bucket": BUCKET, "milk_bucket": MILK_BUCKET,
-        "shears": SHEARS, "white_wool": WHITE_WOOL,
-        "stick": STICK, "flint_and_steel": FLINT_AND_STEEL,
-        "torch": TORCH,
-        "wooden_pickaxe": WOODEN_PICKAXE, "stone_pickaxe": STONE_PICKAXE,
-        "iron_pickaxe": IRON_PICKAXE, "diamond_pickaxe": DIAMOND_PICKAXE,
-    }
-    material_type = known.get(material_id)
+    material_type = _material_registry.get(material_id)
     if material_type is not None:
         return material_type()
     from resources.server import blocks

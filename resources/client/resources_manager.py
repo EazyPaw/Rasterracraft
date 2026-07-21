@@ -127,9 +127,10 @@ class ResourcesManager:
 
         return "".join(result)
 
-    def get_texture_img(self, key: str, cft=False, gta = False) -> Surface:
+    def get_texture_img(self, key: str, cft=False, gta = False, flip = False) -> Surface:
         """
         获取指定纹理的 Surface 对象。自带缓存，可直接调用
+        :param flip: 是否镜像翻转贴图
         :param cft: 是否切除材质中完全透明的多余边缘
         :param key: 纹理的键，格式为 "类别.子路径.文件名"
                    例如："blocks.stone" -> assets/minecraft/textures/blocks/stone.png
@@ -139,7 +140,7 @@ class ResourcesManager:
         此方法本身带有缓存优化。
         """
         # 检查缓存
-        ckey = (key, cft, gta)
+        ckey = (key, cft, gta, flip)
         if ckey in self.textures:
             r = self.textures[ckey]
             if isinstance(r, pygame.Surface):
@@ -204,6 +205,9 @@ class ResourcesManager:
 
             if gta:
                 texture = self.grayscale_to_alpha(texture)
+
+            if flip:
+                texture = pygame.transform.flip(texture, True, False)
 
             self.textures[ckey] = texture
             return texture

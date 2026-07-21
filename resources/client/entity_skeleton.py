@@ -495,8 +495,8 @@ class PlayerSkeleton(EntitySkeleton):
             # once when the selected stack changes; no runtime flip is mixed
             # into BodyPart's rotation pipeline.
             self._held_item_textures = {
-                self.RIGHT: texture,
-                self.LEFT: pygame.transform.flip(texture, True, False),
+                self.RIGHT: pygame.transform.flip(texture, True, False),
+                self.LEFT: texture,
             }
             self._held_item_pivots = {
                 self.RIGHT: right_pivot,
