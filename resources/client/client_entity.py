@@ -5,6 +5,10 @@ from resources.client.entity_skeleton import PlayerSkeleton
 from resources.server.entities.falling_block import FallingBlockSkeleton
 from resources.server.entities.primed_tnt import PrimedTNTSkeleton
 from resources.server.entities.zombie import ZombieSkeleton
+from resources.server.entities.chicken import ChickenSkeleton
+from resources.server.entities.cow import CowSkeleton
+from resources.server.entities.pig import PigSkeleton
+from resources.server.entities.sheep import SheepSkeleton
 from resources.server.blocks import get_block_by_id
 from resources.server.item_class import ItemStack
 from resources.server.location import Location, Vector
@@ -58,6 +62,13 @@ class ClientEntity:
         self.aggressive = bool(packet.get('aggressive', False))
         self.look_angle = float(packet.get('look_angle', 0.0))
         self.attack_animation_ticks = int(packet.get('attack_animation_ticks', 0))
+        self.is_baby = bool(packet.get('is_baby', False))
+        self.age_scale = float(packet.get('age_scale', 1.0))
+        self.flap_speed = float(packet.get('flap_speed', 0.0))
+        self.sheared = bool(packet.get('sheared', False))
+        self.wool_color = packet.get('wool_color', 'white')
+        self.eat_animation_ticks = int(packet.get('eat_animation_ticks', 0))
+        self.saddled = bool(packet.get('saddled', False))
         self.breaking = bool(packet.get('breaking', False))
         self.eating = bool(packet.get('eating', False))
         self.break_progress = float(packet.get('break_progress', 0.0))
@@ -95,6 +106,13 @@ class ClientEntity:
         self.attack_animation_ticks = int(packet.get(
             'attack_animation_ticks', self.attack_animation_ticks
         ))
+        self.is_baby = bool(packet.get('is_baby', self.is_baby))
+        self.age_scale = float(packet.get('age_scale', self.age_scale))
+        self.flap_speed = float(packet.get('flap_speed', self.flap_speed))
+        self.sheared = bool(packet.get('sheared', self.sheared))
+        self.wool_color = packet.get('wool_color', self.wool_color)
+        self.eat_animation_ticks = int(packet.get('eat_animation_ticks', self.eat_animation_ticks))
+        self.saddled = bool(packet.get('saddled', self.saddled))
         self.breaking = bool(packet.get('breaking', self.breaking))
         self.eating = bool(packet.get('eating', self.eating))
         self.break_progress = float(packet.get('break_progress', self.break_progress))
@@ -158,5 +176,13 @@ class ClientEntity:
             self.skeleton = ItemEntityRenderer(self)
         elif self.entity_id == "zombie":
             self.skeleton = ZombieSkeleton(self)
+        elif self.entity_id == "chicken":
+            self.skeleton = ChickenSkeleton(self)
+        elif self.entity_id == "cow":
+            self.skeleton = CowSkeleton(self)
+        elif self.entity_id == "pig":
+            self.skeleton = PigSkeleton(self)
+        elif self.entity_id == "sheep":
+            self.skeleton = SheepSkeleton(self)
         elif self.entity_id == "primed_tnt":
             self.skeleton = PrimedTNTSkeleton(self)

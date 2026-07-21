@@ -44,7 +44,12 @@ class GameMode(ABC):
         })
 
     def right_click_on_entity(self, entity: Entity):
-        pass
+        if entity is None or self.player.client.hold_mouse_buttons[2]:
+            return
+        self.player.client.sent_packet({
+            "__class__": "InteractEntity",
+            "uuid": str(entity.uuid),
+        })
 
     def get_choosing_block(self):
         pass

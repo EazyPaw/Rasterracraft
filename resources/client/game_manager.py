@@ -133,7 +133,11 @@ class GameManager:
             else:
                 self.client.hold_mouse_buttons[0] = False
             if mouse_button[2]:
-                if player.choosing_block is not None and (loc := player.choosing_block.location) is not None:
+                if player.choosing_entity is not None:
+                    player.game_mode.right_click_on_entity(player.choosing_entity)
+                    self.client.hold_mouse_buttons[2] = True
+                    player.skeleton.trigger_swing()
+                elif player.choosing_block is not None and (loc := player.choosing_block.location) is not None:
                     x = loc.x
                     y = loc.y
                     self.client.hold_key_map["mouse_right"](self.client.client_world.get_block(x, y, 0))

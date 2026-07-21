@@ -215,7 +215,8 @@ class CommandExecutor:
             raise ValueError("You do not have permission to use /summon")
 
         entity_id = args[0].lower().removeprefix("minecraft:")
-        if entity_id != "zombie":
+        from resources.server.entity_registry import get_entity_types
+        if entity_id not in get_entity_types():
             raise ValueError(f"Unknown entity: {args[0]}")
 
         if isinstance(executor, Player):
@@ -244,11 +245,11 @@ class CommandExecutor:
         if not 0 <= y < world.attribute.MAX_BUILD_HEIGHT:
             raise ValueError(f"y must be between 0 and {world.attribute.MAX_BUILD_HEIGHT - 1}")
 
-        from resources.server.entities.zombie import Zombie
-        zombie = Zombie(x, y, world, z)
-        zombie.apply_summon_nbt(nbt)
-        world.spawn_entity(zombie)
-        return f"Summoned zombie at ({zombie.x:g}, {zombie.y:g}, {zombie.z})"
+        from resources.server.entity_registry import create_entity
+        entity = create_entity(entity_id, x, y, world, z)
+        entity.apply_summon_nbt(nbt)
+        world.spawn_entity(entity)
+        return f"Summoned {entity_id} at ({entity.x:g}, {entity.y:g}, {entity.z})"
 
     def time(self, args, executor: Player | str):
         if args[0] == "add" and isinstance(executor, Player):

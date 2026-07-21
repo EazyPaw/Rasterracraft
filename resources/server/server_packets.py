@@ -349,6 +349,15 @@ def decode_packet(packet: dict, player: Player):
             player.attack(target)
             forward_packet_to_others(player, player, mode="entity_update")
 
+    elif packet['__class__'] == 'InteractEntity':
+        target = _find_attack_target(player, packet.get('uuid', ''))
+        if target is not None and _can_player_reach_entity(player, target):
+            slot = max(0, min(len(player.inventory) - 1, int(player.selected_slot)))
+            held = player.inventory[slot]
+            if target.interact(player, held):
+                player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
+                forward_packet_to_others(player, player, mode="entity_update")
+
     elif packet['__class__'] == 'SelfDamage':
         # Fall, hunger and regeneration are advanced by Player.tick_server().
         # Never accept a client-authored damage amount.
@@ -563,5 +572,4 @@ def forward_packet_to_others(packet, player: Player, mode = 0):
         for other_player in player.world.server.players:
             if other_player != player and other_player.is_loading_position(int(player.x), int(player.y), 0):
                 other_player.world.server.send_client_socket(other_player, packet, "EntityUpdate")
-
 

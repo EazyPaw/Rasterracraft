@@ -231,6 +231,8 @@ class World:
         self.world_time = 0
         self.entities: dict[str, Entity] = {}
         self._entities_lock = threading.RLock()
+        self._saved_entities_by_chunk: dict[int, list[dict]] = {}
+        self.disable_mob_generation = False
         # 每次方块变动都会影响整区块光照。把同一 tick 的变动合并处理，
         # 避免重力/流体连锁时反复重算并发送相同的大型光照包。
         self._pending_light_recalc_chunks: set[int] = set()
@@ -568,6 +570,43 @@ class World:
             if player.is_loading_position(math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)):
                 self.server.send_client_socket(player, entity, "EntitySpawn")
 
+    def queue_saved_entities(self, records) -> None:
+        """Defer entity restore until collision data for its chunk is loaded."""
+        self._saved_entities_by_chunk.clear()
+        for record in records or ():
+            if not isinstance(record, dict):
+                continue
+            try:
+                rx = math.floor(float(record.get("x", 0.0))) // 16
+            except (TypeError, ValueError):
+                continue
+            self._saved_entities_by_chunk.setdefault(rx, []).append(record)
+
+    def _restore_entities_for_chunk(self, rx: int) -> None:
+        records = self._saved_entities_by_chunk.pop(int(rx), ())
+        if not records:
+            return
+        from resources.server.entity_registry import create_entity_from_save
+
+        for record in records:
+            entity = create_entity_from_save(record, self)
+            if entity is not None and entity.health > 0:
+                self.spawn_entity(entity)
+
+    def serialize_persistent_entities(self) -> list[dict]:
+        with self._entities_lock:
+            entities = tuple(self.entities.values())
+        records = [
+            entity.to_save_data() for entity in entities
+            if entity.entity_id != "player"
+            and not entity.removed
+            and entity.health > 0
+            and bool(getattr(entity, "persistence_required", False))
+        ]
+        for pending in self._saved_entities_by_chunk.values():
+            records.extend(dict(record) for record in pending)
+        return records
+
     def remove_entity(self, entity: Entity | str):
         entity_uuid = str(entity.uuid) if isinstance(entity, Entity) else str(entity)
         with self._entities_lock:
@@ -732,6 +771,7 @@ class World:
                     self.mark_chunk_dirty(rx)
                     changed = self.recalculate_light_for_chunks({rx})
                     self.schedule_chunk_and_boundary_fluids(rx)
+                    self._restore_entities_for_chunk(rx)
                     return changed
 
         logging.debug(f"Generating {self.id_name} chunk {rx}")
@@ -759,6 +799,9 @@ class World:
             # 使用世界上下文重新计算光照以支持跨区块传播
             changed = self.recalculate_light_for_chunks({rx})
             self.schedule_chunk_and_boundary_fluids(rx)
+            self._restore_entities_for_chunk(rx)
+            from resources.server.entity_spawning import spawn_animals_for_chunk
+            spawn_animals_for_chunk(self, rx)
             return changed
 
     def _initialize_chunk_blocks(self, chunk: Chunk) -> None:

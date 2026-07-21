@@ -285,6 +285,11 @@ class Server:
                                          , WorldAttribute()
                                          , seed)
         self.worlds["overworld"].world_time = world_time
+        if self.save_id:
+            self.worlds["overworld"].disable_mob_generation = bool(
+                world_meta.get("disable_mob_generation", False)
+            )
+            self.worlds["overworld"].queue_saved_entities(world_meta.get("entities", ()))
         weather_name = str(world_meta.get("weather", Weather.CLEAR.value)) if self.save_id else Weather.CLEAR.value
         try:
             self.worlds["overworld"].weather = Weather(weather_name)
@@ -403,6 +408,8 @@ class Server:
                 "max_build_height": int(world.attribute.MAX_BUILD_HEIGHT),
                 "weather": world.weather.value,
                 "weather_tick": int(world.weather_tick),
+                "disable_mob_generation": bool(world.disable_mob_generation),
+                "entities": world.serialize_persistent_entities(),
             }
         player = last_player
         if player is None and self.players:

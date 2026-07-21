@@ -159,11 +159,67 @@ class Entity:
             data['eating'] = bool(getattr(self, 'eating', False))
             if breaking_target is not None:
                 data['break_target'] = list(breaking_target[:3])
+        data.update(self.get_synced_data())
         return data
+
+    def get_synced_data(self) -> dict:
+        """Subtype-owned state appended to spawn/update packets."""
+        return {}
+
+    def get_persistent_data(self) -> dict:
+        """Subtype-owned state written to the world entity snapshot."""
+        return {}
+
+    def read_persistent_data(self, data: dict) -> None:
+        """Restore subtype-owned state from :meth:`get_persistent_data`."""
+
+    def to_save_data(self) -> dict:
+        """Serialize stable server state without leaking runtime objects."""
+        return {
+            "uuid": str(self.uuid),
+            "entity_id": self.entity_id,
+            "x": float(self.x),
+            "y": float(self.y),
+            "z": int(getattr(self, "z", 0)),
+            "motion": {"x": float(self.motion.x), "y": float(self.motion.y)},
+            "health": float(self.health),
+            "facing": int(self.facing),
+            "no_ai": bool(self.no_ai),
+            "silent": bool(self.silent),
+            "persistence_required": bool(self.persistence_required),
+            "data": self.get_persistent_data(),
+        }
+
+    def restore_common_save_data(self, data: dict) -> None:
+        """Apply the common half of a trusted world entity snapshot."""
+        try:
+            self.uuid = UUID(str(data.get("uuid", self.uuid)))
+        except (TypeError, ValueError):
+            pass
+        self.health = max(0.0, min(self.max_health, float(data.get("health", self.health))))
+        self.facing = 1 if int(data.get("facing", self.facing)) == 1 else 0
+        self.no_ai = bool(data.get("no_ai", self.no_ai))
+        self.silent = bool(data.get("silent", self.silent))
+        self.persistence_required = bool(data.get("persistence_required", self.persistence_required))
+        motion = data.get("motion", {})
+        if isinstance(motion, dict):
+            self.motion.x = float(motion.get("x", self.motion.x))
+            self.motion.y = float(motion.get("y", self.motion.y))
+        subtype = data.get("data", {})
+        if isinstance(subtype, dict):
+            self.read_persistent_data(subtype)
+
+    def interact(self, player, held_stack) -> bool:
+        """Server-authoritative right-click extension point."""
+        return False
 
     @property
     def attack_damage(self):
         return self._attack_damage
+
+    @attack_damage.setter
+    def attack_damage(self, value) -> None:
+        self._attack_damage = max(0.0, float(value))
 
     def apply_summon_nbt(self, nbt: dict) -> None:
         """Apply common living-entity summon data before subtype-specific data."""
@@ -776,6 +832,10 @@ class Entity:
         server = getattr(self.world, "server", None)
         if sound and server is not None:
             server.broadcast_sound(sound, self.x, self.y, getattr(self, "z", 0))
+        ai = getattr(self, "ai", None)
+        notifier = getattr(ai, "on_hurt", None)
+        if callable(notifier) and self.health > 0:
+            notifier(source)
 
     def get_hurt_sound(self, damage_type: type[DamageType], actual_damage: float) -> str | None:
         return None if self.health <= 0 else self.get_sound("hurt")

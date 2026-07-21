@@ -122,7 +122,7 @@ class GRASS_BLOCK(Block):
     hardness = 0.6
     preferred_tool = 'shovel'
     _side_texture_cache = {}  # 缓存不同尺寸的侧面纹理
-    Tags = [BlockTag.GRASS_BLOCKS]
+    Tags = [BlockTag.GRASS_BLOCKS, BlockTag.ANIMALS_SPAWNABLE_ON]
 
     def __init__(self, snowed = False):
         super().__init__()
