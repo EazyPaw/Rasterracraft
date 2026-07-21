@@ -185,6 +185,7 @@ class SHORT_GRASS(GrassStain):
     name = 'tile.tallgrass.grass.name'
     _texture_path = 'blocks.tallgrass'
     hardness = 0.0
+    replaceable = True
 
 
 class DoublePlantBottomMixin:

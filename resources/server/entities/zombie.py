@@ -35,7 +35,7 @@ class Zombie(Entity):
         self.move_speed = 0.1
         self.movement_acceleration = 0.05
         self.interact_range = 1.5
-        self.attack_damage = 3.0
+        self._attack_damage = 3.0
         rotten_flesh = random.randint(0, 2)
         self.drops = (
             [ItemStack(ROTTEN_FLESH(), rotten_flesh)]

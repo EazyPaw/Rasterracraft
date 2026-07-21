@@ -42,7 +42,7 @@ class Player(Entity):
         self.height = 1.8
         self.max_health = 20
         self.health = self.max_health
-        self.attack_damage = 1.0
+        self._attack_damage = 1.0
         self.interact_range = 5.0
         self.food_level = 20
         self.saturation = 5.0

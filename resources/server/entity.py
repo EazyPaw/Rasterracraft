@@ -67,7 +67,7 @@ class Entity:
         self.last_damage_source = None
         self.last_hurt_damage = 0.0
         self.knockback_resistance = 0.0
-        self.attack_damage = 1.0
+        self._attack_damage = 1.0
         self.follow_range = 35.0
         self.attack_cooldown_ticks = 0
         self.attack_interval_ticks = 20
@@ -160,6 +160,10 @@ class Entity:
             if breaking_target is not None:
                 data['break_target'] = list(breaking_target[:3])
         return data
+
+    @property
+    def attack_damage(self):
+        return self._attack_damage
 
     def apply_summon_nbt(self, nbt: dict) -> None:
         """Apply common living-entity summon data before subtype-specific data."""
