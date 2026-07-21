@@ -19,6 +19,7 @@ class GameMode(ABC):
 
     name_id = "null"
     name = "null"
+    durability_consumption = True
 
     def __init__(self, player: 'ClientPlayer'):
         self.player = player
@@ -88,6 +89,7 @@ class GameMode(ABC):
 class CreativeMode(GameMode):
     name_id = "creative"
     name = "gameMode.creative"
+    durability_consumption = False
 
     def __init__(self, player: 'ClientPlayer'):
         super().__init__(player)

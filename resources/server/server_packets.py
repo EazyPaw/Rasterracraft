@@ -16,24 +16,13 @@ def encode_packet(obj, obj_type, args) -> dict:
     if type(obj) == Chunk:
         return obj.to_dict()
     elif isinstance(obj, Player) and obj_type == "Teleport":
-        packet = {
-            '__class__': 'Teleport',
-            'x': obj.x,
-            'y': obj.y,
-            'uuid': str(obj.uuid),
-            'name': obj.name,
-            'health': obj.health,
-            'hurt_time': obj.hurt_time,
-            'last_hurt_damage': obj.last_hurt_damage,
-            'food_level': getattr(obj, 'food_level', 20),
-            'saturation': getattr(obj, 'saturation', 5.0),
-            'experience': getattr(obj, 'experience', 0),
-            'experience_level': getattr(obj, 'experience_level', 0),
-            'selected_slot': getattr(obj, 'selected_slot', 0),
-            'teleport_id': getattr(obj, '_pending_teleport_id', None),
-        }
-        packet['inventory'] = serialize_inventory(obj.inventory)
-        packet['cursor'] = stack_to_payload(obj.cursor_stack)
+        packet = {'__class__': 'Teleport', 'x': obj.x, 'y': obj.y, 'uuid': str(obj.uuid), 'name': obj.name,
+                  'health': obj.health, 'hurt_time': obj.hurt_time, 'last_hurt_damage': obj.last_hurt_damage,
+                  'food_level': getattr(obj, 'food_level', 20), 'saturation': getattr(obj, 'saturation', 5.0),
+                  'experience': getattr(obj, 'experience', 0), 'experience_level': getattr(obj, 'experience_level', 0),
+                  'selected_slot': getattr(obj, 'selected_slot', 0),
+                  'teleport_id': getattr(obj, '_pending_teleport_id', None),
+                  'inventory': serialize_inventory(obj.inventory), 'cursor': stack_to_payload(obj.cursor_stack)}
         return packet
     elif isinstance(obj, Entity) and obj_type in ("EntitySpawn", "EntityUpdate"):
         packet = obj.to_entity_data()

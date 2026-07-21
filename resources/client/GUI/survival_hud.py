@@ -69,7 +69,7 @@ class SurvivalHUD(HotBar):
         # 使填充的图标向屏幕中心方向增长。
         for index in range(10):
             display_index = 9 - index if food else index
-            px = x + display_index * icon_w
+            px = x + display_index * (icon_w - 4)
             self.render.blit(empty, (px, y))
             units = value - index * (maximum / 10)
             if units >= maximum / 10:
@@ -117,8 +117,8 @@ class SurvivalHUD(HotBar):
         # ---- 生命值与饥饿值行（经验条上方） ----
         # 将生命值左移一个图标宽度，饥饿值右移一个图标宽度，
         # 使两个计量条不会紧挨在一起。
-        meter_y = experience_y - icon_w - round(self.render.gui_scale * 3)
-        health_x = bar_x - icon_w
+        meter_y = experience_y - icon_w - round(self.render.gui_scale * 1)
+        health_x = bar_x - (icon_w - self.render.gui_scale * 9)
         hunger_x = bar_x + hotbar.get_width() - icon_w * 9
 
         self._draw_meter(player.health, player.max_health, health_x, meter_y, food=False)

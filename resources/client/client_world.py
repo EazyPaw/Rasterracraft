@@ -36,6 +36,11 @@ class ClientWorld:
         self._chunk_state_lock = threading.RLock()
         self._loading_chunks: set[int] = set()
         self._chunk_load_versions: dict[int, int] = {}
+        # LightUpdate is decoded on the socket thread while Chunk payloads are
+        # decoded in a worker. Track which light epoch existed when each chunk
+        # load began so an older chunk payload cannot overwrite a newer update.
+        self._light_update_epochs: dict[int, int] = {}
+        self._chunk_load_light_epochs: dict[int, int] = {}
         self._chunk_load_counter = 0
         self._pending_chunk_block_updates: dict[int, dict[tuple[int, int, int], Block]] = {}
         self.entities: dict[str, ClientEntity] = {}
@@ -55,6 +60,7 @@ class ClientWorld:
             self._chunk_load_counter += 1
             load_version = self._chunk_load_counter
             self._chunk_load_versions[rx] = load_version
+            self._chunk_load_light_epochs[rx] = self._light_update_epochs.get(rx, 0)
             self._loading_chunks.add(rx)
             return load_version
 
@@ -146,9 +152,22 @@ class ClientWorld:
                 block.location = Location(self, world_x, y, z)
                 chunk_array[world_x % 16, y, z] = block
             self._regions[rx] = chunk_array
-            self.light_map[rx] = light
-            self.sky_light_map[rx] = sky
-            self.block_light_map[rx] = block_light
+            light_changed_during_load = (
+                self._light_update_epochs.get(rx, 0)
+                != self._chunk_load_light_epochs.get(rx, 0)
+            )
+            if light_changed_during_load and all(
+                rx in mapping for mapping in (
+                    self.light_map, self.sky_light_map, self.block_light_map
+                )
+            ):
+                light = self.light_map[rx]
+                sky = self.sky_light_map[rx]
+                block_light = self.block_light_map[rx]
+            else:
+                self.light_map[rx] = light
+                self.sky_light_map[rx] = sky
+                self.block_light_map[rx] = block_light
             self._light_snapshots[rx] = (light, sky, block_light)
             self.biome_map[rx] = biomes
             self._loading_chunks.discard(rx)
@@ -191,6 +210,15 @@ class ClientWorld:
         with self._chunk_state_lock:
             if load_version is not None and self._chunk_load_versions.get(rx) != load_version:
                 return
+            if (
+                load_version is not None
+                and self._light_update_epochs.get(rx, 0)
+                != self._chunk_load_light_epochs.get(rx, 0)
+            ):
+                # A newer LightUpdate already won this race. The chunk's light
+                # payload represents an older server snapshot and must not be
+                # allowed to restore it.
+                return
             self.light_map[rx] = light_array
             if sky_array is not None:
                 self.sky_light_map[rx] = sky_array
@@ -209,32 +237,33 @@ class ClientWorld:
         """
         增量更新光照数据（只更新变化的部分）
         """
-        # Build every replacement off to the side.  The render thread keeps
-        # using the previous complete tuple until all new arrays are ready.
-        previous_light = self.light_map.get(rx)
-        light_array = (
-            previous_light.copy()
-            if previous_light is not None
-            else np.zeros((16, self.y_max), dtype=np.uint8)
-        )
-        for key, value in light_map.items():
-            x, y = key.split(",")
-            x, y = int(x), int(y)
-            light_array[x][y] = value
-        sky_array = (
-            self._dict_to_light_array(sky_light_map)
-            if sky_light_map is not None
-            else self.sky_light_map.get(rx)
-        )
-        block_array = (
-            self._dict_to_light_array(block_light_map)
-            if block_light_map is not None
-            else self.block_light_map.get(rx)
-        )
-        if sky_array is not None and block_array is not None:
-            light_array = np.maximum(sky_array, block_array)
-
         with self._chunk_state_lock:
+            # Build and publish one complete copy-on-write snapshot while the
+            # chunk installer is excluded. Whichever operation gets the lock
+            # last can now determine ordering through the light epoch.
+            previous_light = self.light_map.get(rx)
+            light_array = (
+                previous_light.copy()
+                if previous_light is not None
+                else np.zeros((16, self.y_max), dtype=np.uint8)
+            )
+            for key, value in light_map.items():
+                x, y = key.split(",")
+                light_array[int(x), int(y)] = value
+            sky_array = (
+                self._dict_to_light_array(sky_light_map)
+                if sky_light_map is not None
+                else self.sky_light_map.get(rx)
+            )
+            block_array = (
+                self._dict_to_light_array(block_light_map)
+                if block_light_map is not None
+                else self.block_light_map.get(rx)
+            )
+            if sky_array is not None and block_array is not None:
+                light_array = np.maximum(sky_array, block_array)
+
+            self._light_update_epochs[rx] = self._light_update_epochs.get(rx, 0) + 1
             self.light_map[rx] = light_array
             if sky_array is not None:
                 self.sky_light_map[rx] = sky_array
@@ -363,6 +392,8 @@ class ClientWorld:
             self.biome_map.pop(x, None)
             self._loading_chunks.discard(x)
             self._chunk_load_versions.pop(x, None)
+            self._light_update_epochs.pop(x, None)
+            self._chunk_load_light_epochs.pop(x, None)
             self._pending_chunk_block_updates.pop(x, None)
             for world_x in range(x * 16, x * 16 + 16):
                 self._precipitation_height_cache.pop((world_x, 0), None)

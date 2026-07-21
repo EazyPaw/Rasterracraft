@@ -12,6 +12,14 @@ from resources.server.world_class import World
 
 
 class Player(Entity):
+    # Mining remains server-timed, but action packets and the 20 TPS loop can
+    # drift briefly under latency.  Slow actions (especially underwater)
+    # should not lose all accumulated progress because of one short gap.
+    BREAK_KEEPALIVE_GRACE_TICKS = 10
+    BREAK_MIN_PROGRESS_TOLERANCE = 0.04
+    BREAK_MAX_PROGRESS_TOLERANCE = 0.12
+    BREAK_FINISH_GRACE_TICKS = 4
+
     sounds = {
         "hurt": "game.player.hurt",
         "fall_big": "game.player.hurt.fall.big",
@@ -229,9 +237,9 @@ class Player(Entity):
         if target is None:
             return
         current_tick = int(getattr(self.world.server, "server_ticks", 0))
-        # A short grace period absorbs socket/server thread scheduling jitter;
-        # the client still has to keep sending the same target while held.
-        if current_tick - self._last_break_action_tick > 2:
+        # A bounded grace period absorbs socket/server thread scheduling
+        # jitter. Progress is still advanced only by this authoritative loop.
+        if current_tick - self._last_break_action_tick > self.BREAK_KEEPALIVE_GRACE_TICKS:
             self.clear_breaking()
             return
         x, y, z, block_id = target
@@ -273,10 +281,20 @@ class Player(Entity):
             and self.can_reach_block(x, y, z)
             and current_tool_key == self._breaking_tool_key
         )
-        # The finish packet can arrive just before this server tick advances
-        # mining.  Permit exactly one authoritative tick of scheduling slack.
+        # Permit a small bounded difference between client and server clocks.
+        # The percentage floor matters for slow underwater mining, while the
+        # per-tick allowance keeps quick blocks from gaining a large shortcut.
+        destroy_delta = self._destroy_delta(block) if valid_target else 0.0
+        progress_tolerance = min(
+            self.BREAK_MAX_PROGRESS_TOLERANCE,
+            max(
+                self.BREAK_MIN_PROGRESS_TOLERANCE,
+                destroy_delta * self.BREAK_FINISH_GRACE_TICKS,
+            ),
+        )
         enough_progress = valid_target and (
-            self.break_progress + self._destroy_delta(block) >= 1.0 - 1.0e-9
+            destroy_delta >= 1.0
+            or self.break_progress >= 1.0 - progress_tolerance - 1.0e-9
         )
         if not enough_progress:
             self.clear_breaking()
