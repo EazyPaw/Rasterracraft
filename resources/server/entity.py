@@ -19,6 +19,10 @@ from resources.server.attributes import (
 
 class Entity:
     sounds = {}
+    # Solid blocks may not normally be placed through an entity's physical
+    # bounds.  Non-blocking entity types (notably dropped items) can opt out
+    # without teaching the generic packet handler about concrete subclasses.
+    blocks_block_placement = True
     translation_key: str | None = None
     ambient_sound_interval = (160, 360)
     initial_ambient_sound_interval = (80, 220)

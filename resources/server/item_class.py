@@ -28,12 +28,20 @@ class ItemStack:
         """
         return self.material == materials.AIR() or self.amount == 0
 
-    def is_stackable_with(self, other: 'ItemStack') -> bool:
+    def is_stackable_with(
+        self, other: 'ItemStack', *, require_full_fit: bool = True
+    ) -> bool:
         """
-        判断两个物品是否可以堆叠
+        判断两个物品是否可以堆叠。
+
+        ``require_full_fit=False`` 只检查材质和 NBT 兼容性，供允许部分
+        转移的逻辑使用；默认值保留背包原先的“整堆必须能装下”语义。
         """
-        return (self.material == other.material and
-                self.nbt == other.nbt and self.amount + other.amount <= self.max_stack_size)
+        compatible = self.material == other.material and self.nbt == other.nbt
+        return compatible and (
+            not require_full_fit
+            or self.amount + other.amount <= self.max_stack_size
+        )
 
     def get_attribute_modifiers(self, equipment_slot: str = "mainhand"):
         """Return validated ``(attribute id, modifier)`` pairs for this slot.

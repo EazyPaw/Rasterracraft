@@ -19,6 +19,17 @@ from resources.server.attributes import AttributeMap
 
 class ItemEntityRenderer:
     """Small, bobbing world item renderer for server-synchronised drops."""
+    # Minecraft resets its item-render random source to a fixed seed, which
+    # makes equal stacks use the same copy layout on every frame.  In the 2D
+    # renderer an explicit table is clearer and preserves that determinism.
+    COPY_OFFSETS = (
+        (0.000, 0.000),
+        (-0.095, 0.035),
+        (0.080, 0.070),
+        (-0.040, -0.075),
+        (0.070, -0.040),
+    )
+
     @client_method
     def __init__(self, entity, client = None):
         self.client = client
@@ -27,6 +38,23 @@ class ItemEntityRenderer:
 
     def update(self):
         pass
+
+    @staticmethod
+    def get_render_copy_count(amount: int) -> int:
+        amount = max(0, int(amount))
+        if amount >= 49:
+            return 5
+        if amount >= 33:
+            return 4
+        if amount >= 17:
+            return 3
+        if amount >= 2:
+            return 2
+        return 1
+
+    @classmethod
+    def get_copy_offsets(cls, amount: int):
+        return cls.COPY_OFFSETS[:cls.get_render_copy_count(amount)]
 
     def draw(self):
         item = getattr(self.entity, "item", None)
@@ -38,9 +66,17 @@ class ItemEntityRenderer:
             return
         bob = math.sin((time.perf_counter() - self.created_at) * 4.0) * render.block_size * 0.04
         sx, sy = render.trans_world_location((self.entity.x, self.entity.y + 0.22))
-        tint = (255, 72, 72) if getattr(self.entity, "hurt_time", 0) > 0 else render.get_world_light_tint(self.entity.x, self.entity.y)
+        # Item entities deliberately do not use the living-entity red hurt
+        # flash.  World lighting still applies to every rendered copy.
+        tint = render.get_world_light_tint(self.entity.x, self.entity.y)
         texture = render.get_tinted_surface(texture, tint)
-        render.blit(texture, (round(sx - texture.get_width() / 2), round(sy - texture.get_height() / 2 + bob)))
+        origin_x = sx - texture.get_width() / 2
+        origin_y = sy - texture.get_height() / 2 + bob
+        for offset_x, offset_y in self.get_copy_offsets(item.amount):
+            render.blit(texture, (
+                round(origin_x + offset_x * render.block_size),
+                round(origin_y + offset_y * render.block_size),
+            ))
 
 
 class ClientEntity:

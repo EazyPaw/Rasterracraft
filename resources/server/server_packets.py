@@ -179,6 +179,8 @@ def _block_intersects_entity(world, block, x: int, y: int, z: int) -> bool:
         if identity in seen or getattr(entity, 'removed', False):
             continue
         seen.add(identity)
+        if not getattr(entity, 'blocks_block_placement', True):
+            continue
         if int(getattr(entity, 'z', 0)) != z:
             continue
         min_x = float(entity.x)
