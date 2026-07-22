@@ -578,6 +578,7 @@ class CommandExecutor:
         # ---- 9. 受影响区块重算光照并同步客户端 ----
         for rx in affected_chunks:
             world.mark_chunk_dirty(rx)
+            world.invalidate_chunk_packet(rx)
             if hasattr(world, "schedule_chunk_and_boundary_fluids"):
                 world.schedule_chunk_and_boundary_fluids(rx)
         changed_light_chunks = world.recalculate_light_for_chunks(affected_chunks)

@@ -272,6 +272,30 @@ class ClientWorld:
             self._light_snapshots[rx] = (light_array, sky_array, block_array)
             self._mark_render_chunk_dirty(rx)
 
+    def update_lights_compact(self, rx: int, height: int,
+                              sky_light: bytes, block_light: bytes) -> None:
+        """Install a full light snapshot from the compact server packet."""
+        try:
+            height = int(height)
+            expected = 16 * height
+            if height != self.y_max or len(sky_light) != expected or len(block_light) != expected:
+                logging.warning("Ignoring malformed compact light update for chunk %s", rx)
+                return
+            sky_array = np.frombuffer(sky_light, dtype=np.uint8).reshape((16, height)).copy()
+            block_array = np.frombuffer(block_light, dtype=np.uint8).reshape((16, height)).copy()
+        except (TypeError, ValueError):
+            logging.warning("Ignoring malformed compact light update for chunk %s", rx)
+            return
+
+        light_array = np.maximum(sky_array, block_array)
+        with self._chunk_state_lock:
+            self._light_update_epochs[rx] = self._light_update_epochs.get(rx, 0) + 1
+            self.light_map[rx] = light_array
+            self.sky_light_map[rx] = sky_array
+            self.block_light_map[rx] = block_array
+            self._light_snapshots[rx] = (light_array, sky_array, block_array)
+            self._mark_render_chunk_dirty(rx)
+
     def get_light_snapshot(self, rx: int):
         """Return one internally consistent light state for a render pass."""
         snapshot = self._light_snapshots.get(rx)

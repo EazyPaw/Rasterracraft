@@ -310,6 +310,9 @@ class Block(ABC):
         mark_dirty = getattr(world, "mark_chunk_dirty", None)
         if callable(mark_dirty):
             mark_dirty(int(self.location.x) // 16)
+        invalidate_packet = getattr(world, "invalidate_chunk_packet", None)
+        if callable(invalidate_packet):
+            invalidate_packet(int(self.location.x) // 16)
         server = getattr(world, "server", None)
         if server is None:
             return
@@ -318,6 +321,10 @@ class Block(ABC):
                 self.location.x, self.location.y, self.location.z
             ):
                 server.send_client_socket(player, self, "BlockUpdate")
+
+    def get_light_state(self) -> tuple[bool, int, int]:
+        """Return the properties which influence the current light solver."""
+        return bool(self.solid), int(self.light_attenuation), int(self.light_source)
 
     def on_update(self):
         pass

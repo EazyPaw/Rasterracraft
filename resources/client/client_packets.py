@@ -228,6 +228,14 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             ):
                 world.play_sound('random.fizz', x + 0.5, y + 0.5, z, volume=0.8)
     elif packet['__class__'] == 'LightUpdate':
+        if packet.get('format') == 2:
+            client.client_world.update_lights_compact(
+                packet['rx'],
+                packet['height'],
+                packet['sky_light'],
+                packet['block_light'],
+            )
+            return
         # {
         #     '__class__': 'LightUpdate',
         #     'rx': chunk_x,

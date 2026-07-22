@@ -1,3 +1,5 @@
+import heapq
+import itertools
 import logging
 import random
 import socket
@@ -5,8 +7,8 @@ import struct
 import threading
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, TypedDict
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Any, Callable
 
 import msgpack
 import numpy as np
@@ -26,10 +28,26 @@ from resources.server.utils import recv_exact, set_client, set_server
 from resources.server.world_class import Weather, World, WorldAttribute
 
 
-class EventDict(TypedDict):
-    tick: int
-    func: Callable
-    args: tuple
+def _msgpack_default(value):
+    """Convert the uncommon numpy values which msgpack cannot encode itself.
+
+    Most packets already contain only native Python values.  Letting msgpack
+    walk those packets directly avoids recursively copying every dict/list on
+    every send, while retaining compatibility for numpy-backed payloads.
+    """
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.str_):
+        return str(value)
+    if isinstance(value, np.bytes_):
+        return str(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(f"Cannot serialize {type(value).__name__}")
 
 class Server:
     def __init__(self, integrated = False, client = None, save_id: str | None = None):
@@ -49,7 +67,10 @@ class Server:
         self.save_id = save_id
         self.level_data: dict[str, Any] | None = None
         self._save_lock = threading.RLock()
-        self.autosave_interval_ticks = self.rate * 5
+        # Match Minecraft's normal five-minute (6000 tick) autosave cadence.
+        # The old five-second cadence compressed dirty regions on the tick
+        # thread often enough to create a periodic hitch by itself.
+        self.autosave_interval_ticks = self.rate * 300
         self.socket_server = self.SocketServer(self)
         self.initialized = False
         self.input_thread = threading.Thread(target=self.check_input, name="Command thread")
@@ -58,10 +79,18 @@ class Server:
         self.input_thread.start()
         self.command_executor = CommandExecutor(self)
         self.client = client
-        # 区块生成线程池：generate_chunk 是 CPU 密集型操作（噪声计算），
-        # noise 库（C 扩展）和 numpy 在计算时会释放 GIL，因此多线程有实际收益。
-        self.chunk_gen_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="ChunkGen")
-        self.registered_events: list[EventDict] = []
+        # Noise/numpy release the GIL in places, but block construction remains
+        # Python-heavy.  Two workers keep generation parallel without eight
+        # CPU-bound threads starving the 20 TPS simulation thread.
+        self.chunk_gen_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ChunkGen")
+        self._chunk_gen_futures: dict[tuple[World, int], Future] = {}
+        self.chunk_send_budget_per_tick = 1
+        self._chunk_send_cursor = 0
+        self.chunk_unload_interval_ticks = self.rate
+        self._event_lock = threading.Lock()
+        self._event_sequence = itertools.count()
+        self.registered_events: list[tuple[int, int, Callable, tuple]] = []
+        self.last_tick_sections_ms: dict[str, float] = {}
         if client is not None:
             set_client(client)
         set_server(self)
@@ -83,8 +112,9 @@ class Server:
 
     def register_event(self, func, *args, ticks = 1):
         tick = self.ticks + ticks
-        event: EventDict = {"tick": tick, "func": func, "args": args}
-        self.registered_events.append(event)
+        event = (tick, next(self._event_sequence), func, args)
+        with self._event_lock:
+            heapq.heappush(self.registered_events, event)
 
     class SocketServer:
         def __init__(self, server):
@@ -220,11 +250,14 @@ class Server:
                     break
 
     def process_events(self):
-        for i in range(len(self.registered_events) - 1, -1, -1):
-            e = self.registered_events[i]
-            if e["tick"] == self.ticks:
-                e["func"](*e["args"])  # 解包参数
-                del self.registered_events[i]
+        while True:
+            with self._event_lock:
+                if not self.registered_events or self.registered_events[0][0] > self.ticks:
+                    return
+                _, _, func, args = heapq.heappop(self.registered_events)
+            # Run callbacks outside the heap lock; callbacks may schedule the
+            # next occurrence themselves.
+            func(*args)
 
     def integrated_check(self):
         """
@@ -244,24 +277,54 @@ class Server:
             self.register_event(self.integrated_check, ticks=200)
 
         next_time = time.perf_counter()
-        over_ticks = 0
+        last_overload_warning = -float("inf")
 
         while self.running:
             interval = 1.0 / self.rate
 
+            tick_started = time.perf_counter()
             self.tick()
+            events_started = time.perf_counter()
             self.process_events()
+            self.last_tick_sections_ms["events"] = (
+                time.perf_counter() - events_started
+            ) * 1000.0
+            tick_elapsed = time.perf_counter() - tick_started
 
             next_time += interval
-            sleep_time = next_time - time.perf_counter()
+            now = time.perf_counter()
+            sleep_time = next_time - now
             if sleep_time > 0:
                 time.sleep(sleep_time)
             else:
-                over_ticks += 1
-                if over_ticks > 50:
-                    sleep_time = -sleep_time
-                    logging.warning(f"Overloaded! Server is {sleep_time}ms behind!")
-                    over_ticks = 0
+                behind_seconds = -sleep_time
+                # Minecraft 1.21.4 warns only after roughly 40 missed 20-TPS
+                # ticks and rate-limits this message to about 15 seconds.  A
+                # one-tick Windows scheduling wobble is not server overload.
+                overload_threshold = 1.0 + 20.0 * interval
+                warning_interval = 10.0 + 100.0 * interval
+                if (
+                    behind_seconds >= overload_threshold
+                    and now - last_overload_warning >= warning_interval
+                ):
+                    sections = sorted(
+                        self.last_tick_sections_ms.items(),
+                        key=lambda item: item[1],
+                        reverse=True,
+                    )[:3]
+                    detail = ", ".join(f"{name}={value:.1f}ms" for name, value in sections)
+                    logging.warning(
+                        "Overloaded! Server is %.1fms (%.1f ticks) behind; "
+                        "last tick %.1fms%s",
+                        behind_seconds * 1000.0,
+                        behind_seconds / interval,
+                        tick_elapsed * 1000.0,
+                        f"; slowest: {detail}" if detail else "",
+                    )
+                    # Rebase the deadline instead of busy-running old ticks to
+                    # catch up, matching Minecraft's overload recovery loop.
+                    next_time += int(behind_seconds / interval) * interval
+                    last_overload_warning = now
             self.ticks += 1
 
     def init(self):
@@ -306,13 +369,24 @@ class Server:
         self.run()
 
     def tick(self):
+        timings: dict[str, float] = {}
+        section_start = time.perf_counter()
+
+        def finish_section(name: str) -> None:
+            nonlocal section_start
+            now = time.perf_counter()
+            timings[name] = (now - section_start) * 1000.0
+            section_start = now
+
         self.server_ticks += 1
         for player in tuple(self.players):
             player.tick_server()
+        finish_section("players")
         for world in self.worlds.values():
             world.world_time = (world.world_time + 1) % 24000
             world.tick_weather()
             world.tick_random_blocks()
+        finish_section("random_ticks")
         if self.server_ticks % 5 == 0:
             for player in self.players:
                 self.send_client_socket(
@@ -320,16 +394,30 @@ class Server:
                     {'__class__': 'TimeUpdate', 'time': int(player.world.world_time)},
                     "Forward"
                 )
+        finish_section("time_sync")
         self.load_chunks()
+        finish_section("chunks")
         for world in self.worlds.values():
             world.tick_fluids()
+        finish_section("fluids")
         for world in self.worlds.values():
             world.update_entities()
+        finish_section("entities")
+        for world in self.worlds.values():
+            for entity_name, update_ms, tracking_ms, send_ms in world.last_entity_timings_ms:
+                timings[f"entity[{entity_name}].update"] = update_ms
+                timings[f"entity[{entity_name}].tracking"] = tracking_ms
+                timings[f"entity[{entity_name}].send"] = send_ms
         for world in self.worlds.values():
             world.flush_light_updates()
-        self.unload_far_chunks()
+        finish_section("lighting")
+        if self.server_ticks % self.chunk_unload_interval_ticks == 0:
+            self.unload_far_chunks()
+        finish_section("unload")
         if self.save_id and self.server_ticks % self.autosave_interval_ticks == 0:
             self.save_all()
+        finish_section("autosave")
+        self.last_tick_sections_ms = timings
 
     def get_player_spawn(self) -> tuple[float, float]:
         if not self.level_data:
@@ -520,111 +608,141 @@ class Server:
         """
 
         try:
-            encoded_obj = encode_packet(obj, obj_type, args)
-            if (
-                getattr(player, '_disconnecting', False)
-                and encoded_obj.get('__class__') != 'Disconnect'
-            ):
-                return False
-            
-            # 辅助函数：将嵌套结构中的 numpy 类型转换为 python 原生类型
-            def convert_numpy_types(o):
-                if isinstance(o, np.integer):
-                    return int(o)
-                elif isinstance(o, np.floating):
-                    return float(o)
-                elif isinstance(o, np.bool_):
-                    return bool(o)
-                elif isinstance(o, (np.str_, np.bytes_)):
-                    return str(o)
-                elif isinstance(o, np.ndarray):
-                    return o.tolist()
-                elif isinstance(o, dict):
-                    return {k: convert_numpy_types(v) for k, v in o.items()}
-                elif isinstance(o, (list, tuple)):
-                    return [convert_numpy_types(i) for i in o]
-                return o
+            encoded_obj, frame = self._encode_packet_frame(obj, obj_type, args)
+            return self._send_packet_frame(player, encoded_obj, frame)
+        except Exception as e:
+            self._log_send_error(player, e)
+            return False
 
-            clean_obj = convert_numpy_types(encoded_obj)
-            packet_data = msgpack.packb(clean_obj, use_bin_type=True)
-            
-            length = len(packet_data)
+    def send_client_sockets(self, players, obj, obj_type=None, args=None) -> int:
+        """Encode a shared packet once and send the same frame to many players."""
+        players = tuple(players)
+        if not players:
+            return 0
+        try:
+            encoded_obj, frame = self._encode_packet_frame(obj, obj_type, args)
+        except Exception as e:
+            self._log_send_error(players[0], e)
+            return 0
+        return sum(
+            self._send_packet_frame(player, encoded_obj, frame)
+            for player in players
+        )
+
+    @staticmethod
+    def _encode_packet_frame(obj, obj_type=None, args=None) -> tuple[dict, bytes]:
+        encoded_obj = encode_packet(obj, obj_type, args)
+        packet_data = msgpack.packb(
+            encoded_obj, use_bin_type=True, default=_msgpack_default
+        )
+        return encoded_obj, struct.pack('>I', len(packet_data)) + packet_data
+
+    def _send_packet_frame(self, player: Player, encoded_obj: dict, frame: bytes) -> bool:
+        if (
+            getattr(player, '_disconnecting', False)
+            and encoded_obj.get('__class__') != 'Disconnect'
+        ):
+            return False
+        try:
             connection = self.socket_server.connections[player][0]
             with self.socket_server.send_locks.setdefault(player, threading.Lock()):
-                connection.sendall(struct.pack('>I', length) + packet_data)
-            # logging.debug(f"Sent {length} data to client {self.socket_server.connections[player][1]}")
+                connection.sendall(frame)
             return True
         except KeyError:
-            # 玩家已断开连接，不在 connections 中
             return False
         except Exception as e:
-            # 安全地获取客户端地址
-            try:
-                client_addr = self.socket_server.connections[player][1]
-            except KeyError:
-                client_addr = "unknown (disconnected)"
-            logging.error(f"Error sending data to client {client_addr}: {e}")
-            logging.error(traceback.format_exc())
+            self._log_send_error(player, e)
             return False
 
-    def load_chunks(self):
-        # 阶段一：收集需要生成的区块，提交到线程池并行生成（噪声计算是主要瓶颈）
-        gen_futures: dict[tuple[int, World], Any] = {}
-        new_chunks: list[tuple[Player, int]] = []  # (player, rx) 待发送的新区块
+    def _log_send_error(self, player: Player, error: Exception) -> None:
+        try:
+            client_addr = self.socket_server.connections[player][1]
+        except KeyError:
+            client_addr = "unknown (disconnected)"
+        logging.error(f"Error sending data to client {client_addr}: {error}")
+        logging.error(traceback.format_exc())
 
-        for player in self.players:
+    def load_chunks(self):
+        """Advance the asynchronous chunk pipeline without waiting in a tick.
+
+        Generation futures persist between ticks.  Completed chunks are sent
+        nearest-first under a small serialization budget, keeping normal game
+        simulation below its 50 ms deadline while the initial view streams in.
+        """
+        players = list(self.players)
+        if players:
+            start = self._chunk_send_cursor % len(players)
+            players = players[start:] + players[:start]
+            self._chunk_send_cursor = (start + 1) % len(players)
+
+        wanted_keys: set[tuple[World, int]] = set()
+        wanted_by_player: list[tuple[Player, list[int]]] = []
+        for player in players:
             rx = int(player.x // 16)
-            # Send the spawn column first.  The old left-to-right order waited
-            # for several distant chunks before the client received ground.
             region_order = sorted(
                 range(rx - self.view_distance, rx + self.view_distance + 1),
                 key=lambda value: (abs(value - rx), value),
             )
+            missing_for_player: list[int] = []
             for x in region_order:
-                if x not in player.loading_regions:
-                    if x not in player.world.regions:
-                        # 避免对同一区块重复提交生成任务（多个玩家共享同一 World）
-                        key = (x, player.world)
-                        if key not in gen_futures:
-                            gen_futures[key] = self.chunk_gen_pool.submit(
-                                player.world.generate_chunk, x
-                            )
-                    new_chunks.append((player, x))
+                if x in player.loading_regions:
+                    continue
+                missing_for_player.append(x)
+                if x not in player.world.regions:
+                    key = (player.world, x)
+                    wanted_keys.add(key)
+                    if key not in self._chunk_gen_futures:
+                        self._chunk_gen_futures[key] = self.chunk_gen_pool.submit(
+                            player.world.generate_chunk, x
+                        )
+            wanted_by_player.append((player, missing_for_player))
 
-        # 阶段二：按距离逐个等待并发送。远处区块继续在后台生成，不会
-        # 阻塞出生区块到达客户端。
-        for player, x in new_chunks:
-            future = gen_futures.get((x, player.world))
-            if future is not None:
+        # Reap only futures which are already complete.  Calling result() on a
+        # pending task here was the main source of multi-hundred-ms ticks.
+        for key, future in list(self._chunk_gen_futures.items()):
+            if not future.done():
+                if key not in wanted_keys:
+                    future.cancel()
+                continue
+            self._chunk_gen_futures.pop(key, None)
+            if future.cancelled():
+                continue
+            try:
+                future.result()
+            except Exception as e:
+                world, x = key
+                logging.error(f"Chunk generation failed for region {world.id_name}:{x}: {e}")
+
+        sends_remaining = max(0, int(self.chunk_send_budget_per_tick))
+        for player, missing_regions in wanted_by_player:
+            if sends_remaining <= 0:
+                break
+            for x in missing_regions:
+                if x not in player.world.regions:
+                    continue
                 try:
-                    future.result(timeout=30)
+                    player.loading_regions.append(x)
+                    self.send_client_socket(player, player.world.regions[x])
+                    player.world.send_entities_in_chunk_to_player(player, x)
+                    self._send_players_in_chunk_to_player(player, x)
+                    for neighbor_rx in (x - 1, x + 1):
+                        if neighbor_rx in player.loading_regions:
+                            neighbor = player.world.regions.get(neighbor_rx)
+                            if neighbor is not None:
+                                self.send_client_socket(
+                                    player, neighbor.get_light_update_packet(), "LightUpdate"
+                                )
                 except Exception as e:
-                    logging.error(f"Chunk generation failed for region {x}: {e}")
-            if x in player.world.regions:
-                # Mark it as sent before writing the frame: the client can
-                # decode and acknowledge a small compact packet immediately.
-                player.loading_regions.append(x)
-                self.send_client_socket(player, player.world.regions[x])
-                player.world.mark_chunk_dirty(x)
-                player.world.send_entities_in_chunk_to_player(player, x)
-                self._send_players_in_chunk_to_player(player, x)
-                # 新区块可能影响了相邻已加载区块的光照，发送邻居的光照更新
-                for neighbor_rx in (x - 1, x + 1):
-                    if neighbor_rx in player.loading_regions:
-                        neighbor = player.world.regions.get(neighbor_rx)
-                        if neighbor is not None:
-                            light_update = {
-                                'rx': neighbor_rx,
-                                'light_array': neighbor.get_full_light_dict(),
-                                'sky_light_array': neighbor.get_full_sky_light_dict(),
-                                'block_light_array': neighbor.get_full_block_light_dict(),
-                            }
-                            self.send_client_socket(player, light_update, "LightUpdate")
+                    if x in player.loading_regions:
+                        player.loading_regions.remove(x)
+                    logging.error(f"Failed to send region {x}: {e}")
+                sends_remaining -= 1
+                break
 
         # Tell the client that the complete initial view-distance batch has
         # been queued.  It still waits for every corresponding ChunkReady, so
         # this packet cannot make the loading screen disappear early.
-        for player in self.players:
+        for player in players:
             if player.initial_load_complete_sent:
                 continue
             center_rx = int(player.x // 16)
@@ -658,7 +776,15 @@ class Server:
             protected: set[int] = set()
             for player in self.players:
                 if player.world is world:
-                    protected.update(player.loading_regions)
+                    center_rx = int(player.x // 16)
+                    protected.update(range(
+                        center_rx - self.view_distance - self.chunk_unload_margin,
+                        center_rx + self.view_distance + self.chunk_unload_margin + 1,
+                    ))
+            protected.update(
+                rx for pending_world, rx in self._chunk_gen_futures
+                if pending_world is world
+            )
             unload_rxs = [rx for rx in list(world.regions.keys()) if rx not in protected]
             if not unload_rxs:
                 continue

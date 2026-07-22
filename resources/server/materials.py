@@ -4,10 +4,10 @@ from resources.server.material_class import Material, BlockItem, Food
 from resources.server.utils import client_method
 
 
-_material_registry: dict[str, type[Material]] = {}
+_material_registry: dict[str, dict[str, type[Material]]] = {}
 
 
-def register_material(cls=None, /, *, aliases: tuple[str, ...] = ()):
+def register_material(cls=None, /, *, aliases: tuple[str, ...] = (), name_spaced_key='minecraft'):
     """Decorator – register *cls* (and optional aliases) in ``_material_registry``.
 
     Usage::
@@ -21,10 +21,11 @@ def register_material(cls=None, /, *, aliases: tuple[str, ...] = ()):
             name_id = "wheat_seeds"
     """
     if cls is None:
-        return lambda c: register_material(c, aliases=aliases)
-    _material_registry[cls.name_id] = cls
+        return lambda c: register_material(c, aliases=aliases, name_spaced_key=name_spaced_key)
+    namespace = _material_registry.setdefault(name_spaced_key, {})
+    namespace[cls.name_id] = cls
     for alias in aliases:
-        _material_registry[alias] = cls
+        namespace[alias] = cls
     return cls
 
 
@@ -436,19 +437,23 @@ def get_material_by_id(material_id: str):
     Material subclasses decorated with :func:`register_material` are looked up
     automatically — no hand-maintained dictionary is needed.
     """
-    material_id = str(material_id).removeprefix("minecraft:")
-    material_type = _material_registry.get(material_id)
+    material_id = str(material_id)
+    if ':' in material_id:
+        namespace, key = material_id.split(':', 1)
+    else:
+        namespace, key = 'minecraft', material_id
+    material_type = _material_registry.get(namespace, {}).get(key)
     if material_type is not None:
         return material_type()
     from resources.server import blocks
     try:
-        return get_block_item(blocks.get_block_by_id(material_id))
+        return get_block_item(blocks.get_block_by_id(key))
     except ValueError:
         # Recipes may use plural forms (e.g. "oak_planks") while block IDs
         # are singular ("oak_plank").  Try stripping a trailing 's'.
-        if material_id.endswith('s'):
+        if key.endswith('s'):
             try:
-                return get_block_item(blocks.get_block_by_id(material_id[:-1]))
+                return get_block_item(blocks.get_block_by_id(key[:-1]))
             except ValueError:
                 pass
         return AIR()

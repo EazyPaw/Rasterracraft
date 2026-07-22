@@ -2,6 +2,7 @@ import logging
 import math
 import random
 import threading
+import time
 import traceback
 import zlib
 from typing import Any
@@ -31,6 +32,7 @@ class Chunk:
         size = self.region_array.shape
         self.sky_light_array = np.zeros((size[0], size[1]), dtype=np.uint8)
         self.block_light_array = np.zeros((size[0], size[1]), dtype=np.uint8)
+        self._packet_cache: dict | None = None
         self._recalculate_internal()   # 初始化时先进行区块内部光照计算
 
     def to_dict(self) -> dict:
@@ -41,6 +43,9 @@ class Chunk:
         reducing both transfer size and client-side parsing work by an order of
         magnitude.  The client keeps a legacy decoder for older servers/tests.
         """
+        if self._packet_cache is not None:
+            return self._packet_cache
+
         block_palette: list[dict] = []
         block_lookup: dict[tuple, int] = {}
         block_indices: list[int] = []
@@ -97,11 +102,26 @@ class Chunk:
             "sky_light": self.sky_light_array.tobytes(),
             "block_light": self.block_light_array.tobytes(),
         }
-        return {
+        packet = {
             "__class__": "Chunk",
             "format": 2,
             "x": int(self.x),
             "payload": zlib.compress(msgpack.packb(payload, use_bin_type=True), level=1),
+        }
+        self._packet_cache = packet
+        return packet
+
+    def invalidate_packet_cache(self) -> None:
+        self._packet_cache = None
+
+    def get_light_update_packet(self) -> dict:
+        """Return the full light state in the compact ndarray wire layout."""
+        return {
+            "rx": int(self.x),
+            "format": 2,
+            "height": int(self.sky_light_array.shape[1]),
+            "sky_light": self.sky_light_array.tobytes(),
+            "block_light": self.block_light_array.tobytes(),
         }
 
     def get_full_light_dict(self) -> dict:
@@ -150,40 +170,11 @@ class Chunk:
 
     def _recalculate_internal(self):
         """仅基于本区块数据重新计算光照（不跨区块传播）"""
-        SX, SY = self.region_array.shape[0], self.region_array.shape[1]
+        from resources.server.light_manager import calculate_light_layers_2d
 
-        # 清零
-        self.sky_light_array.fill(0)
-        self.block_light_array.fill(0)
-
-        # === 天空光 ===
-        sky_sources = []
-        for x in range(SX):
-            # 从上往下找第一个非固体方块
-            for y in range(SY - 1, -1, -1):
-                blk = cast(Block, self.region_array[x, y, 0])
-                if not blk.solid:
-                    sky_sources.append((x, y, 15))
-                else:
-                    break
-        if sky_sources:
-            from resources.server.light_manager import flood_fill_light_2d
-            flood_fill_light_2d(self.sky_light_array, self.region_array,
-                                0, sky_sources)
-
-        # === 方块光 ===
-        block_sources = []
-        for x in range(SX):
-            for y in range(SY):
-                blk0 = cast(Block, self.region_array[x, y, 0])
-                blk1 = cast(Block, self.region_array[x, y, 1])
-                light = blk0.light_source + blk1.light_source
-                if light > 0:
-                    block_sources.append((x, y, min(15, light)))
-        if block_sources:
-            from resources.server.light_manager import flood_fill_light_2d
-            flood_fill_light_2d(self.block_light_array, self.region_array,
-                                0, block_sources)
+        self.sky_light_array, self.block_light_array = calculate_light_layers_2d(
+            self.region_array
+        )
 
     def recalculate_all_light(self, world=None):
         """
@@ -231,6 +222,7 @@ class World:
         self.entities: dict[str, Entity] = {}
         self._entities_lock = threading.RLock()
         self._saved_entities_by_chunk: dict[int, list[dict]] = {}
+        self.last_entity_timings_ms: list[tuple[str, float, float, float]] = []
         self.disable_mob_generation = False
         # 每次方块变动都会影响整区块光照。把同一 tick 的变动合并处理，
         # 避免重力/流体连锁时反复重算并发送相同的大型光照包。
@@ -340,9 +332,15 @@ class World:
         if not chunk_rxs:
             return set()
 
-        min_rx = min(chunk_rxs) - padding
-        max_rx = max(chunk_rxs) + padding
-        loaded_rxs = sorted(rx for rx in range(min_rx, max_rx + 1) if rx in self.regions)
+        # Only include each dirty chunk's actual light-propagation neighborhood.
+        # The previous min..max range also pulled every chunk between two
+        # distant edits into one large and unnecessary recalculation.
+        loaded_rxs = sorted({
+            candidate
+            for rx in chunk_rxs
+            for candidate in range(int(rx) - padding, int(rx) + padding + 1)
+            if candidate in self.regions
+        })
         if not loaded_rxs:
             return set()
 
@@ -377,7 +375,7 @@ class World:
         return changed_chunks
 
     def _recalculate_light_span(self, chunk_rxs: list[int]) -> set[int]:
-        from resources.server.light_manager import flood_fill_light_2d
+        from resources.server.light_manager import calculate_light_layers_2d
 
         if not chunk_rxs:
             return set()
@@ -392,32 +390,7 @@ class World:
             start_x = index * chunk_width
             ext_region[start_x:start_x + chunk_width, :, :] = chunk.region_array
 
-        ext_sky = np.zeros((ext_width, height), dtype=np.uint8)
-        ext_block = np.zeros((ext_width, height), dtype=np.uint8)
-
-        sky_sources: list[tuple[int, int, int]] = []
-        for x in range(ext_width):
-            for y in range(height - 1, -1, -1):
-                blk = cast(Block, ext_region[x, y, 0])
-                if not blk.solid:
-                    sky_sources.append((x, y, 15))
-                else:
-                    break
-
-        if sky_sources:
-            flood_fill_light_2d(ext_sky, ext_region, 0, sky_sources)
-
-        block_sources: list[tuple[int, int, int]] = []
-        for x in range(ext_width):
-            for y in range(height):
-                blk0 = cast(Block, ext_region[x, y, 0])
-                blk1 = cast(Block, ext_region[x, y, 1])
-                light = blk0.light_source + blk1.light_source
-                if light > 0:
-                    block_sources.append((x, y, min(15, light)))
-
-        if block_sources:
-            flood_fill_light_2d(ext_block, ext_region, 0, block_sources)
+        ext_sky, ext_block = calculate_light_layers_2d(ext_region)
 
         changed_chunks: set[int] = set()
         for index, chunk in enumerate(chunks):
@@ -430,6 +403,7 @@ class World:
                 or not np.array_equal(chunk.block_light_array, new_block)
             ):
                 changed_chunks.add(chunk.x)
+                chunk.invalidate_packet_cache()
 
             chunk.sky_light_array = new_sky
             chunk.block_light_array = new_block
@@ -440,18 +414,20 @@ class World:
         if players is None:
             players = self.server.players
 
-        for player in players:
-            for rx in sorted(chunk_rxs):
-                chunk = self.regions.get(rx)
-                if chunk is None or rx not in player.loading_regions:
-                    continue
-                light_update = {
-                    'rx': rx,
-                    'light_array': chunk.get_full_light_dict(),
-                    'sky_light_array': chunk.get_full_sky_light_dict(),
-                    'block_light_array': chunk.get_full_block_light_dict(),
-                }
-                self.server.send_client_socket(player, light_update, "LightUpdate")
+        players = tuple(players)
+        for rx in sorted(chunk_rxs):
+            chunk = self.regions.get(rx)
+            if chunk is None:
+                continue
+            recipients = [player for player in players if rx in player.loading_regions]
+            send_many = getattr(self.server, "send_client_sockets", None)
+            if callable(send_many):
+                send_many(recipients, chunk.get_light_update_packet(), "LightUpdate")
+            else:
+                for player in recipients:
+                    self.server.send_client_socket(
+                        player, chunk.get_light_update_packet(), "LightUpdate"
+                    )
 
     def is_position_loaded(self, x: int, y: int, z: int = 0) -> bool:
         if y < 0 or y >= self.attribute.MAX_BUILD_HEIGHT or z not in (0, 1):
@@ -618,15 +594,44 @@ class World:
     def update_entities(self):
         with self._entities_lock:
             entities = list(self.entities.values())
+        timings: list[tuple[str, float, float, float]] = []
         for entity in entities:
             if entity.removed:
                 continue
+            started = time.perf_counter()
             entity.update()
+            updated = time.perf_counter()
             if entity.removed:
+                timings.append((
+                    f"{entity.entity_id}:{str(entity.uuid)[:8]}",
+                    (updated - started) * 1000.0,
+                    0.0,
+                    0.0,
+                ))
                 continue
-            for player in self.server.players:
-                if player.is_loading_position(math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)):
+            recipients = [
+                player for player in self.server.players
+                if player.is_loading_position(
+                    math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)
+                )
+            ]
+            tracked = time.perf_counter()
+            send_many = getattr(self.server, "send_client_sockets", None)
+            if callable(send_many):
+                send_many(recipients, entity, "EntityUpdate")
+            else:
+                for player in recipients:
                     self.server.send_client_socket(player, entity, "EntityUpdate")
+            finished = time.perf_counter()
+            timings.append((
+                f"{entity.entity_id}:{str(entity.uuid)[:8]}",
+                (updated - started) * 1000.0,
+                (tracked - updated) * 1000.0,
+                (finished - tracked) * 1000.0,
+            ))
+        self.last_entity_timings_ms = sorted(
+            timings, key=lambda item: sum(item[1:]), reverse=True
+        )[:3]
 
     def send_entities_in_chunk_to_player(self, player, rx: int):
         with self._entities_lock:
@@ -682,6 +687,12 @@ class World:
         chunk = self.regions.get(x // 16)
         rela_x = x % 16
         chunk.block_light_array[rela_x, y] = light
+        chunk.invalidate_packet_cache()
+
+    def invalidate_chunk_packet(self, rx: int) -> None:
+        chunk = self.regions.get(int(rx))
+        if chunk is not None:
+            chunk.invalidate_packet_cache()
 
     def get_sum_light(self, x: int, y: int) -> int:
         chunk = self.regions.get(x // 16)
@@ -714,9 +725,11 @@ class World:
         rela_x = x % 16
         old_block = cast(Block, chunk.region_array[rela_x][y][z])
         chunk.region_array[rela_x][y][z] = block
+        chunk.invalidate_packet_cache()
         self.mark_chunk_dirty(chunk.x)
         self.schedule_fluid_around(x, y, z)
-        self.schedule_light_recalculation(chunk.x)
+        if old_block.get_light_state() != block.get_light_state():
+            self.schedule_light_recalculation(chunk.x)
         if send_packet:
             for player in self.server.players:
                 if player.is_loading_position(x, y, z):
