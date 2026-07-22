@@ -512,36 +512,15 @@ class ChatGUI(GUI):
 
     def _render_row(self, text, x, y, color, alpha, font_size):
         """渲染单行（带阴影）。"""
-        font = self.render.get_font(font_size)
-        shadow_off = max(1, font.get_height() // 12)
-
-        if alpha < 255:
-            if isinstance(text, Text):
-                segments = text.text
-            else:
-                segments = ({'text': text, 'color': color, 'bold': False},)
-            cursor_x = x
-            for segment in segments:
-                segment_color = segment.get('color', color)
-                if hasattr(segment_color, 'value'):
-                    segment_color = segment_color.value
-                segment_color = tuple(segment_color)
-                segment_font = self.render.get_font(
-                    font_size, bool(segment.get('bold', False))
-                )
-                segment_text = str(segment.get('text', ''))
-                shadow_col = tuple(max(0, int(c * 0.25)) for c in segment_color)
-                shadow_surface = segment_font.render(segment_text, True, shadow_col)
-                shadow_surface.set_alpha(alpha)
-                self.render.blit(
-                    shadow_surface, (cursor_x + shadow_off, y + shadow_off)
-                )
-                text_surface = segment_font.render(segment_text, True, segment_color)
-                text_surface.set_alpha(alpha)
-                self.render.blit(text_surface, (cursor_x, y))
-                cursor_x += text_surface.get_width()
-        else:
-            self.render.render_text(text, (x, y), color, font_size, shadow=True)
+        self.render.render_text(
+            text,
+            (x, y),
+            color,
+            font_size,
+            shadow=True,
+            shadow_strength=0.25,
+            alpha=alpha,
+        )
 
     def _draw_messages(self):
         """渲染消息历史。

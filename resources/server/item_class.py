@@ -2,6 +2,7 @@ import resources.server.materials as materials
 import pygame
 
 from resources.server.attributes import AttributeModifier
+from resources.server.text import Text, TextColor
 
 from resources.server.utils import client_method
 
@@ -153,6 +154,9 @@ class ItemStack:
             return result
         
         return res
+
+    def get_lore(self) -> list[str | Text]:
+        return []
 
 
 class EmptyItemStack(ItemStack):

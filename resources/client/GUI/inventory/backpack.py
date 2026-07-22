@@ -22,6 +22,7 @@ from copy import deepcopy
 import pygame
 
 from resources.client.GUI.gui import GUI
+from resources.client.GUI.inventory.item_tooltip import ItemTooltip
 from resources.server.item_class import EmptyItemStack, ItemStack
 from resources.server.crafting import find_recipe
 from resources.server.utils import reverse_search_dict
@@ -44,6 +45,7 @@ class Backpack(GUI):
                                                   , "gui.sprites.container.slot_highlight_back")
 
         self.priority = 10  # GUI 渲染优先级
+        self.item_tooltip = ItemTooltip(self.render)
 
         # ---- 鼠标拖拽状态 ----
         self.dragging_item = None     # 当前鼠标上拿着的物品（ItemStack 或 EmptyItemStack）
@@ -187,8 +189,10 @@ class Backpack(GUI):
     def _draw_crafting(self):
         self._refresh_crafting()
         positions, output = self._craft_positions()
+        hovered_target = self._craft_slot_at_pos((self.render.mouse_x, self.render.mouse_y))
         for index, pos in enumerate(positions):
-            if ("crafting", index) in self.drag_slots:
+            target = ("crafting", index)
+            if target in self.drag_slots or target == hovered_target:
                 self.render.blit(
                     self.selection_texture,
                     (pos[0] + self.render.gui_scale, pos[1] + self.render.gui_scale),
@@ -197,6 +201,18 @@ class Backpack(GUI):
             self._draw_crafting_stack(stack, pos)
         if self.crafting_result is not None:
             self._draw_crafting_stack(self.crafting_result, output)
+        if hovered_target == "output":
+            self.render.blit(
+                self.selection_texture,
+                (output[0] + self.render.gui_scale, output[1] + self.render.gui_scale),
+            )
+
+        if self._is_crafting_slot(hovered_target):
+            self.selecting_solt = hovered_target
+            self.selecting_item = self.crafting_slots[hovered_target[1]]
+        elif hovered_target == "output":
+            self.selecting_solt = hovered_target
+            self.selecting_item = self.crafting_result
 
     def _split_stack(self, item, amount):
         """
@@ -675,8 +691,13 @@ class Backpack(GUI):
                             text_y = slot_y + slot_pixel_size - self.render.gui_scale * 5 - 6
                             self.render.render_text(str(item.amount), (text_x, text_y), (255, 255, 255), font_size, True)
 
-        # ---- 第3步：绘制鼠标上的拖拽物品（始终渲染在最上层） ----
+        # ---- 第3步：绘制悬停说明与鼠标上的拖拽物品 ----
         self._draw_crafting()
+        if self._is_empty(self.dragging_item) and not self._is_empty(self.selecting_item):
+            self.item_tooltip.draw(
+                self.selecting_item,
+                (self.render.mouse_x, self.render.mouse_y),
+            )
         if self.dragging_item and not self.dragging_item.is_empty():
             texture_item = self.dragging_item.get_texture(self.render.gui_scale * 0.7, shadow=True)
             if texture_item is not None:

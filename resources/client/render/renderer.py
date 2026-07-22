@@ -20,7 +20,13 @@ from resources.client.GUI.gui import GUI
 from resources.client.camera import Camera
 from resources.server.biome import get_biome_by_id
 from resources.server.block_class import PlacementContext
-from resources.server.text import Text
+from resources.server.text import (
+    Text,
+    darken_text_color,
+    gradient_text_color_at,
+    is_gradient_text_color,
+    normalize_text_color,
+)
 
 from .block import BlockRenderMixin
 from .constants import BLOCK_TINT_COLOR_STEP
@@ -842,6 +848,42 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.font_cache[cache_key] = font
         return font
 
+    def _render_text_surface(self, font, text: str, color, fallback_color=(255, 255, 255)):
+        """Render one solid or horizontally gradient-colored text segment."""
+        try:
+            normalized_color = normalize_text_color(color)
+        except (TypeError, ValueError):
+            normalized_color = normalize_text_color(fallback_color)
+
+        cache = getattr(self, "_colored_text_surface_cache", None)
+        if cache is None:
+            cache = OrderedDict()
+            self._colored_text_surface_cache = cache
+        cache_key = (id(font), text, normalized_color)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cache.move_to_end(cache_key)
+            return cached
+
+        if is_gradient_text_color(normalized_color):
+            mask = font.render(text, True, (255, 255, 255))
+            width, height = mask.get_size()
+            text_surface = pygame.Surface((width, height), pygame.SRCALPHA)
+            denominator = max(1, width - 1)
+            for x in range(width):
+                text_surface.fill(
+                    (*gradient_text_color_at(normalized_color, x / denominator), 255),
+                    (x, 0, 1, height),
+                )
+            text_surface.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        else:
+            text_surface = font.render(text, True, normalized_color)
+
+        cache[cache_key] = text_surface
+        if len(cache) > 512:
+            cache.popitem(last=False)
+        return text_surface
+
     def render_text(
         self,
         text: str | Text,
@@ -853,18 +895,20 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         glow: bool = False,
         clip_rect=None,
         bold: bool = False,
+        alpha: int = 255,
     ) -> None:
         """在屏幕上渲染文本。
 
         参数:
             text: 文本内容；传入 Text 时会逐段应用颜色和粗体样式
             pos: 位置 (x, y)
-            color: 文本颜色 RGB
+            color: TextColor、RGB、十六进制颜色，或由这些颜色组成的渐变元组
             font_size: 字体大小
             shadow: 是否绘制阴影
             shadow_strength: 阴影亮度
             glow: 是否添加发光效果
             bold: 普通字符串是否使用粗体；传入 Text 时作为全局粗体开关
+            alpha: 整体透明度（0-255）
         """
         old_clip = None
         if clip_rect is not None:
@@ -877,26 +921,31 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             segments = ({"text": str(text), "color": color, "bold": bold},)
 
         cursor_x = pos[0]
+        alpha = max(0, min(255, int(alpha)))
         for segment in segments:
             segment_text = str(segment.get("text", ""))
             segment_color = segment.get("color", color)
-            if hasattr(segment_color, "value"):
-                segment_color = segment_color.value
-            if not isinstance(segment_color, (tuple, list)) or len(segment_color) < 3:
-                segment_color = color
-            segment_color = tuple(segment_color[:3])
             segment_bold = bold or bool(segment.get("bold", False))
             font = self.get_font(font_size, segment_bold)
-            text_surface = font.render(segment_text, True, segment_color)
+            text_surface = self._render_text_surface(font, segment_text, segment_color, color)
 
             if shadow:
                 # 阴影：深色版本偏移绘制在文本下方
-                shadow_color = tuple(int(x * shadow_strength) for x in segment_color)
-                shadow_surface = font.render(segment_text, True, shadow_color)
+                try:
+                    shadow_color = darken_text_color(segment_color, shadow_strength)
+                except (TypeError, ValueError):
+                    shadow_color = darken_text_color(color, shadow_strength)
+                shadow_surface = self._render_text_surface(font, segment_text, shadow_color)
+                if alpha < 255:
+                    shadow_surface = shadow_surface.copy()
+                    shadow_surface.set_alpha(alpha)
                 self.screen.blit(
                     shadow_surface,
                     (cursor_x + font_size / 8, pos[1] + font_size / 8),
                 )
+            if alpha < 255:
+                text_surface = text_surface.copy()
+                text_surface.set_alpha(alpha)
             self.screen.blit(text_surface, (cursor_x, pos[1]))
             cursor_x += text_surface.get_width()
 
