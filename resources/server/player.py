@@ -443,6 +443,10 @@ class Player(Entity):
             },
         ))
 
+    def _play_eating_sound(self, sound_id: str) -> None:
+        mouth_x, mouth_y, z = self._mouth_position()
+        self.world.server.broadcast_sound(sound_id, mouth_x, mouth_y, z)
+
     def tick_eating(self) -> None:
         if not self.eating:
             return
@@ -465,12 +469,13 @@ class Player(Entity):
         self._eat_progress += 1
         if self._eat_progress % 4 == 0:
             self._spawn_eating_particles(material_id)
+            self._play_eating_sound('random.eat')
         if self._eat_progress < food.consume_duration_ticks:
             return
         food.on_consume(self)
         held.reduce_amount(1)
-        mouth_x, mouth_y, z = self._mouth_position()
-        self.world.server.broadcast_sound('random.eat', mouth_x, mouth_y, z)
+        if self.food_level >= self.MAX_FOOD_LEVEL:
+            self._play_eating_sound('random.burp')
         self.sync_inventory()
         self.clear_eating()
 

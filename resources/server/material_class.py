@@ -143,7 +143,7 @@ class BlockItem(Material):
         """Create the block represented by this inventory material.
 
         Block classes are resolved only when the item is actually used.  This
-        keeps the material definitions independent from ``blocks.py`` during
+        keeps the material definitions independent of ``blocks.py`` during
         module initialization while retaining a stable, serializable link.
         """
         if cls.target_block_id is None:
