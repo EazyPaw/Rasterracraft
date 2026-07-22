@@ -217,6 +217,46 @@ class BlockRenderMixin:
             cache.popitem(last=False)
         return requires_direct
 
+    def _get_block_section_render_padding(
+        self,
+        section_x: int,
+        section_y: int,
+        version_key: tuple[tuple[int, int], ...],
+    ) -> int:
+        """Return the exact pixel margin needed by render-offset blocks.
+
+        Most sections cache at their original size. Only sections containing a
+        visually shifted block allocate extra transparent pixels, so adding new
+        offset block types does not clip at section boundaries or penalize the
+        common path.
+        """
+        bs = self.block_size
+        probe_key = (section_x, section_y, bs, version_key)
+        cache = self.block_section_padding_cache
+        if probe_key in cache:
+            cache.move_to_end(probe_key)
+            return cache[probe_key]
+
+        section_w = self.BLOCK_SECTION_WIDTH
+        section_h = self.BLOCK_SECTION_HEIGHT
+        x0 = section_x * section_w
+        y0 = section_y * section_h
+        max_offset = 0.0
+        get_block = self.client_world.get_block
+        for x in range(x0, x0 + section_w):
+            for y in range(y0, y0 + section_h):
+                for z in (0, 1):
+                    offset_x, offset_y = getattr(
+                        get_block(x, y, z), 'render_offset_blocks', (0.0, 0.0)
+                    )
+                    max_offset = max(max_offset, abs(offset_x), abs(offset_y))
+
+        padding = _math.ceil(max_offset * bs)
+        cache[probe_key] = padding
+        if len(cache) > self.MAX_BLOCK_SECTION_PADDING_CACHE:
+            cache.popitem(last=False)
+        return padding
+
     def _get_block_section_animation_key(
         self,
         section_x: int,
@@ -373,6 +413,7 @@ class BlockRenderMixin:
                 first_block is not None
                 and first_block.block_id != 'air'
                 and not first_block.has_transparent_pixels
+                and first_block.render_offset_blocks == (0.0, 0.0)
             )
             first_tex = first_block.get_texture(block_size) if can_tile_section else None
             if first_tex is None or first_tex.get_height() != block_size:
@@ -494,8 +535,11 @@ class BlockRenderMixin:
             cache.move_to_end(key)
             return cache[key]
 
-        surface_w = section_w * bs
-        surface_h = section_h * bs
+        padding = self._get_block_section_render_padding(
+            section_x, section_y, version_key
+        )
+        surface_w = section_w * bs + padding * 2
+        surface_h = section_h * bs + padding * 2
         pool_key = (surface_w, surface_h)
 
         if tick_key != 0:
@@ -505,14 +549,16 @@ class BlockRenderMixin:
             ]
             for old_key in old_keys:
                 old_surface = cache.pop(old_key)
-                pool = self.block_section_surface_pool.setdefault(pool_key, [])
-                if old_surface.get_size() == pool_key and len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
+                old_pool_key = old_surface.get_size()
+                pool = self.block_section_surface_pool.setdefault(old_pool_key, [])
+                if len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
                     pool.append(old_surface)
 
         if len(cache) >= self.MAX_BLOCK_SECTION_CACHE:
             _, old_surface = cache.popitem(last=False)
-            pool = self.block_section_surface_pool.setdefault(pool_key, [])
-            if old_surface.get_size() == pool_key and len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
+            old_pool_key = old_surface.get_size()
+            pool = self.block_section_surface_pool.setdefault(old_pool_key, [])
+            if len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
                 pool.append(old_surface)
 
         pool = self.block_section_surface_pool.get(pool_key)
@@ -693,7 +739,10 @@ class BlockRenderMixin:
                 )
                 dest_x = (x0 - cam_x - 0.5) * block_size + width // 2
                 dest_y = height - (((y1 + 1) - cam_y + 0.5) * block_size + height // 2)
-                screen.blit(section, (dest_x, dest_y))
+                padding = self._get_block_section_render_padding(
+                    section_x, section_y, version_key
+                )
+                screen.blit(section, (dest_x - padding, dest_y - padding))
 
         self._trim_distant_animated_sections(sx_start, sx_end, sy_start, sy_end)
         self._prefetch_block_sections(
@@ -991,6 +1040,10 @@ class BlockRenderMixin:
         # 方块占据世界坐标 [y, y+1]，用 y+1 定位顶部，纹理从顶部向下绘制
         sx = (x - cam_x - 0.5) * bs + sw // 2
         sy = sh - (((y + 1) - cam_y + 0.5) * bs + sh // 2)
+        offset_x, offset_y = block.render_offset_blocks
+        if offset_x or offset_y:
+            sx += round(offset_x * bs)
+            sy -= round(offset_y * bs)
 
         # ---- 5. 全黑快速路径 ----
         # 完全无光且无透明像素的方块直接绘制黑色矩形

@@ -1,10 +1,7 @@
-import logging
 import time
-import pygame
-
 from typing import TYPE_CHECKING
 
-from resources.server.blocks import AIR, STONE
+import pygame
 
 if TYPE_CHECKING:
     from resources.client.client_main import Client
@@ -80,16 +77,19 @@ class GameManager:
         """执行一次游戏内逻辑更新"""
         if self.client.client_player is None:
             return
-        try:
-            self.handle_events()
-            self.handle_key_pressed()
-            self.sync_player_camera()
-            self.client.client_player.move_update()
-            self.client.client_player.game_mode.get_choosing_block()
-            self.client.particle_manager.update()
-            self.client.client_world.tick_fluid_sounds()
-        except AttributeError:
-            pass
+        self.handle_events()
+        self.handle_key_pressed()
+        player = self.client.client_player
+        # Event handling can leave the current world.  That transition is the
+        # only missing-player case we need to tolerate; gameplay AttributeError
+        # exceptions must not be swallowed and retried every frame.
+        if player is None:
+            return
+        self.sync_player_camera()
+        player.move_update()
+        player.game_mode.get_choosing_block()
+        self.client.particle_manager.update()
+        self.client.client_world.tick_fluid_sounds()
 
     def client_tick(self):
         ...

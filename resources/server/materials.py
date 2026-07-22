@@ -1,6 +1,6 @@
 import pygame
 
-from resources.server.material_class import Material, BlockItem
+from resources.server.material_class import Material, BlockItem, Food
 from resources.server.utils import client_method
 
 
@@ -72,7 +72,7 @@ class LAVA(BlockItem):
     target_block_id = "lava"
 
 @register_material
-class APPLE(Material):
+class APPLE(Food):
     name_id = "apple"
     name = "item.apple.name"
     _texture_path = "items.apple"
@@ -81,7 +81,7 @@ class APPLE(Material):
 
 
 @register_material
-class BREAD(Material):
+class BREAD(Food):
     name_id = "bread"
     name = "item.bread.name"
     _texture_path = "items.bread"
@@ -90,7 +90,7 @@ class BREAD(Material):
 
 
 @register_material
-class COOKED_BEEF(Material):
+class COOKED_BEEF(Food):
     name_id = "cooked_beef"
     name = "item.beefCooked.name"
     _texture_path = "items.beef_cooked"
@@ -99,7 +99,7 @@ class COOKED_BEEF(Material):
 
 
 @register_material
-class ROTTEN_FLESH(Material):
+class ROTTEN_FLESH(Food):
     name_id = "rotten_flesh"
     name = "item.rottenFlesh.name"
     _texture_path = "items.rotten_flesh"
@@ -108,7 +108,7 @@ class ROTTEN_FLESH(Material):
 
 
 @register_material
-class RAW_CHICKEN(Material):
+class RAW_CHICKEN(Food):
     name_id = "chicken"
     name = "item.chickenRaw.name"
     _texture_path = "items.chicken_raw"
@@ -117,7 +117,7 @@ class RAW_CHICKEN(Material):
 
 
 @register_material
-class COOKED_CHICKEN(Material):
+class COOKED_CHICKEN(Food):
     name_id = "cooked_chicken"
     name = "item.chickenCooked.name"
     _texture_path = "items.chicken_cooked"
@@ -126,7 +126,7 @@ class COOKED_CHICKEN(Material):
 
 
 @register_material
-class RAW_BEEF(Material):
+class RAW_BEEF(Food):
     name_id = "beef"
     name = "item.beefRaw.name"
     _texture_path = "items.beef_raw"
@@ -142,7 +142,7 @@ class LEATHER(Material):
 
 
 @register_material
-class RAW_PORKCHOP(Material):
+class RAW_PORKCHOP(Food):
     name_id = "porkchop"
     name = "item.porkchopRaw.name"
     _texture_path = "items.porkchop_raw"
@@ -151,7 +151,7 @@ class RAW_PORKCHOP(Material):
 
 
 @register_material
-class COOKED_PORKCHOP(Material):
+class COOKED_PORKCHOP(Food):
     name_id = "cooked_porkchop"
     name = "item.porkchopCooked.name"
     _texture_path = "items.porkchop_cooked"
@@ -160,7 +160,7 @@ class COOKED_PORKCHOP(Material):
 
 
 @register_material
-class RAW_MUTTON(Material):
+class RAW_MUTTON(Food):
     name_id = "mutton"
     name = "item.muttonRaw.name"
     _texture_path = "items.mutton_raw"
@@ -169,7 +169,7 @@ class RAW_MUTTON(Material):
 
 
 @register_material
-class COOKED_MUTTON(Material):
+class COOKED_MUTTON(Food):
     name_id = "cooked_mutton"
     name = "item.muttonCooked.name"
     _texture_path = "items.mutton_cooked"
@@ -191,11 +191,23 @@ class EGG(Material):
     _texture_path = "items.egg"
 
 
+class CropPlantingMaterial(Material):
+    """An item that plants a crop while keeping block imports lazy."""
+
+    crop_block_id = None
+
+    @classmethod
+    def create_crop(cls):
+        from resources.server.blocks import get_block_by_id
+        return get_block_by_id(cls.crop_block_id)
+
+
 @register_material(aliases=("seeds",))
-class WHEAT_SEEDS(Material):
+class WHEAT_SEEDS(CropPlantingMaterial):
     name_id = "wheat_seeds"
     name = "item.seeds.name"
     _texture_path = "items.seeds_wheat"
+    crop_block_id = "wheat"
 
 
 @register_material
@@ -220,17 +232,32 @@ class WHEAT(Material):
 
 
 @register_material
-class CARROT(Material):
+class CARROT(CropPlantingMaterial, Food):
     name_id = "carrot"
     name = "item.carrots.name"
     _texture_path = "items.carrot"
+    crop_block_id = "carrots"
+    food_value = 3
+    saturation_modifier = 0.6
 
 
 @register_material
-class POTATO(Material):
+class POTATO(CropPlantingMaterial, Food):
     name_id = "potato"
     name = "item.potato.name"
     _texture_path = "items.potato"
+    crop_block_id = "potatoes"
+    food_value = 1
+    saturation_modifier = 0.3
+
+
+@register_material
+class POISONOUS_POTATO(Food):
+    name_id = "poisonous_potato"
+    name = "item.potatoPoisonous.name"
+    _texture_path = "items.potato_poisonous"
+    food_value = 2
+    saturation_modifier = 0.3
 
 
 @register_material
@@ -351,38 +378,6 @@ class WOODEN_HOE(Tool):
     tier = "wood"
     tool_type = "hoe"
     mining_speed = 2.0
-
-    # @classmethod
-    # @client_method
-    # def get_texture(cls, size: float, client):
-    #     if cls._texture_path is None:
-    #         return None
-    #     original = client.resources_manager.get_texture_img(cls._texture_path, flip=True)
-    #     if original is None:
-    #         return None
-    #     cls._original_texture = original
-    #     key = (round(float(size), 4), original)
-    #     cache = cls.__dict__.get("_scaled_texture_cache")
-    #     if cache is None:
-    #         cache = {}
-    #         cls._scaled_texture_cache = cache
-    #     cached = cache.get(key)
-    #     if cached is not None:
-    #         return cached
-    #     original_width = original.get_width()
-    #     original_height = original.get_height()
-    #     new_width = max(1, int(round(original_width * size)))
-    #     new_height = max(1, int(round(original_height * size)))
-    #     texture = pygame.transform.scale(original, (new_width, new_height))
-    #     cls._last_scaled = key
-    #     cache[key] = texture
-    #     if len(cache) > 64:
-    #         cache.pop(next(iter(cache)))
-    #     return texture
-    #
-    # @client_method
-    # def get_anchor(self, client = None):
-    #     return {'anchor':(0.3,0.7),'offset':(0, 0),'scale':0.8,'rotation':-90}
 
 
 class SNOWBALL(Material):

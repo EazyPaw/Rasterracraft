@@ -161,6 +161,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.MAX_BLOCK_SECTION_ANIMATION_CACHE: int = 256
         self.block_section_direct_cache: OrderedDict[tuple, bool] = OrderedDict()
         self.MAX_BLOCK_SECTION_DIRECT_CACHE: int = 256
+        self.block_section_padding_cache: OrderedDict[tuple, int] = OrderedDict()
+        self.MAX_BLOCK_SECTION_PADDING_CACHE: int = 256
         self.animated_texture_path_cache: dict[str, bool] = {}
         self.partial_alpha_surface_cache: dict[int, bool] = {}
         self.BLOCK_SECTION_WIDTH: int = 8
@@ -374,6 +376,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.block_section_surface_pool.clear()
                     self.block_section_animation_cache.clear()
                     self.block_section_direct_cache.clear()
+                    self.block_section_padding_cache.clear()
                     self._last_block_cache_cam = None
                     self.ig_gui_layer = pygame.Surface(
                         (self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA

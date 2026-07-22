@@ -14,6 +14,19 @@ from resources.server.biome import get_biome_by_id
 from resources.server.utils import client_method
 
 
+# Logical sounds implemented with assets already present in the base resource
+# pack. A pack can override any entry by defining the same ID in sounds.json.
+BUILTIN_SOUND_FALLBACKS = {
+    'item.hoe.till': {
+        'category': 'block',
+        'sounds': [
+            {'name': f'dig/gravel{index}', 'volume': 0.8}
+            for index in range(1, 5)
+        ],
+    },
+}
+
+
 class ResourcesManager:
     def __init__(self, client):
         self.client = client
@@ -387,12 +400,15 @@ class ResourcesManager:
         """
         加载 sounds.json 并解析到 self.sounds 中。
         """
+        data = {}
         if not os.path.exists(json_path):
             print(f"Warning: sounds.json not found at {json_path}")
-            return
+        else:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
 
-        with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        for sound_id, info in BUILTIN_SOUND_FALLBACKS.items():
+            data.setdefault(sound_id, info)
 
         for sound_id, info in data.items():
             self.sounds[sound_id] = {

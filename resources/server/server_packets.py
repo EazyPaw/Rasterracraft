@@ -252,7 +252,10 @@ def decode_packet(packet: dict, player: Player):
         player.motion.x = dx
         player.motion.y = dy
         player.sneaking = packet.get('sneaking') is True
-        player.sprinting = packet.get('sprinting') is True
+        player.sprinting = (
+            packet.get('sprinting') is True
+            and (mode != 'survival' or player.food_level > 6)
+        )
         try:
             facing = int(packet.get('facing', player.facing))
         except (TypeError, ValueError):
@@ -324,8 +327,12 @@ def decode_packet(packet: dict, player: Player):
         if held.is_empty():
             return
         block = world.get_block(x, y, z)
+        handled = block.on_right_click(player)
+        if not handled:
+            handled = block.on_use(player, held.material)
+        if not handled:
+            return
         player.clear_eating()
-        block.on_use(player, held.material)
         player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
         forward_packet_to_others(player, player, mode="entity_update")
 
@@ -527,8 +534,7 @@ def decode_packet(packet: dict, player: Player):
         player.food_level = 20
         player.saturation = 5.0
         player.exhaustion = 0.0
-        player.regen_timer = 0
-        player.starvation_timer = 0
+        player.food_tick_timer = 0
         player.fall_distance = 0.0
         player.clear_breaking()
         player.clear_eating()
@@ -572,4 +578,3 @@ def forward_packet_to_others(packet, player: Player, mode = 0):
         for other_player in player.world.server.players:
             if other_player != player and other_player.is_loading_position(int(player.x), int(player.y), 0):
                 other_player.world.server.send_client_socket(other_player, packet, "EntityUpdate")
-

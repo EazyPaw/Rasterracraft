@@ -344,6 +344,8 @@ class Server:
         player.health = max(0.0, min(player.max_health, float(data.get("health", player.max_health))))
         player.food_level = max(0, min(20, int(data.get("food_level", 20))))
         player.saturation = max(0.0, min(float(player.food_level), float(data.get("saturation", 5.0))))
+        player.exhaustion = max(0.0, min(40.0, float(data.get("exhaustion", 0.0))))
+        player.food_tick_timer = max(0, min(80, int(data.get("food_tick_timer", 0))))
         player.experience = max(0, int(data.get("experience", 0)))
         player.experience_level = max(0, int(data.get("experience_level", 0)))
         # 恢复玩家的游戏模式（优先读取玩家存档，回退到世界默认模式）
@@ -418,6 +420,8 @@ class Server:
             player_data = {"x": float(player.x), "y": float(player.y), "health": float(player.health),
                            "food_level": int(getattr(player, "food_level", 20)),
                            "saturation": float(getattr(player, "saturation", 5.0)),
+                           "exhaustion": float(getattr(player, "exhaustion", 0.0)),
+                           "food_tick_timer": int(getattr(player, "food_tick_timer", 0)),
                            "experience": int(getattr(player, "experience", 0)),
                            "experience_level": int(getattr(player, "experience_level", 0)),
                            "gamemode": player.gamemode.name_id if hasattr(player.gamemode, "name_id") else "survival",

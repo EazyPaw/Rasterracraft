@@ -7,6 +7,7 @@ from resources.server.entity import Entity
 from resources.server.inventory import Inventory, serialize_inventory, stack_to_payload
 from resources.server.item_class import EmptyItemStack, ItemStack
 from resources.server.location import Location, decide_x_or_loc
+from resources.server.material_class import Food
 from resources.server.particles import ITEM, SPRINT_STEP
 from resources.server.world_class import World
 
@@ -19,6 +20,11 @@ class Player(Entity):
     BREAK_MIN_PROGRESS_TOLERANCE = 0.04
     BREAK_MAX_PROGRESS_TOLERANCE = 0.12
     BREAK_FINISH_GRACE_TICKS = 4
+    MAX_FOOD_LEVEL = 20
+    EXHAUSTION_THRESHOLD = 4.0
+    NATURAL_REGEN_FOOD_LEVEL = 18
+    NATURAL_REGEN_TICKS = 80
+    STARVATION_TICKS = 80
 
     sounds = {
         "hurt": "game.player.hurt",
@@ -66,11 +72,9 @@ class Player(Entity):
         self._eating_material_id: str | None = None
         self._eat_progress = 0
         self._last_eat_action_tick = -10_000
-        self._movement_distance_this_tick = 0.0
         self._last_move_tick = -1
         self.exhaustion = 0.0
-        self.regen_timer = 0
-        self.starvation_timer = 0
+        self.food_tick_timer = 0
         self.fall_distance = 0.0
         # A client may already have PlayerMove packets queued when the server
         # teleports it.  Do not let one of those stale packets overwrite the
@@ -308,6 +312,7 @@ class Player(Entity):
         tool = held_stack.material
         self.clear_breaking(notify=False)
         experience = world.break_block(x, y, z, tool=tool)
+        self.add_exhaustion(0.005)
         self._send_break_progress(target, 0.0, False)
         if experience:
             self.experience += experience
@@ -321,8 +326,8 @@ class Player(Entity):
             self.clear_breaking()
         held = self.inventory[self.selected_slot]
         material_id = getattr(held.material, 'name_id', 'air')
-        food = int(getattr(held.material, 'food_value', 0))
-        if self.health <= 0 or self.food_level >= 20 or held.is_empty() or food <= 0:
+        food = held.material
+        if held.is_empty() or not isinstance(food, Food) or not food.can_consume(self):
             self.clear_eating()
             return False
         if self._eating_slot != self.selected_slot or self._eating_material_id != material_id:
@@ -334,6 +339,30 @@ class Player(Entity):
             self._broadcast_action_state()
         self._last_eat_action_tick = int(getattr(self.world.server, 'server_ticks', 0))
         return True
+
+    def can_consume_food(self, food: Food) -> bool:
+        if self.health <= 0:
+            return False
+        if getattr(self.gamemode, "name_id", "survival") != "survival":
+            return False
+        return bool(food.always_edible or self.food_level < self.MAX_FOOD_LEVEL)
+
+    def consume_food(self, food: Food) -> None:
+        """Apply one completed food use using Bedrock hunger values."""
+        nutrition = max(0, int(food.food_value))
+        saturation_gain = nutrition * max(0.0, float(food.saturation_modifier)) * 2.0
+        self.food_level = min(self.MAX_FOOD_LEVEL, self.food_level + nutrition)
+        self.saturation = min(
+            float(self.food_level),
+            max(0.0, self.saturation) + saturation_gain,
+        )
+        # Bedrock grants one additional heart once when food is completed
+        # while natural regeneration is available.  It is paid for through
+        # the same 6 exhaustion per health point as timed regeneration.
+        if self.food_level >= self.NATURAL_REGEN_FOOD_LEVEL and self.health < self.max_health:
+            healed = min(2.0, float(self.max_health) - float(self.health))
+            self.health += healed
+            self.add_exhaustion(6.0 * healed)
 
     def clear_eating(self) -> None:
         was_eating = self.eating
@@ -380,26 +409,22 @@ class Player(Entity):
             return
         held = self.inventory[self.selected_slot]
         material_id = getattr(held.material, 'name_id', 'air')
-        food = int(getattr(held.material, 'food_value', 0))
+        food = held.material
         if (
             self.selected_slot != self._eating_slot
             or material_id != self._eating_material_id
             or held.is_empty()
-            or food <= 0
-            or self.food_level >= 20
+            or not isinstance(food, Food)
+            or not food.can_consume(self)
         ):
             self.clear_eating()
             return
         self._eat_progress += 1
         if self._eat_progress % 4 == 0:
             self._spawn_eating_particles(material_id)
-        if self._eat_progress < 16:
+        if self._eat_progress < food.consume_duration_ticks:
             return
-        saturation = float(getattr(held.material, 'saturation_modifier', 0.0))
-        self.food_level = min(20, self.food_level + food)
-        self.saturation = min(
-            float(self.food_level), self.saturation + food * saturation * 2
-        )
+        food.on_consume(self)
         held.reduce_amount(1)
         mouth_x, mouth_y, z = self._mouth_position()
         self.world.server.broadcast_sound('random.eat', mouth_x, mouth_y, z)
@@ -409,10 +434,20 @@ class Player(Entity):
     def record_server_movement(self, previous_y: float, was_on_ground: bool,
                                horizontal_distance: float) -> None:
         """Update server-owned fall and exhaustion state after an accepted move."""
-        self._movement_distance_this_tick += max(0.0, float(horizontal_distance))
-        if getattr(self.gamemode, "name_id", "survival") != "survival":
-            self.fall_distance = 0.0
-            return
+        distance = max(0.0, float(horizontal_distance))
+        if self.in_fluid:
+            swim_distance = _math.hypot(distance, float(self.y) - float(previous_y))
+            self.add_exhaustion(swim_distance * 0.01)
+        elif self.sprinting:
+            self.add_exhaustion(distance * 0.1)
+        if (
+            not self.in_fluid
+            and not self.flying
+            and was_on_ground
+            and not self.on_ground
+            and self.y > previous_y
+        ):
+            self.add_exhaustion(0.2 if self.sprinting else 0.05)
         if self.in_fluid or self.flying:
             self.fall_distance = 0.0
             return
@@ -420,50 +455,66 @@ class Player(Entity):
         if fallen > 0:
             self.fall_distance += fallen
         if self.on_ground and not was_on_ground:
-            if self.fall_distance > 3.0:
-                self.apply_damage(int(self.fall_distance - 3.0 + 0.999), FALL, source=None)
+            landing_distance = self.fall_distance
+            position_corrected = self.on_landed(landing_distance)
+            if position_corrected:
+                # The acknowledgement gate prevents already queued client
+                # movement from restoring the now-embedded position.
+                self.teleport_to(self.x, self.y)
+            if (
+                getattr(self.gamemode, "name_id", "survival") == "survival"
+                and landing_distance > 3.0
+            ):
+                self.apply_damage(int(landing_distance - 3.0 + 0.999), FALL, source=None)
             self.fall_distance = 0.0
 
     def _tick_survival_state(self) -> None:
         if getattr(self.gamemode, "name_id", "survival") != "survival":
-            self._movement_distance_this_tick = 0.0
             return
         if self.health <= 0:
-            self._movement_distance_this_tick = 0.0
             return
-        if self._movement_distance_this_tick > 0.02:
-            self.exhaustion += 0.006 if self.sprinting else 0.001
-        self._movement_distance_this_tick = 0.0
 
-        food_changed = False
-        while self.exhaustion >= 4.0:
-            self.exhaustion -= 4.0
+        state_changed = False
+        # Vanilla caps queued exhaustion at 40 and performs at most one
+        # four-point drain per game tick.
+        if self.exhaustion >= self.EXHAUSTION_THRESHOLD:
+            self.exhaustion -= self.EXHAUSTION_THRESHOLD
             if self.saturation > 0:
                 self.saturation = max(0.0, self.saturation - 1.0)
-                food_changed = True
+                state_changed = True
             elif self.food_level > 0:
                 self.food_level -= 1
-                food_changed = True
+                state_changed = True
+        if self.food_level <= 6:
+            self.sprinting = False
 
-        if self.food_level >= 18 and self.health < self.max_health:
-            self.regen_timer += 1
-            if self.regen_timer >= 80:
-                self.health = min(self.max_health, self.health + 1)
-                self.exhaustion += 6.0
-                self.regen_timer = 0
-                food_changed = True
-        else:
-            self.regen_timer = 0
-
-        if self.food_level == 0:
-            self.starvation_timer += 1
-            if self.starvation_timer >= 80:
+        if self.food_level >= self.NATURAL_REGEN_FOOD_LEVEL and self.health < self.max_health:
+            self.food_tick_timer += 1
+            if self.food_tick_timer >= self.NATURAL_REGEN_TICKS:
+                healed = min(1.0, float(self.max_health) - float(self.health))
+                self.health += healed
+                self.add_exhaustion(6.0 * healed)
+                self.food_tick_timer = 0
+                state_changed = True
+        elif self.food_level == 0:
+            self.food_tick_timer += 1
+            if self.food_tick_timer >= self.STARVATION_TICKS:
                 self.apply_damage(1, STARVE, source=None)
-                self.starvation_timer = 0
+                self.food_tick_timer = 0
         else:
-            self.starvation_timer = 0
-        if food_changed:
+            self.food_tick_timer = 0
+        if state_changed:
             self.sync_inventory()
+
+    def add_exhaustion(self, amount: float) -> None:
+        if getattr(self.gamemode, "name_id", "survival") != "survival" or self.health <= 0:
+            return
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            return
+        if amount > 0:
+            self.exhaustion = min(40.0, self.exhaustion + amount)
 
     def tick_server(self) -> None:
         """Advance state which must never be supplied by a client packet."""
@@ -479,6 +530,13 @@ class Player(Entity):
     def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
         mode = getattr(self.gamemode, "name_id", "survival")
         return mode not in {"creative", "spectator"} and super().can_take_damage(damage_type)
+
+    def attack(self, target, damage_type: type[DamageType] | None = None,
+               amount: float | None = None, knockback=None) -> float:
+        actual_damage = super().attack(target, damage_type, amount, knockback)
+        if actual_damage > 0:
+            self.add_exhaustion(0.1)
+        return actual_damage
 
     def get_attack_damage(self, target=None) -> float:
         try:
@@ -500,6 +558,7 @@ class Player(Entity):
     def on_damage_applied(self, actual_damage: float, raw_damage: float,
                           damage_type: type[DamageType], source) -> None:
         super().on_damage_applied(actual_damage, raw_damage, damage_type, source)
+        self.add_exhaustion(getattr(damage_type, "exhaustion", 0.0))
         server = getattr(self.world, "server", None)
         if server is None:
             return
@@ -842,3 +901,10 @@ class Player(Entity):
 
     def __str__(self):
         return self.name
+
+    def get_held_item(self) -> ItemStack:
+        """
+        获取玩家手持物品
+        :return:
+        """
+        return self.inventory[self.selected_slot]

@@ -2,6 +2,7 @@ from abc import ABC
 
 import ast
 import logging
+import random
 from dataclasses import dataclass
 
 import pygame
@@ -21,8 +22,6 @@ from resources.server.block_collision import (
     BlockCollisionBox,
     coerce_collision_shape,
 )
-
-
 BLOCK_EXPERIENCE = {
     "coal_ore": (0, 2), "diamond_ore": (3, 7), "emerald_ore": (3, 7),
     "lapis_ore": (2, 5), "redstone_ore": (1, 5),
@@ -102,6 +101,9 @@ class Block(ABC):
     Tags = []
     has_transparent_pixels = None  # None = 自动从纹理检测，也可手动覆盖为 True/False
     drops: tuple[BlockDrop, ...] | None = None
+    # 世界方块单位中的纯渲染偏移；正 x 向右、正 y 向上。碰撞和逻辑坐标
+    # 不受影响。渲染器按区块中实际最大偏移动态预留缓存边距。
+    render_offset_blocks = (0.0, 0.0)
 
     def __init__(self, nbt = None):
         # 方块应该带有的属性
@@ -270,23 +272,52 @@ class Block(ABC):
         bounds = BLOCK_EXPERIENCE.get(self.block_id)
         return random.randint(*bounds) if bounds else 0
 
-    def on_right_click(self) -> bool:
-        """
-        执行方块被右键交互时的操作，返回方块交互是否成功（如果方块不可交互则始终返回 False ）
-        :return:
-        """
-        return False # 返回此方块能否被交互
-
     def on_use(self, player, material) -> bool:
         """Server-side item-on-block interaction hook."""
+        return False
+
+    def accepts_item_use(self, material) -> bool:
+        """Return whether this block should consume an item-use right click.
+
+        This predicate is safe to evaluate on the client.  The actual effect
+        remains server-authoritative in ``on_right_click``/``on_use``.
+        """
         return False
 
     def on_exploded(self, power: float, source=None) -> bool:
         """React to a blast and report whether the world should destroy it."""
         return self.breakable
 
-    def on_left_click(self):
-        pass
+    def on_right_click(self, player) -> bool:
+        """
+        执行方块被右键交互时的操作，返回方块交互是否成功（如果方块不可交互则始终返回 False ）
+        :return:
+        """
+        return False # 返回此方块能否被交互
+
+    def on_left_click(self, player) -> bool:
+        return False
+
+    def on_fallen_on(self, entity, fall_distance: float) -> bool:
+        """React to a landing and report whether the block state changed."""
+        return False
+
+    def notify_state_changed(self) -> None:
+        """Persist and broadcast an in-place NBT/state mutation."""
+        if self.location is None:
+            return
+        world = self.location.world
+        mark_dirty = getattr(world, "mark_chunk_dirty", None)
+        if callable(mark_dirty):
+            mark_dirty(int(self.location.x) // 16)
+        server = getattr(world, "server", None)
+        if server is None:
+            return
+        for player in tuple(getattr(server, "players", ())):
+            if player.is_loading_position(
+                self.location.x, self.location.y, self.location.z
+            ):
+                server.send_client_socket(player, self, "BlockUpdate")
 
     def on_update(self):
         pass
@@ -1328,3 +1359,105 @@ class ParticleEmitterBlock(SupportedBlock):
     def on_break(self):
         self._particles_active = False
         self._particle_event_scheduled = False
+
+class Crop(Block):
+    solid = False
+    collision_box = EMPTY
+    light_attenuation = 1
+    has_transparent_pixels = True
+    hardness = 0.0
+    break_sound = 'dig.grass'
+    maintains_farmland = True
+    max_age = 7
+    _crop_texture_cache = {}
+    # 耕地表面比完整方块低 2/16 格，作物视觉上应落在其表面。
+    render_offset_blocks = (0.0, -2 / 16)
+
+    def __init__(self, nbt=None):
+        self.age = 0
+        super().__init__(nbt)
+
+    @property
+    def is_mature(self) -> bool:
+        return self.age >= self.max_age
+
+    def on_update(self):
+        if self.location is None:
+            return
+        loc = self.location
+        world = loc.world
+        if world.get_block(loc.add(0, -1, 0)).block_id != 'farmland':
+            world.break_block(loc)
+
+    def _growth_speed(self) -> float:
+        """Vanilla crop fertility adapted to PyCraft2D's two depth layers."""
+        loc = self.location
+        world = loc.world
+        speed = 1.0
+        for dx in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                soil_z = int(loc.z) + dz
+                if soil_z not in (0, 1):
+                    continue
+                soil = world.get_block(int(loc.x) + dx, int(loc.y) - 1, soil_z)
+                fertility = 0.0
+                if getattr(soil, 'block_id', None) == 'farmland':
+                    fertility = 3.0 if getattr(soil, 'moisture', 0) > 0 else 1.0
+                if dx != 0 or dz != 0:
+                    fertility /= 4.0
+                speed += fertility
+
+        crop_id = self.block_id
+        has_x_neighbor = any(
+            world.get_block(int(loc.x) + dx, int(loc.y), int(loc.z)).block_id == crop_id
+            for dx in (-1, 1)
+        )
+        other_z = 1 - int(loc.z)
+        has_z_neighbor = world.get_block(int(loc.x), int(loc.y), other_z).block_id == crop_id
+        has_diagonal = any(
+            world.get_block(int(loc.x) + dx, int(loc.y), other_z).block_id == crop_id
+            for dx in (-1, 1)
+        )
+        if (has_x_neighbor and has_z_neighbor) or has_diagonal:
+            speed /= 2.0
+        return speed
+
+    def on_random_tick(self):
+        if self.location is None or self.is_mature:
+            return
+        loc = self.location
+        world = loc.world
+        if world.get_block(loc.add(0, -1, 0)).block_id != 'farmland':
+            world.break_block(loc)
+            return
+        get_light = getattr(world, 'get_sum_light', None)
+        light = get_light(int(loc.x), int(loc.y)) if callable(get_light) else 15
+        if light < 9:
+            return
+        bound = int(25.0 / max(0.01, self._growth_speed())) + 1
+        if random.randrange(bound) != 0:
+            return
+        self.age = min(self.max_age, self.age + 1)
+        self.notify_state_changed()
+
+    def get_texture_path(self) -> str:
+        """Return the real staged path used by rendering and animation probes."""
+        return f'{self._texture_path}_stage_{self.age}'
+
+    @client_method
+    def get_texture(self, size, client = None):
+        texture_path = self.get_texture_path()
+        size = max(1, int(round(size)))
+        tex = client.resources_manager.get_texture_img(texture_path)
+        if tex is None:
+            return None
+        if self.has_transparent_pixels is None:
+            self.has_transparent_pixels = client.resources_manager.has_transparent_pixels(tex)
+        key = (type(self), size, texture_path, tex)
+        cached = self._crop_texture_cache.get(key)
+        if cached is None:
+            cached = pygame.transform.scale(tex, (size, size)).convert_alpha()
+            self._crop_texture_cache[key] = cached
+            if len(self._crop_texture_cache) > 128:
+                self._crop_texture_cache.pop(next(iter(self._crop_texture_cache)))
+        return cached

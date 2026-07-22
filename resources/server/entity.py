@@ -327,6 +327,52 @@ class Entity:
         """Return the block under the entity's feet, if any."""
         return self._get_block_at(self.x + self.width * 0.5, self.y - 0.05)
 
+    def _resolve_landing_block_overlap(self, block) -> bool:
+        """Lift the entity onto a landing block whose collision grew upward."""
+        location = getattr(block, "location", None)
+        if location is None:
+            return False
+        getter = getattr(block, "get_collision_box", None)
+        try:
+            shape = coerce_collision_shape(
+                getter() if callable(getter) else getattr(block, "collision_box", EMPTY)
+            )
+        except (TypeError, ValueError):
+            return False
+
+        entity_top = self.y + self.height
+        correction_y = self.y
+        for local_box in shape:
+            box = local_box.translated(location.x, location.y)
+            if not box.overlaps(self.x, self.y, self.x + self.width, entity_top):
+                continue
+            correction_y = max(correction_y, box.max_y)
+
+        if correction_y <= self.y or self._check_collision_at(self.x, correction_y):
+            return False
+        self.y = correction_y
+        self.motion.y = max(0.0, self.motion.y)
+        self.on_ground = bool(self._check_support_at())
+        return True
+
+    def on_landed(self, fall_distance: float) -> bool:
+        """Dispatch a server-side landing event to the supporting block.
+
+        Movement implementations only need to detect the air-to-ground edge;
+        block-specific reactions remain polymorphic on ``Block.on_fallen_on``.
+        """
+        ground = self.get_ground_block()
+        location = getattr(ground, "location", None)
+        if ground is None or location is None:
+            return False
+        world = location.world
+        coordinates = int(location.x), int(location.y), int(location.z)
+        changed = ground.on_fallen_on(self, max(0.0, float(fall_distance)))
+        if not changed:
+            return False
+        replacement = world.get_block(*coordinates)
+        return self._resolve_landing_block_overlap(replacement)
+
     def get_ground_friction(self) -> float:
         """Vanilla horizontal multiplier for the current surface."""
         block = self.get_ground_block()

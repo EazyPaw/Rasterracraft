@@ -85,6 +85,8 @@ class ClientPlayer(Entity):
         self.tick_damage_state()
         if not isinstance(self.game_mode, SurvivalMode):
             return
+        if self.food_level <= 6:
+            self.sprinting = False
         self._request_nearby_item_pickups()
         self.game_mode.tick()
 

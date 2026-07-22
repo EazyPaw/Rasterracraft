@@ -1,15 +1,20 @@
 import os
-
-import logging
 import random
 
-from resources.server.biome import get_biome_by_id
+from resources.server.biome import get_biome_by_id, get_precipitation_type
 
 if os.environ.get('PYCRAFT_CLIENT') == '1':
     pass
 
 from resources.server.block_class import *
-from resources.server.materials import COBBLESTONE as COBBLESTONE_ITEM
+from resources.server.materials import (
+    CARROT as CARROT_ITEM,
+    COBBLESTONE as COBBLESTONE_ITEM,
+    POISONOUS_POTATO as POISONOUS_POTATO_ITEM,
+    POTATO as POTATO_ITEM,
+    WHEAT as WHEAT_ITEM,
+    WHEAT_SEEDS as WHEAT_SEEDS_ITEM,
+)
 from resources.server.tags import BlockTag
 from resources.server.utils import client_method
 
@@ -30,8 +35,37 @@ class AIR(Block):
     def get_texture(cls, size, client):
         return None
 
-    def on_right_click(self):
-        pass
+
+class TillableBlockMixin:
+    """Shared server-authoritative hoe interaction for tillable blocks."""
+
+    till_sound = 'item.hoe.till'
+
+    def accepts_item_use(self, material) -> bool:
+        return getattr(material, 'tool_type', None) == 'hoe'
+
+    def on_right_click(self, player) -> bool:
+        material = player.get_held_item().material
+        if not self.accepts_item_use(material) or self.location is None:
+            return False
+        world = self.location.world
+        if not isinstance(world.get_block(self.location.add(0, 1, 0)), AIR):
+            return False
+        location = self.location
+        farmland = FARMLAND()
+        world.set_block(farmland, location)
+        if world.get_block(location) is not farmland:
+            return False
+        server = getattr(world, 'server', None)
+        broadcast_sound = getattr(server, 'broadcast_sound', None)
+        if callable(broadcast_sound):
+            broadcast_sound(
+                self.till_sound,
+                float(location.x) + 0.5,
+                float(location.y) + 0.5,
+                int(location.z),
+            )
+        return True
 
 class STONE(Block):
     block_id = 'stone'
@@ -89,7 +123,7 @@ class BEDROCK(Block):
     hardness = -1
     blast_resistance = 3_600_000.0
 
-class DIRT(Block):
+class DIRT(TillableBlockMixin, Block):
     block_id = 'dirt'
     name = 'tile.dirt.name'
     _texture_path = 'blocks.dirt'
@@ -114,7 +148,7 @@ class PODZOL(Block):
     preferred_tool = 'shovel'
     Tags = [BlockTag.GRASS_BLOCKS]
 
-class GRASS_BLOCK(Block):
+class GRASS_BLOCK(TillableBlockMixin, Block):
     block_id = 'grass_block'
     name = 'tile.grass.name'
     light_attenuation = 5
@@ -129,7 +163,7 @@ class GRASS_BLOCK(Block):
         self.snowed = snowed
 
     @client_method
-    def get_texture(self, size, client: 'Client'):
+    def get_texture(self, size, client):
         """
         获取草方块侧面纹理：将染色后的 grass_side_overlay 组合到 grass_side 上。
         (client 由 @client_only 自动注入)
@@ -179,8 +213,199 @@ class GRASS_BLOCK(Block):
     def on_update(self):
         self.snowed = isinstance(self.location.world.get_block(self.location.add(0, 1, 0)), SNOW)
 
+class FARMLAND(Block):
+    block_id = 'farmland'
+    name = 'tile.farmland.name'
+    _texture_path = 'blocks.farmland_dry'
+    _texture_cache = {}
+    solid = True
+    has_transparent_pixels = True
+    MAX_MOISTURE = 7
 
-class SHORT_GRASS(GrassStain):
+    def __init__(self, moisture=0, nbt=None):
+        self.moisture = max(0, min(self.MAX_MOISTURE, int(moisture)))
+        super().__init__(nbt)
+
+    def accepts_item_use(self, material) -> bool:
+        return callable(getattr(material, 'create_crop', None))
+
+    def on_right_click(self, player) -> bool:
+        stack = player.get_held_item()
+        create_crop = getattr(stack.material, 'create_crop', None)
+        if stack.is_empty() or not callable(create_crop) or self.location is None:
+            return False
+        world = self.location.world
+        crop_location = self.location.add(0, 1, 0)
+        if not isinstance(world.get_block(crop_location), AIR):
+            return False
+        crop = create_crop()
+        if not isinstance(crop, Crop):
+            return False
+        world.set_block(crop, crop_location)
+        if world.get_block(crop_location) is not crop:
+            return False
+        if getattr(player.gamemode, 'name_id', 'survival') != 'creative':
+            stack.reduce_amount(1)
+            player.sync_inventory()
+        return True
+
+    @client_method
+    def get_texture(self, size, client):
+        wet = self.moisture == self.MAX_MOISTURE
+        if wet:
+            base_texture = client.resources_manager.get_texture_img('blocks.farmland_wet')
+        else:
+            base_texture = client.resources_manager.get_texture_img('blocks.farmland_dry')
+        cache_key = (int(size), wet, base_texture)
+        if cache_key in self._texture_cache:
+            return self._texture_cache[cache_key]
+        width, height = base_texture.size
+        layer_height = height * 7 // 8
+        rect = pygame.Rect(0, height - layer_height, width, layer_height)
+        tex = base_texture.subsurface(rect).copy()
+        tex_h = size * 7 // 8
+        final_texture = pygame.transform.scale(tex, (size, tex_h))
+        self._texture_cache[cache_key] = final_texture.convert_alpha()
+        return self._texture_cache[cache_key]
+
+    def get_collision_box(self) -> BlockCollisionBox:
+        return BlockCollisionBox.from_box(0, 0, 1, 7/8)
+
+    def _has_nearby_water(self) -> bool:
+        loc = self.location
+        world = loc.world
+        for x in range(int(loc.x) - 4, int(loc.x) + 5):
+            for y in (int(loc.y), int(loc.y) + 1):
+                for z in (0, 1):
+                    if world.get_block(x, y, z).block_id == 'water':
+                        return True
+        return False
+
+    def _is_rained_on(self) -> bool:
+        loc = self.location
+        world = loc.world
+        weather = getattr(getattr(world, 'weather', None), 'value', None)
+        if weather != 'rain':
+            return False
+        if get_precipitation_type(world.get_biome(int(loc.x), int(loc.y) + 1), int(loc.y) + 1) != 'rain':
+            return False
+        max_height = int(world.attribute.MAX_BUILD_HEIGHT)
+        return not any(
+            world.get_block(int(loc.x), y, int(loc.z)).solid
+            for y in range(int(loc.y) + 1, max_height)
+        )
+
+    def _set_moisture(self, moisture: int) -> None:
+        moisture = max(0, min(self.MAX_MOISTURE, int(moisture)))
+        if moisture == self.moisture:
+            return
+        self.moisture = moisture
+        self.notify_state_changed()
+
+    def on_update(self):
+        if self.location is None:
+            return
+        above = self.location.world.get_block(self.location.add(0, 1, 0))
+        if above.solid:
+            self.location.world.set_block(DIRT(), self.location)
+
+    def on_random_tick(self):
+        if self.location is None:
+            return
+        world = self.location.world
+        if self._has_nearby_water() or self._is_rained_on():
+            self._set_moisture(self.MAX_MOISTURE)
+            return
+        if self.moisture > 0:
+            self._set_moisture(self.moisture - 1)
+            return
+        above = world.get_block(self.location.add(0, 1, 0))
+        if not getattr(above, 'maintains_farmland', False):
+            world.set_block(DIRT(), self.location)
+
+    def on_fallen_on(self, entity, fall_distance: float) -> bool:
+        volume = float(getattr(entity, 'width', 0.0)) ** 2 * float(
+            getattr(entity, 'height', 0.0)
+        )
+        if (
+            self.location is not None
+            and volume > 0.512
+            and random.random() < max(0.0, float(fall_distance) - 0.5)
+        ):
+            self.location.world.set_block(DIRT(), self.location)
+            return True
+        return False
+
+class WHEAT(Crop):
+    block_id = 'wheat'
+    _texture_path = 'blocks.wheat'
+    name = 'tile.crops.name'
+    max_age = 7
+
+    def get_drops(self, material):
+        from resources.server.item_class import ItemStack
+        if not self.is_mature:
+            return [ItemStack(WHEAT_SEEDS_ITEM(), 1)]
+        drops = [ItemStack(WHEAT_ITEM(), 1)]
+        seed_count = random.randint(0, 3)
+        if seed_count:
+            drops.append(ItemStack(WHEAT_SEEDS_ITEM(), seed_count))
+        return drops
+
+    def get_explosion_drops(self):
+        return self.get_drops(None)
+
+
+class RootCrop(Crop):
+    """Shared vanilla-style harvest behavior for self-planting root crops."""
+
+    produce_material_type = None
+    max_age = 3
+
+    def get_drops(self, material):
+        from resources.server.item_class import ItemStack
+        amount = 1
+        if self.is_mature:
+            amount += sum(random.random() < 4 / 7 for _ in range(3))
+        return [ItemStack(self.produce_material_type(), amount)]
+
+    def get_explosion_drops(self):
+        return self.get_drops(None)
+
+
+class CARROTS(RootCrop):
+    block_id = 'carrots'
+    _texture_path = 'blocks.carrots'
+    name = 'tile.carrots.name'
+    produce_material_type = CARROT_ITEM
+
+
+class POTATOES(RootCrop):
+    block_id = 'potatoes'
+    _texture_path = 'blocks.potatoes'
+    name = 'tile.potatoes.name'
+    produce_material_type = POTATO_ITEM
+
+    def get_drops(self, material):
+        from resources.server.item_class import ItemStack
+        drops = super().get_drops(material)
+        if self.is_mature and random.random() < 0.02:
+            drops.append(ItemStack(POISONOUS_POTATO_ITEM(), 1))
+        return drops
+
+
+class SeedDroppingGrass:
+    def get_drops(self, material):
+        from resources.server.item_class import ItemStack
+        if random.randrange(8) == 0:
+            return [ItemStack(WHEAT_SEEDS_ITEM(), 1)]
+        return []
+
+    def get_explosion_drops(self):
+        return self.get_drops(None)
+
+
+class SHORT_GRASS(SeedDroppingGrass, GrassStain):
     block_id = 'short_grass'
     name = 'tile.tallgrass.grass.name'
     _texture_path = 'blocks.tallgrass'
@@ -191,7 +416,8 @@ class SHORT_GRASS(GrassStain):
 class DoublePlantBottomMixin:
     top_block_id = None
 
-    def _remove_double_plant_neighbor(self, location):
+    @staticmethod
+    def _remove_double_plant_neighbor(location):
         world = location.world
         try:
             world.set_block(AIR(), location, send_packet=True, block_update=False)
@@ -234,28 +460,28 @@ class DoublePlantTopMixin:
             self._remove_double_plant_neighbor(bottom.location)
 
 
-class TALL_GRASS(DoublePlantBottomMixin, GrassStain):
+class TALL_GRASS(DoublePlantBottomMixin, SeedDroppingGrass, GrassStain):
     block_id = 'tall_grass'
     name = 'tile.doublePlant.grass.name'
     _texture_path = 'blocks.double_plant_grass_bottom'
     top_block_id = 'tall_grass_top'
 
 
-class TALL_GRASS_TOP(DoublePlantTopMixin, GrassStain):
+class TALL_GRASS_TOP(DoublePlantTopMixin, SeedDroppingGrass, GrassStain):
     block_id = 'tall_grass_top'
     name = 'tile.doublePlant.grass.name'
     _texture_path = 'blocks.double_plant_grass_top'
     bottom_block_id = 'tall_grass'
 
 
-class LARGE_FERN(DoublePlantBottomMixin, GrassStain):
+class LARGE_FERN(DoublePlantBottomMixin, SeedDroppingGrass, GrassStain):
     block_id = 'large_fern'
     name = 'tile.doublePlant.fern.name'
     _texture_path = 'blocks.double_plant_fern_bottom'
     top_block_id = 'large_fern_top'
 
 
-class LARGE_FERN_TOP(DoublePlantTopMixin, GrassStain):
+class LARGE_FERN_TOP(DoublePlantTopMixin, SeedDroppingGrass, GrassStain):
     block_id = 'large_fern_top'
     name = 'tile.doublePlant.fern.name'
     _texture_path = 'blocks.double_plant_fern_top'
@@ -649,7 +875,7 @@ class SUGAR_CANE(Plant):
                 return
         self.location.world.break_block(self.location)
 
-class FERN(GrassStain):
+class FERN(SeedDroppingGrass, GrassStain):
     block_id = 'fern'
     name = 'tile.tallgrass.fern.name'
     _texture_path = 'blocks.fern'
@@ -1005,6 +1231,9 @@ class TNT(Block):
     hardness = 0.0
     blast_resistance = 0.0
     break_sound = 'dig.grass'
+
+    def accepts_item_use(self, material) -> bool:
+        return bool(getattr(material, "ignites_blocks", False))
 
     def prime(self, *, fuse: int = 80, igniter=None) -> bool:
         """Replace this block with a server-authoritative primed TNT entity."""

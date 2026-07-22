@@ -99,6 +99,36 @@ class Material:
         return {'anchor':(0.5,0.9),'offset':(0, 0),'scale':0.5,'rotation':-90}
 
 
+class Food(Material):
+    """Common interface for materials which can be eaten.
+
+    Food definitions own their nutrition, saturation and use duration.  The
+    consumer owns the kind of food state it supports; this keeps the callback
+    usable by future animals or other entities instead of coupling it to
+    ``Player``.
+    """
+
+    food_value = 0
+    saturation_modifier = 0.0
+    consume_duration_ticks = 32
+    always_edible = False
+
+    def can_consume(self, consumer) -> bool:
+        checker = getattr(consumer, "can_consume_food", None)
+        if callable(checker):
+            return bool(checker(self))
+        food_level = getattr(consumer, "food_level", None)
+        if food_level is None:
+            return True
+        return bool(self.always_edible or float(food_level) < 20.0)
+
+    def on_consume(self, consumer) -> None:
+        """Apply this food after its use duration has completed."""
+        handler = getattr(consumer, "consume_food", None)
+        if callable(handler):
+            handler(self)
+
+
 class BlockItem(Material):
     target_block_id = None
 

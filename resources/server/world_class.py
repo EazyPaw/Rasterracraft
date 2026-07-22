@@ -216,7 +216,6 @@ class Weather(Enum):
 
 
 class World:
-    RANDOM_TICK_SPEED = 3
 
     def __init__(self,server, id_name, generator, attribute: WorldAttribute, seed):
         self.server = server
@@ -239,7 +238,7 @@ class World:
         self._light_recalc_lock = threading.RLock()
         self._scheduled_fluid_ticks: set[tuple[int, int, int]] = set()
         self._fluid_lock = threading.RLock()
-        self.random_tick_speed = self.RANDOM_TICK_SPEED
+        self.random_tick_speed = 3
         self.weather: Weather = Weather.CLEAR
         self.weather_tick = self._random_weather_duration(self.weather)
 

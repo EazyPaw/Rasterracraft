@@ -10,6 +10,7 @@ from resources.client.GUI.survival_hud import SurvivalHUD
 from resources.server.block_class import Block
 from resources.server.blocks import AIR
 from resources.server.entity import Entity
+from resources.server.material_class import Food
 from abc import ABC
 
 if TYPE_CHECKING:
@@ -73,8 +74,13 @@ class GameMode(ABC):
         if target is None:
             return False
         stack = self.player.inventory[self.player.selected_slot]
-        if stack.is_empty() or not getattr(stack.material, "ignites_blocks", False):
+        if stack.is_empty() or not target.accepts_item_use(stack.material):
             return False
+        # Item-on-block interactions fire once per physical press.  Returning
+        # True while the button remains held also prevents falling through to
+        # placement logic during the same interaction.
+        if self.player.client.hold_mouse_buttons[2]:
+            return True
         location = target.location
         self.player.skeleton.trigger_swing()
         self.player.client.sent_packet({
@@ -147,15 +153,12 @@ class CreativeMode(GameMode):
             return
         if self.try_use_selected_item_on_block():
             return
-        location = self.player.choosing_block.location
         item = self.player.inventory[self.player.selected_slot]
         # 空手、食物或其它非方块物品对着空气右键不应伪造 AIR 放置包。
         create_block = getattr(item.material, 'create_block', None)
         if item.is_empty() or not callable(create_block):
             return
         new_block = create_block()
-        if self.player.choosing_block.on_right_click():
-            return
         place_location = self.get_block_placement_location(new_block)
         if place_location is None:
             return
@@ -308,41 +311,42 @@ class SurvivalMode(GameMode):
 
     def left_click_on_block(self, block: Block):
         target = self.player.choosing_block
-        if target is None or not target.breakable or isinstance(target, AIR):
-            self.reset_breaking(notify_server=True)
-            return
-        key = self._target_key(target)
-        if (
-            self.pending_break_target is not None
-            and self.pending_break_target[:3] == key[:3]
-        ):
-            return
-        if self.break_target is None or tuple(self.break_target[:3]) != key[:3]:
-            self.reset_breaking()
-            self.break_target = key
-            self.break_progress = 0.0
-        self._breaking_request_active = True
-        self.break_progress = min(1.0, self.break_progress + self._destroy_delta(target))
-        self.player.client.sent_packet({
-            '__class__': 'PlayerAction',
-            'action': 'continue_breaking',
-            'x': target.location.x,
-            'y': target.location.y,
-            'z': target.location.z,
-        })
-        self._publish_local_break_progress()
-        self.player.skeleton.trigger_swing()
-        if self.break_progress < 1.0:
-            return
+        if not target.on_left_click(self.player):
+            if target is None or not target.breakable or isinstance(target, AIR):
+                self.reset_breaking(notify_server=True)
+                return
+            key = self._target_key(target)
+            if (
+                self.pending_break_target is not None
+                and self.pending_break_target[:3] == key[:3]
+            ):
+                return
+            if self.break_target is None or tuple(self.break_target[:3]) != key[:3]:
+                self.reset_breaking()
+                self.break_target = key
+                self.break_progress = 0.0
+            self._breaking_request_active = True
+            self.break_progress = min(1.0, self.break_progress + self._destroy_delta(target))
+            self.player.client.sent_packet({
+                '__class__': 'PlayerAction',
+                'action': 'continue_breaking',
+                'x': target.location.x,
+                'y': target.location.y,
+                'z': target.location.z,
+            })
+            self._publish_local_break_progress()
+            self.player.skeleton.trigger_swing()
+            if self.break_progress < 1.0:
+                return
 
-        x, y, z, _block_id = key
-        self.pending_break_target = key
-        self.player.client.client_world.break_block(x, y, z)
-        self.player.client.sent_packet({
-            '__class__': 'BreakBlock',
-            'x': x, 'y': y, 'z': z,
-        })
-        self.reset_breaking()
+            x, y, z, _block_id = key
+            self.pending_break_target = key
+            self.player.client.client_world.break_block(x, y, z)
+            self.player.client.sent_packet({
+                '__class__': 'BreakBlock',
+                'x': x, 'y': y, 'z': z,
+            })
+            self.reset_breaking()
 
     def right_click_on_block(self, block: Block):
         item = self.player.inventory[self.player.selected_slot]
@@ -352,8 +356,11 @@ class SurvivalMode(GameMode):
             return
         if self.try_use_selected_item_on_block():
             return
-        if getattr(item.material, "food_value", 0):
+        if isinstance(item.material, Food):
             self._eat_selected_item(item)
+            return
+
+        if self.player.client.hold_mouse_buttons[2]:
             return
 
         location = self.player.choosing_block.location if self.player.choosing_block else None
@@ -361,8 +368,6 @@ class SurvivalMode(GameMode):
         if location is None or item.is_empty() or not callable(create_block):
             return
         new_block = create_block()
-        if self.player.choosing_block.on_right_click():
-            return
         place_location = self.get_block_placement_location(new_block)
         if place_location is None:
             return
@@ -371,7 +376,8 @@ class SurvivalMode(GameMode):
         self.player.client.sent_packet(new_block, 'PlaceBlock')
 
     def _eat_selected_item(self, item):
-        if self.player.food_level >= 20:
+        food = item.material
+        if not isinstance(food, Food) or not food.can_consume(self.player):
             if self._eating_request_active:
                 self.player.client.sent_packet({
                     '__class__': 'PlayerAction', 'action': 'stop_eating'
@@ -391,7 +397,7 @@ class SurvivalMode(GameMode):
             'action': 'continue_eating',
         })
         self.player.skeleton.trigger_swing()
-        if self.eat_progress < 16:  # 0.8 seconds at 20 TPS
+        if self.eat_progress < food.consume_duration_ticks:
             return
         self.eating_slot = None
         self.eat_progress = 0
