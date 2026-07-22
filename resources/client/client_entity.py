@@ -14,6 +14,7 @@ from resources.server.item_class import ItemStack
 from resources.server.location import Location, Vector
 from resources.server.materials import get_material_by_id
 from resources.server.utils import client_method
+from resources.server.attributes import AttributeMap
 
 
 class ItemEntityRenderer:
@@ -58,6 +59,8 @@ class ClientEntity:
         self.sprinting = bool(packet.get('sprinting', False))
         self.on_ground = bool(packet.get('on_ground', False))
         self.health = float(packet.get('health', 20))
+        self.max_health = float(packet.get('max_health', 20))
+        self.attributes = AttributeMap()
         self.hurt_time = int(packet.get('hurt_time', 0))
         self.aggressive = bool(packet.get('aggressive', False))
         self.look_angle = float(packet.get('look_angle', 0.0))
@@ -100,6 +103,9 @@ class ClientEntity:
         self.sprinting = bool(packet.get('sprinting', self.sprinting))
         self.on_ground = bool(packet.get('on_ground', self.on_ground))
         self.health = float(packet.get('health', self.health))
+        self.max_health = float(packet.get('max_health', self.max_health))
+        if 'attributes' in packet:
+            self.attributes.apply_sync_snapshot(packet['attributes'])
         self.hurt_time = int(packet.get('hurt_time', self.hurt_time))
         self.aggressive = bool(packet.get('aggressive', self.aggressive))
         self.look_angle = float(packet.get('look_angle', self.look_angle))

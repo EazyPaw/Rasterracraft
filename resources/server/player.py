@@ -2,6 +2,7 @@ import math as _math
 import random as _random
 
 from resources.client.game_mode import SurvivalMode
+from resources.server.attributes import EATING_SPEED_MODIFIER
 from resources.server.damange_type import DamageType, FALL, GENERIC, STARVE
 from resources.server.entity import Entity
 from resources.server.inventory import Inventory, serialize_inventory, stack_to_payload
@@ -48,14 +49,22 @@ class Player(Entity):
         self.height = 1.8
         self.max_health = 20
         self.health = self.max_health
-        self._attack_damage = 1.0
+        self.attack_damage = 1.0
+        self.block_interaction_range = 5.0
         self.interact_range = 5.0
+        self.set_attribute_base_value("waypoint_receive_range", 60_000_000.0)
+        self.set_attribute_base_value("waypoint_transmit_range", 60_000_000.0)
+        self._equipment_attribute_signature = None
         self.food_level = 20
         self.saturation = 5.0
         self.experience = 0
         self.experience_level = 0
         self.gamemode = gamemode if gamemode is not None else SurvivalMode
         self.inventory = Inventory(36)
+        self.equipment = {
+            slot: EmptyItemStack()
+            for slot in ("offhand", "head", "chest", "legs", "feet")
+        }
         self.crafting_grid = Inventory(9)
         self.cursor_stack = EmptyItemStack()
         self._initialize_inventory()
@@ -73,6 +82,8 @@ class Player(Entity):
         self._eat_progress = 0
         self._last_eat_action_tick = -10_000
         self._last_move_tick = -1
+        self.attack_strength_ticker = 20
+        self._last_attribute_attack_tick: int | None = None
         self.exhaustion = 0.0
         self.food_tick_timer = 0
         self.fall_distance = 0.0
@@ -122,16 +133,42 @@ class Player(Entity):
             material = get_material_by_id(material)
         return self.give_item_stack(ItemStack(material, max(0, int(amount)), nbt), sync=sync)
 
+    def get_equipped_item(self, slot: str) -> ItemStack:
+        slot = str(slot).lower().replace("_", "")
+        if slot == "mainhand":
+            return self.inventory[self.selected_slot]
+        if slot not in self.equipment:
+            raise ValueError(f"unknown equipment slot: {slot}")
+        return self.equipment[slot]
+
+    def set_equipped_item(self, slot: str, stack: ItemStack, *, sync: bool = True) -> None:
+        """Server-side equipment hook for armor, offhand items, and future UI."""
+        slot = str(slot).lower().replace("_", "")
+        if slot == "mainhand":
+            self.inventory[self.selected_slot] = stack
+        elif slot in self.equipment:
+            self.equipment[slot] = stack
+        else:
+            raise ValueError(f"unknown equipment slot: {slot}")
+        self._equipment_attribute_signature = None
+        if sync:
+            self.sync_inventory()
+
     def inventory_packet(self) -> dict:
+        self.refresh_attribute_modifiers()
         return {
             "__class__": "InventoryUpdate",
             "inventory": serialize_inventory(self.inventory),
+            "equipment": {
+                slot: stack_to_payload(stack) for slot, stack in self.equipment.items()
+            },
             "crafting": serialize_inventory(self.crafting_grid),
             "cursor": stack_to_payload(self.cursor_stack),
             "selected_slot": int(self.selected_slot),
             "health": float(self.health),
             "food_level": int(self.food_level),
             "saturation": float(self.saturation),
+            "attributes": self.attributes.sync_snapshot(),
         }
 
     def sync_inventory(self) -> None:
@@ -147,7 +184,7 @@ class Player(Entity):
         center_y = self.y + self.height * 0.5
         dx = x + 0.5 - center_x
         dy = y + 0.5 - center_y
-        reach = max(0.0, float(self.interact_range)) + 0.75
+        reach = max(0.0, float(self.block_interaction_range)) + 0.75
         return dx * dx + dy * dy <= reach * reach
 
     def _send_break_progress(self, target, progress: float, active: bool) -> None:
@@ -226,11 +263,13 @@ class Player(Entity):
         speed = 1.0
         if getattr(held, "tool_type", None) == getattr(block, "preferred_tool", None):
             speed = max(0.0, float(getattr(held, "mining_speed", 1.0)))
+            speed += self.get_attribute_value("mining_efficiency")
+        speed *= self.get_attribute_value("block_break_speed")
         # Do not trust the client's in-fluid/on-ground flags for mining speed.
         inside_block = bool(self._check_collision_at(self.x, self.y))
         if not inside_block:
             if self._get_fluid_interaction()[0]:
-                speed /= 5.0
+                speed *= self.get_attribute_value("submerged_mining_speed")
             if not self._check_support_at():
                 speed /= 5.0
         divisor = 30.0 if block.can_harvest(held) else 100.0
@@ -336,6 +375,9 @@ class Player(Entity):
             self._eating_slot = self.selected_slot
             self._eating_material_id = material_id
             self._eat_progress = 0
+            self.replace_attribute_modifiers("state:eating", (
+                ("movement_speed", EATING_SPEED_MODIFIER),
+            ))
             self._broadcast_action_state()
         self._last_eat_action_tick = int(getattr(self.world.server, 'server_ticks', 0))
         return True
@@ -367,6 +409,7 @@ class Player(Entity):
     def clear_eating(self) -> None:
         was_eating = self.eating
         self.eating = False
+        self.replace_attribute_modifiers("state:eating", ())
         self._eating_slot = None
         self._eating_material_id = None
         self._eat_progress = 0
@@ -463,9 +506,15 @@ class Player(Entity):
                 self.teleport_to(self.x, self.y)
             if (
                 getattr(self.gamemode, "name_id", "survival") == "survival"
-                and landing_distance > 3.0
+                and landing_distance > self.get_attribute_value("safe_fall_distance")
             ):
-                self.apply_damage(int(landing_distance - 3.0 + 0.999), FALL, source=None)
+                safe_distance = self.get_attribute_value("safe_fall_distance")
+                fall_damage = int(
+                    (landing_distance - safe_distance)
+                    * self.get_attribute_value("fall_damage_multiplier")
+                    + 0.999
+                )
+                self.apply_damage(fall_damage, FALL, source=None)
             self.fall_distance = 0.0
 
     def _tick_survival_state(self) -> None:
@@ -523,9 +572,31 @@ class Player(Entity):
             self.attack_cooldown_ticks -= 1
         if self.attack_animation_ticks > 0:
             self.attack_animation_ticks -= 1
+        self.attack_strength_ticker += 1
         self._tick_survival_state()
         self.tick_breaking()
         self.tick_eating()
+        self._sync_modified_attributes()
+
+    def _sync_modified_attributes(self) -> None:
+        """Flush server-owned syncable attribute changes to tracking clients."""
+        self.refresh_attribute_modifiers()
+        if not self.attributes.take_dirty_syncable():
+            return
+        server = getattr(self.world, "server", None)
+        if server is None or not hasattr(server, "send_client_socket"):
+            return
+        server.send_client_socket(self, {
+            "__class__": "AttributeUpdate",
+            "uuid": str(self.uuid),
+            "attributes": self.attributes.sync_snapshot(),
+            "max_health": float(self.max_health),
+        }, "Forward")
+        for observer in tuple(getattr(server, "players", ())):
+            if observer is self or observer.world is not self.world:
+                continue
+            if observer.is_loading_position(int(self.x), int(self.y), getattr(self, "z", 0)):
+                server.send_client_socket(observer, self, "EntityUpdate")
 
     def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
         mode = getattr(self.gamemode, "name_id", "survival")
@@ -533,20 +604,60 @@ class Player(Entity):
 
     def attack(self, target, damage_type: type[DamageType] | None = None,
                amount: float | None = None, knockback=None) -> float:
+        current_tick = int(getattr(getattr(self.world, "server", None), "server_ticks", 0))
+        if self._last_attribute_attack_tick is not None:
+            self.attack_strength_ticker = max(
+                self.attack_strength_ticker,
+                current_tick - self._last_attribute_attack_tick,
+            )
+        if amount is None:
+            strength = self.get_attack_strength_scale(0.5)
+            amount = self.get_attack_damage(target) * (0.2 + strength * strength * 0.8)
+        self.attack_strength_ticker = 0
+        self._last_attribute_attack_tick = current_tick
         actual_damage = super().attack(target, damage_type, amount, knockback)
         if actual_damage > 0:
             self.add_exhaustion(0.1)
         return actual_damage
 
+    def get_attack_strength_scale(self, partial_tick: float = 0.0) -> float:
+        """Return Java's 0..1 attack recharge strength from attack_speed."""
+        attack_speed = self.get_attribute_value("attack_speed")
+        if attack_speed <= 0.0:
+            return 0.0
+        recharge_ticks = 20.0 / attack_speed
+        return max(0.0, min(1.0, (self.attack_strength_ticker + partial_tick) / recharge_ticks))
+
     def get_attack_damage(self, target=None) -> float:
-        try:
-            held = self.inventory[self.selected_slot]
-            held_damage = getattr(held.material, "attack_damage", None)
-            if held_damage is not None:
-                return max(0.0, float(held_damage))
-        except (AttributeError, IndexError, TypeError, ValueError):
-            pass
         return super().get_attack_damage(target)
+
+    def refresh_attribute_modifiers(self) -> None:
+        """Install modifiers from the authoritative selected server stack."""
+        super().refresh_attribute_modifiers()
+        try:
+            selected = max(0, min(len(self.inventory) - 1, int(self.selected_slot)))
+            equipped = {"mainhand": self.inventory[selected], **self.equipment}
+            signature = tuple(
+                (
+                    slot,
+                    getattr(stack.material, "name_id", "air"),
+                    repr(getattr(stack, "nbt", {})),
+                    int(getattr(stack, "amount", 0)),
+                )
+                for slot, stack in equipped.items()
+            )
+        except (AttributeError, IndexError, TypeError, ValueError):
+            signature = None
+            equipped = {}
+        if signature == getattr(self, "_equipment_attribute_signature", None):
+            return
+        entries = tuple(
+            entry
+            for slot, stack in equipped.items()
+            for entry in stack.get_attribute_modifiers(slot)
+        )
+        self.attributes.replace_source("equipment", entries)
+        self._equipment_attribute_signature = signature
 
     def get_hurt_sound(self, damage_type: type[DamageType], actual_damage: float) -> str | None:
         if self.health <= 0:

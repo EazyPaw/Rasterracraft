@@ -319,6 +319,27 @@ class Tool(Material):
     tool_type = None
     tier = "wood"
     mining_speed = 1.0
+    attack_damage_modifier = 0.0
+    attack_speed_modifier = -3.0
+
+    @classmethod
+    def get_default_attribute_modifiers(cls):
+        return (
+            {
+                "type": "minecraft:attack_damage",
+                "id": "minecraft:base_attack_damage",
+                "amount": cls.attack_damage_modifier,
+                "operation": "add_value",
+                "slot": "mainhand",
+            },
+            {
+                "type": "minecraft:attack_speed",
+                "id": "minecraft:base_attack_speed",
+                "amount": cls.attack_speed_modifier,
+                "operation": "add_value",
+                "slot": "mainhand",
+            },
+        )
 
     @client_method
     def get_anchor(self, client = None):
@@ -336,6 +357,8 @@ class WOODEN_PICKAXE(Tool):
     _texture_path = "items.wood_pickaxe"
     tool_type = "pickaxe"
     mining_speed = 2.0
+    attack_damage_modifier = 1.0
+    attack_speed_modifier = -2.8
 
 
 @register_material
@@ -345,6 +368,7 @@ class STONE_PICKAXE(WOODEN_PICKAXE):
     _texture_path = "items.stone_pickaxe"
     tier = "stone"
     mining_speed = 4.0
+    attack_damage_modifier = 2.0
 
 
 @register_material
@@ -354,6 +378,7 @@ class IRON_PICKAXE(WOODEN_PICKAXE):
     _texture_path = "items.iron_pickaxe"
     tier = "iron"
     mining_speed = 6.0
+    attack_damage_modifier = 3.0
 
 
 @register_material
@@ -363,6 +388,7 @@ class DIAMOND_PICKAXE(WOODEN_PICKAXE):
     _texture_path = "items.diamond_pickaxe"
     tier = "diamond"
     mining_speed = 8.0
+    attack_damage_modifier = 4.0
 
 @register_material
 class TORCH(BlockItem):

@@ -641,7 +641,8 @@ class PassiveMobAI(EntityAI):
             return "air"
 
     def is_tempting(self, player) -> bool:
-        if self.distance_squared_to(player) > 10.0 * 10.0:
+        tempt_range = max(0.0, float(getattr(self.entity, "tempt_range", 10.0)))
+        if self.distance_squared_to(player) > tempt_range * tempt_range:
             return False
         return self._held_item_id(player) in set(getattr(self.entity, "tempt_items", ()))
 

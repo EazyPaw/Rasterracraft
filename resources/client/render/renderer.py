@@ -590,7 +590,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             (self.mouse_y - self.SCREEN_HEIGHT / 2) ** 2
         ) / self.block_size
 
-        if distance > self.client.client_player.interact_range:
+        if distance > self.client.client_player.block_interaction_range:
             return None, None
 
         self.choosing_position = (block_x, block_y)

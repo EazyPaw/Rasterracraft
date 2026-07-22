@@ -9,6 +9,7 @@ from resources.client.GUI.inventory.hotbar import HotBar
 from resources.client.GUI.survival_hud import SurvivalHUD
 from resources.server.block_class import Block
 from resources.server.blocks import AIR
+from resources.server.attributes import EATING_SPEED_MODIFIER
 from resources.server.entity import Entity
 from resources.server.material_class import Food
 from abc import ABC
@@ -25,6 +26,7 @@ class GameMode(ABC):
     def __init__(self, player: 'ClientPlayer'):
         self.player = player
         self.player.interact_range = 5
+        self.player.block_interaction_range = 5
         self.update_gui()
 
     def update_gui(self):
@@ -106,6 +108,7 @@ class CreativeMode(GameMode):
         super().__init__(player)
         self.player = player
         self.player.interact_range = 5
+        self.player.block_interaction_range = 5
         self.player.flyable = True
         self.update_gui()
         self.inv = Backpack(self.player.client.render)
@@ -309,6 +312,30 @@ class SurvivalMode(GameMode):
         if self.pending_break_target is not None and self.pending_break_target[:3] == (x, y, z):
             self.pending_break_target = None
 
+    def reconcile_attribute_predictions(self) -> None:
+        """Reapply the local eating prediction after an authoritative snapshot."""
+        movement = self.player.attributes.get_instance("movement_speed")
+        if self._eating_request_active:
+            movement.add_modifier(
+                EATING_SPEED_MODIFIER,
+                source="prediction:eating",
+                replace=True,
+            )
+        else:
+            # This also removes a delayed authoritative copy with the same id,
+            # so releasing use restores local movement on the current frame.
+            movement.remove_modifier(EATING_SPEED_MODIFIER.id)
+
+    def _stop_eating(self, *, notify_server: bool) -> None:
+        if notify_server and self._eating_request_active:
+            self.player.client.sent_packet({
+                '__class__': 'PlayerAction', 'action': 'stop_eating'
+            })
+        self._eating_request_active = False
+        self.eating_slot = None
+        self.eat_progress = 0
+        self.reconcile_attribute_predictions()
+
     def left_click_on_block(self, block: Block):
         target = self.player.choosing_block
         if not target.on_left_click(self.player):
@@ -378,20 +405,18 @@ class SurvivalMode(GameMode):
     def _eat_selected_item(self, item):
         food = item.material
         if not isinstance(food, Food) or not food.can_consume(self.player):
-            if self._eating_request_active:
-                self.player.client.sent_packet({
-                    '__class__': 'PlayerAction', 'action': 'stop_eating'
-                })
-            self._eating_request_active = False
-            self.eating_slot = None
-            self.eat_progress = 0
+            self._stop_eating(notify_server=True)
             return
         slot = self.player.selected_slot
         if self.eating_slot != slot:
             self.eating_slot = slot
             self.eat_progress = 0
         self.eat_progress += 1
-        self._eating_request_active = True
+        if not self._eating_request_active:
+            self._eating_request_active = True
+            # Predict on the input frame; the packet below no longer needs to
+            # make a round trip before movement becomes slower.
+            self.reconcile_attribute_predictions()
         self.player.client.sent_packet({
             '__class__': 'PlayerAction',
             'action': 'continue_eating',
@@ -406,18 +431,14 @@ class SurvivalMode(GameMode):
         if not self.player.client.hold_mouse_buttons[0]:
             self.reset_breaking(notify_server=True)
         if not self.player.client.hold_mouse_buttons[2]:
-            if self._eating_request_active:
-                self.player.client.sent_packet({
-                    '__class__': 'PlayerAction', 'action': 'stop_eating'
-                })
-            self._eating_request_active = False
-            self.eating_slot = None
-            self.eat_progress = 0
+            self._stop_eating(notify_server=True)
 
     def get_choosing_block(self):
         CreativeMode.get_choosing_block(self)
 
     def mouse_wheel(self, direction):
+        if direction != 0:
+            self._stop_eating(notify_server=True)
         CreativeMode.mouse_wheel(self, direction)
 
     def open_inventory(self):

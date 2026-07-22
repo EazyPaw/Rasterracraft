@@ -16,13 +16,18 @@ def encode_packet(obj, obj_type, args) -> dict:
     if type(obj) == Chunk:
         return obj.to_dict()
     elif isinstance(obj, Player) and obj_type == "Teleport":
+        obj.refresh_attribute_modifiers()
         packet = {'__class__': 'Teleport', 'x': obj.x, 'y': obj.y, 'uuid': str(obj.uuid), 'name': obj.name,
                   'health': obj.health, 'hurt_time': obj.hurt_time, 'last_hurt_damage': obj.last_hurt_damage,
                   'food_level': getattr(obj, 'food_level', 20), 'saturation': getattr(obj, 'saturation', 5.0),
                   'experience': getattr(obj, 'experience', 0), 'experience_level': getattr(obj, 'experience_level', 0),
                   'selected_slot': getattr(obj, 'selected_slot', 0),
                   'teleport_id': getattr(obj, '_pending_teleport_id', None),
-                  'inventory': serialize_inventory(obj.inventory), 'cursor': stack_to_payload(obj.cursor_stack)}
+                  'inventory': serialize_inventory(obj.inventory), 'cursor': stack_to_payload(obj.cursor_stack),
+                  'equipment': {
+                      slot: stack_to_payload(stack) for slot, stack in obj.equipment.items()
+                  },
+                  'attributes': obj.attributes.sync_snapshot()}
         return packet
     elif isinstance(obj, Entity) and obj_type in ("EntitySpawn", "EntityUpdate"):
         packet = obj.to_entity_data()
@@ -228,7 +233,17 @@ def decode_packet(packet: dict, player: Player):
             return
         elapsed_ticks = 1 if last_tick < 0 else max(1, current_tick - last_tick)
         mode = getattr(getattr(player, 'gamemode', None), 'name_id', 'survival')
-        max_horizontal = (4.0 if mode == 'creative' else 2.0) * elapsed_ticks
+        if mode == 'creative' and player.flying:
+            movement_scale = max(1.0, player.get_attribute_value("flying_speed") / 0.4)
+        else:
+            movement_scale = max(1.0, player.get_attribute_value("movement_speed") / 0.1)
+        # The base envelope is intentionally generous for jitter, but any
+        # expansion comes only from server-owned effective attributes.
+        max_horizontal = (
+            (4.0 if mode == 'creative' else 2.0)
+            * movement_scale
+            * elapsed_ticks
+        )
         max_vertical = (6.0 if mode == 'creative' else 3.0) * elapsed_ticks
         dx = new_x - player.x
         dy = new_y - player.y

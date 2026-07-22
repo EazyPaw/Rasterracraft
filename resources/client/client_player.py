@@ -8,6 +8,7 @@ from resources.client.game_mode import CreativeMode, SurvivalMode
 from resources.server.damange_type import GENERIC, DamageType
 from resources.server.entity import Entity
 from resources.server.inventory import Inventory
+from resources.server.item_class import EmptyItemStack
 
 if TYPE_CHECKING:
     from resources.client.client_main import Client
@@ -29,6 +30,8 @@ class ClientPlayer(Entity):
         self.width = 0.6
         self.height = 1.8
         self.jump_height = 0.42
+        self.set_attribute_base_value("waypoint_receive_range", 60_000_000.0)
+        self.set_attribute_base_value("waypoint_transmit_range", 60_000_000.0)
         self.max_health = 20
         self.health = self.max_health
         self.food_level = 20
@@ -41,6 +44,10 @@ class ClientPlayer(Entity):
         self.choosing_entity = None
         self.flyable = False
         self.inventory = Inventory(36)
+        self.equipment = {
+            slot: EmptyItemStack()
+            for slot in ("offhand", "head", "chest", "legs", "feet")
+        }
         self.skeleton = PlayerSkeleton(self)
         self.skeleton.x = self.client.render.SCREEN_WIDTH / 2
         self.skeleton.y = self.client.render.SCREEN_HEIGHT / 2

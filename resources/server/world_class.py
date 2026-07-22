@@ -972,6 +972,13 @@ class World:
                     delta_x / horizontal_length * impact,
                     delta_y / horizontal_length * impact,
                 )
+            get_attribute_value = getattr(entity, "get_attribute_value", None)
+            if callable(get_attribute_value):
+                explosion_resistance = max(
+                    0.0,
+                    min(1.0, get_attribute_value("explosion_knockback_resistance")),
+                )
+                knockback *= 1.0 - explosion_resistance
 
             damage_type = (
                 PLAYER_EXPLOSION

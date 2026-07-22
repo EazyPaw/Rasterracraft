@@ -15,6 +15,7 @@ class Material:
     _last_scaled = None
     _scaled_texture_cache = {}
     name_space_key = "minecraft"
+    attribute_modifiers = ()
 
     def __init__(self):
         self.texture_cache = {}
@@ -93,6 +94,11 @@ class Material:
     def get_name(self) -> str:
         """返回用于 HUD、背包等界面的可读物品名称。"""
         return transkey(self.name)
+
+    @classmethod
+    def get_default_attribute_modifiers(cls):
+        """Declarative item modifiers, consumed only in matching equipment slots."""
+        return tuple(cls.attribute_modifiers)
 
     @client_method
     def get_anchor(self):

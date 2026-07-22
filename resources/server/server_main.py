@@ -341,6 +341,7 @@ class Server:
         if not self.level_data:
             return
         data = self.level_data.get("player", {})
+        player.attributes.load_persistent_data(data.get("attributes", []))
         player.health = max(0.0, min(player.max_health, float(data.get("health", player.max_health))))
         player.food_level = max(0, min(20, int(data.get("food_level", 20))))
         player.saturation = max(0.0, min(float(player.food_level), float(data.get("saturation", 5.0))))
@@ -360,11 +361,16 @@ class Server:
             player.inventory = Inventory(36)
             player._initialize_inventory()
         restore_inventory(player.crafting_grid, data.get("crafting", []))
+        saved_equipment = data.get("equipment", {})
+        if isinstance(saved_equipment, dict):
+            for slot in player.equipment:
+                player.equipment[slot] = payload_to_stack(saved_equipment.get(slot, {}))
         player.cursor_stack = payload_to_stack(data.get("cursor", {}))
         try:
             player.selected_slot = max(0, min(8, int(data.get("selected_slot", 0))))
         except (TypeError, ValueError):
             player.selected_slot = 0
+        player._equipment_attribute_signature = None
 
     def save_all(self, last_player: Player | None = None, *, force: bool = False):
         if not self.save_id:
@@ -417,7 +423,9 @@ class Server:
         if player is None and self.players:
             player = self.players[0]
         if player is not None:
+            player.refresh_attribute_modifiers()
             player_data = {"x": float(player.x), "y": float(player.y), "health": float(player.health),
+                           "attributes": player.attributes.to_persistent_data(),
                            "food_level": int(getattr(player, "food_level", 20)),
                            "saturation": float(getattr(player, "saturation", 5.0)),
                            "exhaustion": float(getattr(player, "exhaustion", 0.0)),
@@ -426,6 +434,10 @@ class Server:
                            "experience_level": int(getattr(player, "experience_level", 0)),
                            "gamemode": player.gamemode.name_id if hasattr(player.gamemode, "name_id") else "survival",
                            "selected_slot": max(0, min(8, int(getattr(player, "selected_slot", 0)))),
+                           "equipment": {
+                               slot: stack_to_payload(stack)
+                               for slot, stack in player.equipment.items()
+                           },
                            "cursor": stack_to_payload(player.cursor_stack), "inventory": normalize_inventory_payload(
                     serialize_inventory(player.inventory)
                 ), "crafting": normalize_inventory_payload(

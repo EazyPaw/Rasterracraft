@@ -42,6 +42,26 @@ def _set_crafting_grid(client: 'Client', payload) -> None:
                 refresh()
 
 
+def _set_equipment(player, payload) -> None:
+    if not isinstance(payload, dict):
+        return
+    for slot in ("offhand", "head", "chest", "legs", "feet"):
+        if slot in payload:
+            player.equipment[slot] = payload_to_stack(payload[slot])
+
+
+def _apply_local_attribute_snapshot(player, payload) -> None:
+    """Apply server state, then restore any current-frame local predictions."""
+    player.attributes.apply_sync_snapshot(payload)
+    reconcile = getattr(
+        getattr(player, "game_mode", None),
+        "reconcile_attribute_predictions",
+        None,
+    )
+    if callable(reconcile):
+        reconcile()
+
+
 def decode_packet(packet: dict, client: 'Client') -> None:
     """
     将服务器数据包转化为相应对象并执行对应操作
@@ -111,6 +131,7 @@ def decode_packet(packet: dict, client: 'Client') -> None:
                     setattr(client.client_player, key, packet[key])
             if 'inventory' in packet:
                 restore_inventory(client.client_player.inventory, packet['inventory'])
+            _set_equipment(client.client_player, packet.get('equipment'))
             if 'crafting' in packet:
                 _set_crafting_grid(client, packet['crafting'])
             if 'cursor' in packet:
@@ -121,6 +142,8 @@ def decode_packet(packet: dict, client: 'Client') -> None:
                     client.client_player.selected_slot = max(0, min(8, int(packet['selected_slot'])))
                 except (TypeError, ValueError):
                     client.client_player.selected_slot = 0
+            if 'attributes' in packet:
+                _apply_local_attribute_snapshot(client.client_player, packet['attributes'])
             client.client_player.dead = False
             client.close_death_screen()
         # Do not acknowledge until the destination and its immediate neighbours
@@ -256,6 +279,7 @@ def decode_packet(packet: dict, client: 'Client') -> None:
         player = client.client_player
         if player is not None:
             restore_inventory(player.inventory, packet.get('inventory', []))
+            _set_equipment(player, packet.get('equipment'))
             _set_crafting_grid(client, packet.get('crafting', []))
             for key in ('health', 'food_level', 'saturation'):
                 if key in packet:
@@ -266,6 +290,8 @@ def decode_packet(packet: dict, client: 'Client') -> None:
                 player.selected_slot = 0
             cursor = payload_to_stack(packet.get('cursor', {}))
             _set_inventory_cursor(client, cursor)
+            if 'attributes' in packet:
+                _apply_local_attribute_snapshot(player, packet['attributes'])
     elif packet['__class__'] == 'PlayerHurt':
         player = client.client_player
         if player is not None:
@@ -277,6 +303,16 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             player.motion.y = float(motion.get('y', player.motion.y))
             if player.health <= 0:
                 client.show_death_screen(packet.get('death_message'))
+    elif packet['__class__'] == 'AttributeUpdate':
+        player = client.client_player
+        target_uuid = str(packet.get('uuid', ''))
+        if player is not None and target_uuid in {'', str(player.uuid), str(getattr(client, 'server_player_uuid', ''))}:
+            _apply_local_attribute_snapshot(player, packet.get('attributes', []))
+        else:
+            entity = client.client_world.entities.get(target_uuid)
+            if entity is not None:
+                entity.attributes.apply_sync_snapshot(packet.get('attributes', []))
+                entity.max_health = float(packet.get('max_health', entity.max_health))
     elif packet['__class__'] == 'PlayerVelocity':
         player = client.client_player
         if player is not None:

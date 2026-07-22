@@ -1,6 +1,8 @@
 import resources.server.materials as materials
 import pygame
 
+from resources.server.attributes import AttributeModifier
+
 from resources.server.utils import client_method
 
 
@@ -31,6 +33,49 @@ class ItemStack:
         """
         return (self.material == other.material and
                 self.nbt == other.nbt and self.amount + other.amount <= self.max_stack_size)
+
+    def get_attribute_modifiers(self, equipment_slot: str = "mainhand"):
+        """Return validated ``(attribute id, modifier)`` pairs for this slot.
+
+        An explicit modern ``attribute_modifiers`` item component replaces the
+        material defaults, matching Java Edition's data-component behavior.
+        """
+        slot = str(equipment_slot).lower().replace("_", "")
+        sentinel = object()
+        component = self.nbt.get(
+            "attribute_modifiers",
+            self.nbt.get("minecraft:attribute_modifiers", sentinel),
+        )
+        if component is sentinel:
+            raw_entries = self.material.get_default_attribute_modifiers()
+        elif isinstance(component, dict):
+            raw_entries = component.get("modifiers", ())
+        elif isinstance(component, list):
+            raw_entries = component
+        else:
+            raw_entries = ()
+
+        result = []
+        for entry in raw_entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_slot = str(entry.get("slot", "any")).lower().replace("_", "")
+            valid_slot = (
+                entry_slot == "any"
+                or entry_slot == slot
+                or entry_slot == "hand" and slot in {"mainhand", "offhand"}
+                or entry_slot == "armor" and slot in {"head", "chest", "legs", "feet"}
+            )
+            if not valid_slot:
+                continue
+            attribute_id = entry.get("type", entry.get("attribute"))
+            if attribute_id is None or "id" not in entry:
+                continue
+            try:
+                result.append((str(attribute_id), AttributeModifier.from_dict(entry)))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return tuple(result)
 
     def stack_item(self, other: 'ItemStack') -> bool:
         """

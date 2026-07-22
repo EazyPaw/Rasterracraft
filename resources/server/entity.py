@@ -10,6 +10,11 @@ from resources.server.location import Vector
 from resources.server.tags import DamageTag
 from resources.server.utils import is_safe_value
 from resources.server.block_collision import EMPTY, coerce_collision_shape
+from resources.server.attributes import (
+    AttributeMap,
+    AttributeModifier,
+    SPRINTING_SPEED_MODIFIER,
+)
 
 
 class Entity:
@@ -25,12 +30,13 @@ class Entity:
         self.y = y
         self.world = world
         self.motion = Vector(0, 0)
+        self.attributes = AttributeMap(on_dirty=self._on_attribute_dirty)
         self.width = 1
         self.height = 1
         # Movement constants use Minecraft's block/tick units (the game runs
         # at 20 ticks per second).  Keeping these on the base entity makes the
         # same integration code usable by players, items and falling blocks.
-        self.move_speed = 0.1  # vanilla generic.movement_speed
+        self.move_speed = 0.1  # vanilla player movement_speed reference
         self.movement_acceleration = 0.098  # 0.1 * 0.98, per tick
         self.air_acceleration = 0.02
         self.air_friction = 0.91
@@ -67,7 +73,7 @@ class Entity:
         self.last_damage_source = None
         self.last_hurt_damage = 0.0
         self.knockback_resistance = 0.0
-        self._attack_damage = 1.0
+        self.attack_damage = 1.0
         self.follow_range = 35.0
         self.attack_cooldown_ticks = 0
         self.attack_interval_ticks = 20
@@ -82,6 +88,155 @@ class Entity:
         self.drops = []
         self._death_handled = False
         self._ambient_sound_cooldown = self._new_ambient_sound_delay(initial=True)
+
+    def _on_attribute_dirty(self, instance) -> None:
+        """Keep dependent runtime state valid when an effective value changes."""
+        if instance.definition.id == "minecraft:max_health" and hasattr(self, "health"):
+            self.health = max(0.0, min(float(self.health), instance.value))
+
+    def refresh_attribute_modifiers(self) -> None:
+        """Subtype hook for equipment, effects, and other transient sources."""
+        sprinting = bool(getattr(self, "sprinting", False))
+        if sprinting == getattr(self, "_sprinting_attribute_state", None):
+            return
+        entries = (("movement_speed", SPRINTING_SPEED_MODIFIER),) if sprinting else ()
+        self.attributes.replace_source("state:sprinting", entries)
+        self._sprinting_attribute_state = sprinting
+
+    def get_attribute_instance(self, attribute_id: str):
+        self.refresh_attribute_modifiers()
+        return self.attributes.get_instance(attribute_id)
+
+    def get_attribute_value(self, attribute_id: str) -> float:
+        self.refresh_attribute_modifiers()
+        return self.attributes.get_value(attribute_id)
+
+    def get_attribute_base_value(self, attribute_id: str) -> float:
+        return self.attributes.get_base_value(attribute_id)
+
+    def set_attribute_base_value(self, attribute_id: str, value: float) -> None:
+        self.attributes.set_base_value(attribute_id, value)
+
+    def add_attribute_modifier(self, attribute_id: str, modifier: AttributeModifier,
+                               *, permanent: bool = False, source: str | None = None,
+                               replace: bool = False) -> None:
+        self.attributes.add_modifier(
+            attribute_id, modifier, permanent=permanent, source=source, replace=replace,
+        )
+
+    def remove_attribute_modifier(self, attribute_id: str, modifier_id: str) -> bool:
+        return self.attributes.remove_modifier(attribute_id, modifier_id)
+
+    def replace_attribute_modifiers(self, source: str, entries) -> None:
+        """Atomically refresh one transient source such as equipment or a buff."""
+        self.attributes.replace_source(source, entries)
+
+    @property
+    def max_health(self) -> float:
+        return self.get_attribute_value("max_health")
+
+    @max_health.setter
+    def max_health(self, value: float) -> None:
+        self.set_attribute_base_value("max_health", value)
+
+    @property
+    def scale(self) -> float:
+        return self.get_attribute_value("scale")
+
+    @scale.setter
+    def scale(self, value: float) -> None:
+        self.set_attribute_base_value("scale", value)
+
+    @property
+    def width(self) -> float:
+        return float(getattr(self, "_base_width", 1.0)) * self.scale
+
+    @width.setter
+    def width(self, value: float) -> None:
+        scale = self.scale
+        self._base_width = float(value) / scale if scale else float(value)
+
+    @property
+    def height(self) -> float:
+        return float(getattr(self, "_base_height", 1.0)) * self.scale
+
+    @height.setter
+    def height(self, value: float) -> None:
+        scale = self.scale
+        self._base_height = float(value) / scale if scale else float(value)
+
+    @property
+    def move_speed(self) -> float:
+        return self.get_attribute_value("movement_speed")
+
+    @move_speed.setter
+    def move_speed(self, value: float) -> None:
+        self.set_attribute_base_value("movement_speed", value)
+
+    @property
+    def gravity(self) -> float:
+        return self.get_attribute_value("gravity")
+
+    @gravity.setter
+    def gravity(self, value: float) -> None:
+        self.set_attribute_base_value("gravity", value)
+
+    @property
+    def jump_height(self) -> float:
+        return self.get_attribute_value("jump_strength")
+
+    @jump_height.setter
+    def jump_height(self, value: float) -> None:
+        self.set_attribute_base_value("jump_strength", value)
+
+    @property
+    def max_step_height(self) -> float:
+        return self.get_attribute_value("step_height")
+
+    @max_step_height.setter
+    def max_step_height(self, value: float) -> None:
+        self.set_attribute_base_value("step_height", value)
+
+    @property
+    def knockback_resistance(self) -> float:
+        return self.get_attribute_value("knockback_resistance")
+
+    @knockback_resistance.setter
+    def knockback_resistance(self, value: float) -> None:
+        self.set_attribute_base_value("knockback_resistance", value)
+
+    @property
+    def follow_range(self) -> float:
+        return self.get_attribute_value("follow_range")
+
+    @follow_range.setter
+    def follow_range(self, value: float) -> None:
+        self.set_attribute_base_value("follow_range", value)
+
+    @property
+    def interact_range(self) -> float:
+        """Compatibility alias for the entity-interaction range."""
+        return self.get_attribute_value("entity_interaction_range")
+
+    @interact_range.setter
+    def interact_range(self, value: float) -> None:
+        self.set_attribute_base_value("entity_interaction_range", value)
+
+    @property
+    def block_interaction_range(self) -> float:
+        return self.get_attribute_value("block_interaction_range")
+
+    @block_interaction_range.setter
+    def block_interaction_range(self, value: float) -> None:
+        self.set_attribute_base_value("block_interaction_range", value)
+
+    @property
+    def tempt_range(self) -> float:
+        return self.get_attribute_value("tempt_range")
+
+    @tempt_range.setter
+    def tempt_range(self, value: float) -> None:
+        self.set_attribute_base_value("tempt_range", value)
 
     def teleport_to(self, x, y, world = None):
         self.x = x
@@ -105,6 +260,7 @@ class Entity:
         return str(nbt)
 
     def to_entity_data(self) -> dict:
+        self.refresh_attribute_modifiers()
         data = {
             'uuid': str(self.uuid),
             'entity_id': self.entity_id,
@@ -118,6 +274,8 @@ class Entity:
             'sprinting': self.sprinting,
             'on_ground': self.on_ground,
             'health': self.health,
+            'max_health': self.max_health,
+            'attributes': self.attributes.sync_snapshot(),
             'hurt_time': self.hurt_time,
             'aggressive': self.get_target() is not None,
             'look_angle': self.look_angle,
@@ -183,6 +341,7 @@ class Entity:
             "z": int(getattr(self, "z", 0)),
             "motion": {"x": float(self.motion.x), "y": float(self.motion.y)},
             "health": float(self.health),
+            "attributes": self.attributes.to_persistent_data(),
             "facing": int(self.facing),
             "no_ai": bool(self.no_ai),
             "silent": bool(self.silent),
@@ -196,6 +355,7 @@ class Entity:
             self.uuid = UUID(str(data.get("uuid", self.uuid)))
         except (TypeError, ValueError):
             pass
+        self.attributes.load_persistent_data(data.get("attributes", []))
         self.health = max(0.0, min(self.max_health, float(data.get("health", self.health))))
         self.facing = 1 if int(data.get("facing", self.facing)) == 1 else 0
         self.no_ai = bool(data.get("no_ai", self.no_ai))
@@ -215,14 +375,17 @@ class Entity:
 
     @property
     def attack_damage(self):
-        return self._attack_damage
+        return self.get_attribute_value("attack_damage")
 
     @attack_damage.setter
     def attack_damage(self, value) -> None:
-        self._attack_damage = max(0.0, float(value))
+        self.set_attribute_base_value("attack_damage", value)
 
     def apply_summon_nbt(self, nbt: dict) -> None:
         """Apply common living-entity summon data before subtype-specific data."""
+        for attribute_key in ("attributes", "Attributes"):
+            if isinstance(nbt.get(attribute_key), list):
+                self.attributes.load_persistent_data(nbt[attribute_key])
         aliases = {
             "Health": "health",
             "NoAI": "no_ai",
@@ -232,6 +395,8 @@ class Entity:
         }
         for raw_key, value in nbt.items():
             key = aliases.get(str(raw_key), str(raw_key))
+            if key in {"attributes", "Attributes"}:
+                continue
             if key == "health":
                 self.health = max(0.0, min(self.max_health, float(value)))
             elif key in {"no_ai", "silent", "persistence_required"}:
@@ -620,12 +785,15 @@ class Entity:
         self.on_ground = (collided_y and requested_dy < 0) or self._check_support_at()
 
     def _movement_multiplier(self) -> float:
-        multiplier = 0.3 if self.sneaking else 1.0
+        multiplier = self.get_attribute_value("sneaking_speed") if self.sneaking else 1.0
         if self.sprinting:
-            multiplier *= 2.0 if self.flying else 1.3
+            multiplier *= 2.0 if self.flying else 1.0
         multiplier *= self.speed_factor
         if self.in_fluid and not self.flying:
-            multiplier *= self.fluid_move_speed_multiplier
+            efficiency = self.get_attribute_value("water_movement_efficiency")
+            multiplier *= self.fluid_move_speed_multiplier + (
+                1.0 - self.fluid_move_speed_multiplier
+            ) * efficiency
         return multiplier
 
     def get_move_acceleration(self) -> float:
@@ -641,7 +809,10 @@ class Entity:
         # vanilla/player reference value and scale the same acceleration path
         # for every entity, including hostile mobs.
         try:
-            speed_scale = max(0.0, float(getattr(self, "move_speed", 0.1)) / 0.1)
+            if self.flying:
+                speed_scale = max(0.0, self.get_attribute_value("flying_speed") / 0.4)
+            else:
+                speed_scale = max(0.0, float(getattr(self, "move_speed", 0.1)) / 0.1)
         except (TypeError, ValueError):
             speed_scale = 1.0
         base *= speed_scale
@@ -649,6 +820,8 @@ class Entity:
         block_factor = 1.0
         if self.on_ground and not self.flying and not self.in_fluid:
             block_factor = self.get_ground_speed_factor()
+            efficiency = self.get_attribute_value("movement_efficiency")
+            block_factor += (1.0 - block_factor) * efficiency
         return base * self._movement_multiplier() * block_factor
 
     def move_right(self):
@@ -823,7 +996,7 @@ class Entity:
             raise TypeError("knockback must be a Vector")
         resistance = max(
             0.0,
-            min(1.0, float(getattr(self, "knockback_resistance", 0.0))),
+            min(1.0, self.get_attribute_value("knockback_resistance")),
         )
         adjusted = knockback * (1.0 - resistance)
         self.motion.x += adjusted.x
@@ -899,7 +1072,8 @@ class Entity:
         delta_x = target_center - source_center
         if abs(delta_x) < 1e-8:
             delta_x = 1.0 if int(getattr(self, "facing", 1)) == 1 else -1.0
-        return Vector(0.4 if delta_x > 0 else -0.4, 0.2)
+        strength = 0.4 + self.get_attribute_value("attack_knockback")
+        return Vector(strength if delta_x > 0 else -strength, 0.2)
 
     def attack(self, target, damage_type: type[DamageType] | None = None,
                amount: float | None = None, knockback: Vector | None = None) -> float:
@@ -1004,7 +1178,10 @@ class Entity:
         返回实体的护甲值和盔甲韧性
         :return:
         """
-        return 0, 0
+        return (
+            self.get_attribute_value("armor"),
+            self.get_attribute_value("armor_toughness"),
+        )
 
     def calc_entity_distance(self, other: UUID | str) -> float:
         """
