@@ -221,7 +221,8 @@ class World:
         self.world_time = 0
         self.entities: dict[str, Entity] = {}
         self._entities_lock = threading.RLock()
-        self._saved_entities_by_chunk: dict[int, list[dict]] = {}
+        self._legacy_saved_entities_by_chunk: dict[int, list[dict]] = {}
+        self._unresolved_entities_by_chunk: dict[int, list[dict]] = {}
         self.last_entity_timings_ms: list[tuple[str, float, float, float]] = []
         self.disable_mob_generation = False
         # 每次方块变动都会影响整区块光照。把同一 tick 的变动合并处理，
@@ -546,41 +547,136 @@ class World:
                 self.server.send_client_socket(player, entity, "EntitySpawn")
 
     def queue_saved_entities(self, records) -> None:
-        """Defer entity restore until collision data for its chunk is loaded."""
-        self._saved_entities_by_chunk.clear()
+        """Queue legacy ``level.msgpack`` entities for one-time migration."""
+        self._legacy_saved_entities_by_chunk.clear()
         for record in records or ():
             if not isinstance(record, dict):
                 continue
             try:
-                rx = math.floor(float(record.get("x", 0.0))) // 16
+                x = float(record.get("x", 0.0))
+                if not math.isfinite(x):
+                    continue
+                rx = math.floor(x) // 16
             except (TypeError, ValueError):
                 continue
-            self._saved_entities_by_chunk.setdefault(rx, []).append(record)
+            self._legacy_saved_entities_by_chunk.setdefault(rx, []).append(dict(record))
 
     def _restore_entities_for_chunk(self, rx: int) -> None:
-        records = self._saved_entities_by_chunk.pop(int(rx), ())
+        rx = int(rx)
+        self._unresolved_entities_by_chunk.pop(rx, None)
+        records: list[dict] = []
+        save_id = getattr(self.server, "save_id", None)
+        if save_id:
+            try:
+                records.extend(
+                    save_manager.load_entity_chunk(save_id, self.id_name, rx)
+                )
+            except Exception as exc:
+                logging.error(
+                    f"Failed to load saved entities for {self.id_name}:{rx}: {exc}"
+                )
+                logging.error(traceback.format_exc())
+        records.extend(self._legacy_saved_entities_by_chunk.pop(rx, ()))
         if not records:
             return
         from resources.server.entity_registry import create_entity_from_save
 
+        seen_uuids: set[str] = set()
         for record in records:
+            entity_uuid = str(record.get("uuid", ""))
+            if entity_uuid and (
+                entity_uuid in seen_uuids or entity_uuid in self.entities
+            ):
+                continue
+            if entity_uuid:
+                seen_uuids.add(entity_uuid)
             entity = create_entity_from_save(record, self)
             if entity is not None and entity.health > 0:
                 self.spawn_entity(entity)
+            elif entity is None:
+                # Preserve records from temporarily unavailable namespaces.
+                self._unresolved_entities_by_chunk.setdefault(rx, []).append(
+                    dict(record)
+                )
 
-    def serialize_persistent_entities(self) -> list[dict]:
+    def serialize_entities_in_chunks(
+        self, chunk_rxs
+    ) -> dict[int, list[dict]]:
+        """Snapshot every registered persistent non-player entity by chunk."""
+        from resources.server.entity_registry import is_entity_persistent
+
+        result = {int(rx): [] for rx in chunk_rxs}
+        if not result:
+            return result
         with self._entities_lock:
             entities = tuple(self.entities.values())
-        records = [
-            entity.to_save_data() for entity in entities
-            if entity.entity_id != "player"
-            and not entity.removed
-            and entity.health > 0
-            and bool(getattr(entity, "persistence_required", False))
+        for entity in entities:
+            if (
+                entity.entity_id == "player"
+                or entity.removed
+                or entity.health <= 0
+                or not is_entity_persistent(entity)
+            ):
+                continue
+            entity_rx = math.floor(float(entity.x)) // 16
+            if entity_rx in result:
+                result[entity_rx].append(entity.to_save_data())
+        for rx in result:
+            result[rx].extend(
+                dict(record)
+                for record in self._unresolved_entities_by_chunk.get(rx, ())
+            )
+        return result
+
+    def get_active_entity_chunks(self) -> set[int]:
+        with self._entities_lock:
+            return {
+                math.floor(float(entity.x)) // 16
+                for entity in self.entities.values()
+                if entity.entity_id != "player" and not entity.removed
+            }
+
+    def serialize_pending_legacy_entities(self) -> list[dict]:
+        """Return only records not yet migrated out of ``level.msgpack``."""
+        return [
+            dict(record)
+            for records in self._legacy_saved_entities_by_chunk.values()
+            for record in records
         ]
-        for pending in self._saved_entities_by_chunk.values():
-            records.extend(dict(record) for record in pending)
+
+    def serialize_persistent_entities(self) -> list[dict]:
+        """Compatibility snapshot for callers of the former level-wide API."""
+        loaded = self.serialize_entities_in_chunks(self.regions.keys())
+        records = [record for chunk in loaded.values() for record in chunk]
+        records.extend(self.serialize_pending_legacy_entities())
         return records
+
+    def unload_entities_in_chunks(self, chunk_rxs) -> None:
+        """Detach entities after their chunk snapshots have reached disk."""
+        chunk_rxs = {int(rx) for rx in chunk_rxs}
+        for rx in chunk_rxs:
+            self._unresolved_entities_by_chunk.pop(rx, None)
+        with self._entities_lock:
+            removed = [
+                entity
+                for entity in self.entities.values()
+                if entity.entity_id != "player"
+                and math.floor(float(entity.x)) // 16 in chunk_rxs
+            ]
+            for entity in removed:
+                self.entities.pop(str(entity.uuid), None)
+                entity.removed = True
+        for entity in removed:
+            entity_uuid = str(entity.uuid)
+            for player in self.server.players:
+                if player.is_loading_position(
+                    math.floor(entity.x),
+                    math.floor(entity.y),
+                    getattr(entity, "z", 0),
+                ):
+                    self.server.send_client_socket(
+                        player, {"uuid": entity_uuid}, "EntityRemove"
+                    )
 
     def remove_entity(self, entity: Entity | str):
         entity_uuid = str(entity.uuid) if isinstance(entity, Entity) else str(entity)

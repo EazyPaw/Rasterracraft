@@ -3,11 +3,14 @@ import math
 from resources.client.entity_skeleton import EntitySkeleton
 from resources.server import blocks
 from resources.server.entity import Entity
+from resources.server.entity_registry import register_entity
 from resources.server.location import Location
 from resources.server.utils import client_method
 
 
+@register_entity(summonable=False)
 class FallingBlock(Entity):
+    entity_id = "falling_block"
     def __init__(self, x, y, z, world, block: blocks.Block):
         super().__init__(x, y, world)
         self.entity_id = "falling_block"
@@ -19,6 +22,29 @@ class FallingBlock(Entity):
         self.drag_vertical = 0.98
         self.air_friction = 0.98
         self.damping = self.air_friction
+
+    @classmethod
+    def create_from_save(cls, data: dict, world):
+        block_data = data.get("data", {}).get("block", {})
+        block = blocks.get_block_by_id(block_data.get("id", "sand"))
+        nbt = block_data.get("nbt", {})
+        if isinstance(nbt, dict) and nbt:
+            block.write_nbt(nbt)
+        return cls(
+            float(data.get("x", 0.0)),
+            float(data.get("y", 0.0)),
+            int(data.get("z", 0)),
+            world,
+            block,
+        )
+
+    def get_persistent_data(self) -> dict:
+        return {
+            "block": {
+                "id": str(self.block.block_id),
+                "nbt": dict(self.block.parse_nbt() or {}),
+            }
+        }
 
     def _is_block_solid(self, x: int, y: int, z: int = 0) -> bool:
         return super()._is_block_solid(x, y, self.z)

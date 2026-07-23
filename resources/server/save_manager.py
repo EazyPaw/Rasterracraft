@@ -73,6 +73,21 @@ def region_path(save_id: str, world_id: str, region_index: int) -> Path:
     return save_path(save_id) / "worlds" / world_id / "regions" / f"r.{region_index}.region"
 
 
+def entity_region_path(save_id: str, world_id: str, region_index: int) -> Path:
+    """Path for one 256-chunk-wide entity region.
+
+    ``entitys`` intentionally follows the save-layout name requested by the
+    project, while keeping entity data separate from block region files.
+    """
+    return (
+        save_path(save_id)
+        / "worlds"
+        / world_id
+        / "entitys"
+        / f"r.{region_index}.entity"
+    )
+
+
 def chunk_path(save_id: str, world_id: str, rx: int) -> Path:
     """Legacy one-file-per-chunk path kept only for reading old test saves."""
     return save_path(save_id) / "worlds" / world_id / "chunks" / f"{rx}.chunk"
@@ -224,6 +239,79 @@ def _write_region(save_id: str, world_id: str, region_index: int, data: dict[str
     data["region_size"] = REGION_SIZE
     data["region_index"] = region_index
     _write_msgpack(region_path(save_id, world_id, region_index), data, compress=True)
+
+
+def _read_entity_region(
+    save_id: str, world_id: str, region_index: int
+) -> dict[str, Any]:
+    data = _read_msgpack(entity_region_path(save_id, world_id, region_index))
+    if data is None:
+        return {
+            "format_version": FORMAT_VERSION,
+            "region_size": REGION_SIZE,
+            "region_index": region_index,
+            "chunks": {},
+        }
+    data.setdefault("format_version", FORMAT_VERSION)
+    data.setdefault("region_size", REGION_SIZE)
+    data.setdefault("region_index", region_index)
+    data.setdefault("chunks", {})
+    return data
+
+
+def _write_entity_region(
+    save_id: str, world_id: str, region_index: int, data: dict[str, Any]
+) -> None:
+    data["format_version"] = FORMAT_VERSION
+    data["region_size"] = REGION_SIZE
+    data["region_index"] = region_index
+    _write_msgpack(
+        entity_region_path(save_id, world_id, region_index), data, compress=True
+    )
+
+
+def load_entity_chunk(save_id: str | None, world_id: str, rx: int) -> list[dict]:
+    """Load entity records belonging to exactly one block chunk."""
+    if not save_id:
+        return []
+    region = _read_entity_region(str(save_id), world_id, _region_index(rx))
+    records = region.get("chunks", {}).get(str(int(rx)), ())
+    if not isinstance(records, (list, tuple)):
+        raise ValueError(f"Invalid entity chunk data for {world_id}:{rx}")
+    return [dict(record) for record in records if isinstance(record, dict)]
+
+
+def save_entity_chunks(
+    save_id: str, world_id: str, records_by_chunk: dict[int, list[dict]]
+) -> None:
+    """Replace entity snapshots for the supplied chunks.
+
+    Explicitly writing an empty list clears entities removed since the previous
+    save, which is essential when an item is picked up or moves to a new chunk.
+    """
+    grouped: dict[int, dict[int, list[dict]]] = {}
+    for raw_rx, raw_records in records_by_chunk.items():
+        rx = int(raw_rx)
+        records: list[dict] = []
+        seen_uuids: set[str] = set()
+        for raw_record in raw_records or ():
+            if not isinstance(raw_record, dict):
+                continue
+            record = dict(raw_record)
+            entity_uuid = str(record.get("uuid", ""))
+            if entity_uuid and entity_uuid in seen_uuids:
+                continue
+            if entity_uuid:
+                seen_uuids.add(entity_uuid)
+            records.append(record)
+        grouped.setdefault(_region_index(rx), {})[rx] = records
+
+    for region_index, chunk_records in grouped.items():
+        region = _read_entity_region(save_id, world_id, region_index)
+        chunk_map = region.setdefault("chunks", {})
+        for rx, records in chunk_records.items():
+            chunk_map[str(rx)] = records
+        _write_entity_region(save_id, world_id, region_index, region)
 
 
 def chunk_exists(save_id: str | None, world_id: str, rx: int) -> bool:

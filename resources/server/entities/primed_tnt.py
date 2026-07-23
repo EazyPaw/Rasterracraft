@@ -5,14 +5,17 @@ import pygame
 from resources.client.entity_skeleton import EntitySkeleton
 from resources.server.blocks import TNT as TNTBlock
 from resources.server.entity import Entity
+from resources.server.entity_registry import register_entity
 from resources.server.location import Location
 from resources.server.particles import SMOKE
 from resources.server.utils import client_method
 
 
+@register_entity(summonable=False)
 class PrimedTNT(Entity):
     """A moving TNT fuse whose countdown and explosion live on the server."""
 
+    entity_id = "primed_tnt"
     translation_key = "entity.PrimedTnt.name"
 
     def __init__(self, x: float, y: float, z: int, world, *, fuse: int = 80,
@@ -25,12 +28,48 @@ class PrimedTNT(Entity):
         self.fuse = max(1, int(fuse))
         self.initial_fuse = self.fuse
         self.owner = owner
+        self.owner_uuid = (
+            str(owner.uuid) if getattr(owner, "uuid", None) is not None else None
+        )
         self.gravity = 0.04
         self.drag_vertical = 0.98
         self.air_friction = 0.98
         self.damping = self.air_friction
         self.motion.x = random.uniform(-0.02, 0.02)
         self.motion.y = 0.2
+
+    @classmethod
+    def create_from_save(cls, data: dict, world):
+        subtype = data.get("data", {})
+        entity = cls(
+            float(data.get("x", 0.0)),
+            float(data.get("y", 0.0)),
+            int(data.get("z", 0)),
+            world,
+            fuse=max(1, int(subtype.get("fuse", 80))),
+        )
+        entity.initial_fuse = max(
+            entity.fuse, int(subtype.get("initial_fuse", entity.initial_fuse))
+        )
+        return entity
+
+    def get_persistent_data(self) -> dict:
+        owner_uuid = getattr(self.owner, "uuid", None) or self.owner_uuid
+        return {
+            "fuse": max(1, int(self.fuse)),
+            "initial_fuse": max(1, int(self.initial_fuse)),
+            "owner_uuid": str(owner_uuid) if owner_uuid is not None else None,
+        }
+
+    def read_persistent_data(self, data: dict) -> None:
+        self.fuse = max(1, int(data.get("fuse", self.fuse)))
+        self.initial_fuse = max(
+            self.fuse, int(data.get("initial_fuse", self.initial_fuse))
+        )
+        owner_uuid = data.get("owner_uuid")
+        if owner_uuid:
+            self.owner_uuid = str(owner_uuid)
+            self.owner = getattr(self.world, "entities", {}).get(self.owner_uuid)
 
     def _is_block_solid(self, x: int, y: int, z: int = 0) -> bool:
         return super()._is_block_solid(x, y, self.z)
@@ -62,7 +101,11 @@ class PrimedTNT(Entity):
                 power=4.0,
                 break_block=True,
                 catch_fire=False,
-                source=self.owner or self,
+                source=(
+                    self.owner
+                    or getattr(self.world, "entities", {}).get(self.owner_uuid)
+                    or self
+                ),
             )
             return
 

@@ -5,12 +5,15 @@ from resources.client.entity_skeleton import BodyPart, Pose
 from resources.server.entities.animal import Animal, AnimalSkeleton, crop_rotated_body, crop_x_side
 from resources.server.entities.item import Item
 from resources.server.entity_AI import ChickenAI
+from resources.server.entity_registry import register_entity
 from resources.server.item_class import ItemStack
 from resources.server.materials import COOKED_CHICKEN, EGG, FEATHER, RAW_CHICKEN
 from resources.server.utils import client_method
 
 
+@register_entity
 class Chicken(Animal):
+    entity_id = "chicken"
     translation_key = "entity.Chicken.name"
     tempt_items = frozenset({"wheat_seeds", "pumpkin_seeds", "melon_seeds"})
     panic_speed_modifier = 1.4

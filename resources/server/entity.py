@@ -18,6 +18,10 @@ from resources.server.attributes import (
 
 
 class Entity:
+    entity_id = "null"
+    registry_key = None
+    summonable = False
+    persistent = False
     sounds = {}
     # Solid blocks may not normally be placed through an entity's physical
     # bounds.  Non-blocking entity types (notably dropped items) can opt out
@@ -29,7 +33,7 @@ class Entity:
 
     def __init__(self, x, y, world):
         self.uuid = uuid.uuid4()
-        self.entity_id = "null"
+        self.entity_id = type(self).entity_id
         self.x = x
         self.y = y
         self.world = world
@@ -337,7 +341,9 @@ class Entity:
 
     def to_save_data(self) -> dict:
         """Serialize stable server state without leaking runtime objects."""
+        registry_key = getattr(type(self), "registry_key", None)
         return {
+            "id": str(registry_key) if registry_key is not None else self.entity_id,
             "uuid": str(self.uuid),
             "entity_id": self.entity_id,
             "x": float(self.x),
@@ -347,11 +353,26 @@ class Entity:
             "health": float(self.health),
             "attributes": self.attributes.to_persistent_data(),
             "facing": int(self.facing),
+            "on_ground": bool(self.on_ground),
+            "sneaking": bool(self.sneaking),
+            "sprinting": bool(self.sprinting),
+            "fire_ticks": max(0, int(self.fire_ticks)),
             "no_ai": bool(self.no_ai),
             "silent": bool(self.silent),
             "persistence_required": bool(self.persistence_required),
+            **({"name": str(self.name)} if hasattr(self, "name") else {}),
             "data": self.get_persistent_data(),
         }
+
+    @classmethod
+    def create_from_save(cls, data: dict, world):
+        """Construct a normally-shaped entity before common state is restored."""
+        return cls(
+            float(data.get("x", 0.0)),
+            float(data.get("y", 0.0)),
+            world,
+            int(data.get("z", 0)),
+        )
 
     def restore_common_save_data(self, data: dict) -> None:
         """Apply the common half of a trusted world entity snapshot."""
@@ -362,9 +383,15 @@ class Entity:
         self.attributes.load_persistent_data(data.get("attributes", []))
         self.health = max(0.0, min(self.max_health, float(data.get("health", self.health))))
         self.facing = 1 if int(data.get("facing", self.facing)) == 1 else 0
+        self.on_ground = bool(data.get("on_ground", self.on_ground))
+        self.sneaking = bool(data.get("sneaking", self.sneaking))
+        self.sprinting = bool(data.get("sprinting", self.sprinting))
+        self.fire_ticks = max(0, int(data.get("fire_ticks", self.fire_ticks)))
         self.no_ai = bool(data.get("no_ai", self.no_ai))
         self.silent = bool(data.get("silent", self.silent))
         self.persistence_required = bool(data.get("persistence_required", self.persistence_required))
+        if isinstance(data.get("name"), str):
+            self.name = data["name"][:64]
         motion = data.get("motion", {})
         if isinstance(motion, dict):
             self.motion.x = float(motion.get("x", self.motion.x))

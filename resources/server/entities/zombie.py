@@ -7,14 +7,17 @@ import pygame
 from resources.client.entity_skeleton import BodyPart, EntitySkeleton, PlayerSkeleton
 from resources.server.entity import Entity
 from resources.server.entity_AI import ZombieAI
+from resources.server.entity_registry import register_entity
 from resources.server.item_class import ItemStack
 from resources.server.materials import ROTTEN_FLESH
 from resources.server.utils import client_method
 
 
+@register_entity
 class Zombie(Entity):
     """Server-authoritative zombie; behavior is supplied by :class:`ZombieAI`."""
 
+    entity_id = "zombie"
     translation_key = "entity.Zombie.name"
     sounds = {
         "ambient": "mob.zombie.say",

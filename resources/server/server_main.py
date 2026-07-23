@@ -466,6 +466,10 @@ class Server:
         with self._save_lock:
             for world in self.worlds.values():
                 self._save_world_chunks(world, world.take_dirty_chunks())
+                self._save_world_entities(
+                    world,
+                    set(world.regions.keys()) | world.get_active_entity_chunks(),
+                )
             self._save_level_metadata(last_player)
             if force:
                 logging.info(f"Saved world '{self.save_id}'")
@@ -490,6 +494,26 @@ class Server:
                 logging.error(traceback.format_exc())
                 return False
 
+    def _save_world_entities(self, world: World, chunk_rxs) -> bool:
+        if not self.save_id:
+            return False
+        with self._save_lock:
+            rxs = sorted({int(rx) for rx in chunk_rxs})
+            if not rxs:
+                return True
+            try:
+                records_by_chunk = world.serialize_entities_in_chunks(rxs)
+                save_manager.save_entity_chunks(
+                    self.save_id, world.id_name, records_by_chunk
+                )
+                return True
+            except Exception as e:
+                logging.error(
+                    f"Failed to save {world.id_name} entities in chunks {rxs}: {e}"
+                )
+                logging.error(traceback.format_exc())
+                return False
+
     def _save_level_metadata(self, last_player: Player | None = None):
         if not self.save_id:
             return
@@ -497,7 +521,7 @@ class Server:
             self.level_data = save_manager.ensure_level(self.save_id)
         worlds_meta = self.level_data.setdefault("worlds", {})
         for world in self.worlds.values():
-            worlds_meta[world.id_name] = {
+            world_meta = {
                 "seed": int(world.seed),
                 "world_time": int(world.world_time),
                 "generator": type(world.generator).__name__,
@@ -505,8 +529,11 @@ class Server:
                 "weather": world.weather.value,
                 "weather_tick": int(world.weather_tick),
                 "disable_mob_generation": bool(world.disable_mob_generation),
-                "entities": world.serialize_persistent_entities(),
             }
+            legacy_entities = world.serialize_pending_legacy_entities()
+            if legacy_entities:
+                world_meta["entities"] = legacy_entities
+            worlds_meta[world.id_name] = world_meta
         player = last_player
         if player is None and self.players:
             player = self.players[0]
@@ -788,7 +815,14 @@ class Server:
             unload_rxs = [rx for rx in list(world.regions.keys()) if rx not in protected]
             if not unload_rxs:
                 continue
-            if self._save_world_chunks(world, unload_rxs):
+            chunks_saved = self._save_world_chunks(world, unload_rxs)
+            entities_saved = (
+                self._save_world_entities(world, unload_rxs)
+                if chunks_saved
+                else False
+            )
+            if chunks_saved and entities_saved:
+                world.unload_entities_in_chunks(unload_rxs)
                 for rx in unload_rxs:
                     world.regions.pop(rx, None)
 

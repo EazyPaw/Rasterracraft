@@ -3,12 +3,15 @@ import random
 from resources.client.entity_skeleton import BodyPart, Pose
 from resources.server.entities.animal import Animal, QuadrupedSkeleton, crop_x_side
 from resources.server.entity_AI import PigAI
+from resources.server.entity_registry import register_entity
 from resources.server.item_class import ItemStack
 from resources.server.materials import COOKED_PORKCHOP, RAW_PORKCHOP
 from resources.server.utils import client_method
 
 
+@register_entity
 class Pig(Animal):
+    entity_id = "pig"
     translation_key = "entity.Pig.name"
     tempt_items = frozenset({"carrot", "potato", "carrot_on_a_stick"})
     panic_speed_modifier = 1.25

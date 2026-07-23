@@ -2,10 +2,13 @@ import math
 import random
 
 from resources.server.entity import Entity
+from resources.server.entity_registry import register_entity
 from resources.server.item_class import ItemStack
 
 
+@register_entity(summonable=False)
 class Item(Entity):
+    entity_id = "item"
     blocks_block_placement = False
     merge_radius = 1.5
     merge_interval = 40
@@ -26,6 +29,40 @@ class Item(Entity):
         self.age = 0
         self.motion.x = random.uniform(-0.075, 0.075)
         self.motion.y = random.uniform(0.08, 0.15)
+
+    @classmethod
+    def create_from_save(cls, data: dict, world):
+        from resources.server.materials import get_material_by_id
+
+        item_data = data.get("data", {}).get("item", {})
+        material = get_material_by_id(item_data.get("id", "air"))
+        stack = ItemStack(
+            material,
+            max(0, int(item_data.get("amount", 0))),
+            dict(item_data.get("nbt", {})),
+        )
+        return cls(
+            float(data.get("x", 0.0)),
+            float(data.get("y", 0.0)),
+            world,
+            stack,
+            int(data.get("z", 0)),
+        )
+
+    def get_persistent_data(self) -> dict:
+        return {
+            "item": {
+                "id": str(self.item.material.name_id),
+                "amount": int(self.item.amount),
+                "nbt": dict(self.item.nbt),
+            },
+            "age": max(0, int(self.age)),
+            "pickup_delay": max(0, int(self.pickup_delay)),
+        }
+
+    def read_persistent_data(self, data: dict) -> None:
+        self.age = max(0, int(data.get("age", self.age)))
+        self.pickup_delay = max(0, int(data.get("pickup_delay", self.pickup_delay)))
 
     def _is_block_solid(self, x: int, y: int, z: int = 0) -> bool:
         return super()._is_block_solid(x, y, self.z)

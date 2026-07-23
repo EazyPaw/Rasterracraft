@@ -3,12 +3,15 @@ import random
 from resources.client.entity_skeleton import BodyPart, Pose
 from resources.server.entities.animal import Animal, QuadrupedSkeleton, crop_x_side
 from resources.server.entity_AI import CowAI
+from resources.server.entity_registry import register_entity
 from resources.server.item_class import ItemStack
 from resources.server.materials import BUCKET, COOKED_BEEF, LEATHER, MILK_BUCKET, RAW_BEEF
 from resources.server.utils import client_method
 
 
+@register_entity
 class Cow(Animal):
+    entity_id = "cow"
     translation_key = "entity.Cow.name"
     tempt_items = frozenset({"wheat"})
     panic_speed_modifier = 2.0

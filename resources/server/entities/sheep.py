@@ -7,12 +7,15 @@ from resources.server.blocks import AIR, DIRT
 from resources.server.entities.animal import Animal, QuadrupedSkeleton, crop_rotated_body, crop_x_side
 from resources.server.entities.item import Item
 from resources.server.entity_AI import SheepAI
+from resources.server.entity_registry import register_entity
 from resources.server.item_class import ItemStack
 from resources.server.materials import COOKED_MUTTON, RAW_MUTTON, WHITE_WOOL
 from resources.server.utils import client_method
 
 
+@register_entity
 class Sheep(Animal):
+    entity_id = "sheep"
     translation_key = "entity.Sheep.name"
     tempt_items = frozenset({"wheat"})
     panic_speed_modifier = 1.25

@@ -214,9 +214,9 @@ class CommandExecutor:
         if isinstance(executor, Player) and not executor.is_operator:
             raise ValueError("You do not have permission to use /summon")
 
-        entity_id = args[0].lower().removeprefix("minecraft:")
-        from resources.server.entity_registry import get_entity_types
-        if entity_id not in get_entity_types():
+        entity_id = args[0].lower()
+        from resources.server.entity_registry import get_entity_type
+        if get_entity_type(entity_id, summonable_only=True) is None:
             raise ValueError(f"Unknown entity: {args[0]}")
 
         if isinstance(executor, Player):
