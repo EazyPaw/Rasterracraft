@@ -8,3 +8,4 @@ class CraftingTable(Backpack):
     crafting_rows = 3
     crafting_offset = (29, 17)
     crafting_output_offset = (124, 35)
+    quick_move_screen = "crafting_table"

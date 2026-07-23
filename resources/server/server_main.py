@@ -449,6 +449,10 @@ class Server:
             player.inventory = Inventory(36)
             player._initialize_inventory()
         restore_inventory(player.crafting_grid, data.get("crafting", []))
+        saved_hotbars = data.get("saved_hotbars", [])
+        if isinstance(saved_hotbars, list):
+            for preset, payload in enumerate(saved_hotbars[:9]):
+                restore_inventory(player.saved_hotbars[preset], payload)
         saved_equipment = data.get("equipment", {})
         if isinstance(saved_equipment, dict):
             for slot in player.equipment:
@@ -557,7 +561,10 @@ class Server:
                     serialize_inventory(player.inventory)
                 ), "crafting": normalize_inventory_payload(
                     serialize_inventory(player.crafting_grid), 9
-                )}
+                ), "saved_hotbars": [
+                    normalize_inventory_payload(serialize_inventory(hotbar), 9)
+                    for hotbar in player.saved_hotbars
+                ]}
             self.level_data["player"] = player_data
         save_manager.save_level(self.save_id, self.level_data)
 

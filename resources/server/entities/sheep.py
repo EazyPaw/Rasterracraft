@@ -128,7 +128,7 @@ class SheepSkeleton(QuadrupedSkeleton):
             head_uv=(0, 0), head_size=(6, 6, 8),
             leg_uv=(0, 16), leg_size=(4, 12, 4),
             body_anchor=(0.08, 1.125), head_anchor=(1.07, 1.1125),
-            rear_leg_anchor=(0.305, 0.75), front_leg_anchor=(0.845, 0.75),
+            rear_leg_anchor=(0.105, 0.75), front_leg_anchor=(0.845, 0.75),
         )
         fur_texture = self.client.resources_manager.get_texture_img("entity.sheep.sheep_fur")
         fur_body = crop_rotated_body(fur_texture, (28, 8), (8, 16, 6))
@@ -140,9 +140,9 @@ class SheepSkeleton(QuadrupedSkeleton):
         fur_head = pygame.transform.scale(fur_head, (7, 7))
         fur_leg = pygame.transform.scale(fur_leg, (5, 7))
         # Fur anchors mirror the base leg anchors (far + near offset pairs).
-        fur_far_back = (0.30625, 0.78)
+        fur_far_back = (0.10625, 0.78)
         fur_far_front = (0.84625, 0.78)
-        fur_near_back = (0.30625 + 0.03, 0.78 - 0.04)
+        fur_near_back = (0.10625 + 0.03, 0.78 - 0.04)
         fur_near_front = (0.84625 - 0.03, 0.78 - 0.04)
         self._base_anchors.update({
             "fur_body": (-0.04, 1.30),
@@ -172,7 +172,7 @@ class SheepSkeleton(QuadrupedSkeleton):
             return self._base_anchors["head"]
         progress = 1.0 if 4 <= remaining <= 36 else min(1.0, (40 - remaining) / 4.0)
         x, y = self._base_anchors["head"]
-        return (x + 0.12, y - 0.55 * progress)
+        return x + 0.12, y - 0.55 * progress
 
     def apply_extra_pose(self, flip: bool, swing: float) -> None:
         visible = not bool(getattr(self.entity, "sheared", False))

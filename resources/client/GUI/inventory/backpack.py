@@ -6,8 +6,10 @@
 - 4行×9列 = 36格物品栏（底部一行为快捷栏，上方三行为存储区）
 - 左键：拿起/放下整组物品，与目标槽位合并或交换
 - 右键：拿起半组 / 放下1个，与目标槽位合并或交换
+- Shift+左键/双击：按 Java 版顺序快速移动一组/全部同类物品
+- 1-9/F：与快捷栏/副手交换
 - 拖拽分发：按住鼠标拖过多个槽位，均匀分配物品
-- Q键丢弃、Ctrl+Q丢弃单个
+- Q键丢弃1个、Ctrl+Q丢弃整组
 - 物品栏编号从下往上递增（底部快捷栏 0-8，顶部 27-35）
 
 槽位映射（Minecraft 原版规范）：
@@ -35,6 +37,7 @@ class Backpack(GUI):
     crafting_rows = 2
     crafting_offset = (98, 17)
     crafting_output_offset = (154, 28)
+    quick_move_screen = "inventory"
 
     def __init__(self, render):
         super().__init__(render)
@@ -65,6 +68,7 @@ class Backpack(GUI):
         self.crafting_slots = [self._empty_stack() for _ in range(self.crafting_columns * self.crafting_rows)]
         self.crafting_result = None
         self.crafting_inputs = []
+        self._pressed_keys = set()
 
 
     @property
@@ -98,6 +102,41 @@ class Backpack(GUI):
     @staticmethod
     def _is_crafting_slot(slot):
         return isinstance(slot, tuple) and len(slot) == 2 and slot[0] == "crafting"
+
+    def _slot_descriptor(self, slot):
+        """Translate a GUI slot into the generic server container protocol."""
+        if isinstance(slot, int):
+            return "inventory", slot
+        if self._is_crafting_slot(slot):
+            return "crafting", slot[1]
+        return None
+
+    def _send_quick_move(self, slot, *, all_matching=False):
+        descriptor = self._slot_descriptor(slot)
+        if descriptor is None:
+            return
+        container_id, index = descriptor
+        self.render.client.sent_packet({
+            "__class__": "ContainerQuickMove",
+            "container": container_id,
+            "slot": index,
+            "screen": self.quick_move_screen,
+            "crafting_size": self.crafting_columns * self.crafting_rows,
+            "all_matching": bool(all_matching),
+        })
+
+    def _send_slot_swap(self, slot, target_container, target_slot):
+        descriptor = self._slot_descriptor(slot)
+        if descriptor is None:
+            return
+        container_id, index = descriptor
+        self.render.client.sent_packet({
+            "__class__": "ContainerSwap",
+            "container": container_id,
+            "slot": index,
+            "target_container": target_container,
+            "target_slot": target_slot,
+        })
 
     def _get_slot_stack(self, slot):
         if self._is_crafting_slot(slot):
@@ -371,14 +410,13 @@ class Backpack(GUI):
         - 手中无物品 → 拿起槽位中整组物品
         - 手中有物品 → 合并或交换（调用 _merge_or_swap_with_slot）
         """
-        if isinstance(slot, int):
+        descriptor = self._slot_descriptor(slot)
+        if descriptor is not None:
             self.render.client.sent_packet({
-                "__class__": "InventoryClick", "slot": slot, "button": 1,
-            })
-            return
-        if self._is_crafting_slot(slot):
-            self.render.client.sent_packet({
-                "__class__": "CraftingClick", "slot": slot[1], "button": 1,
+                "__class__": "ContainerClick",
+                "container": descriptor[0],
+                "slot": descriptor[1],
+                "button": 1,
             })
             return
         target = self._get_slot_stack(slot)
@@ -396,14 +434,13 @@ class Backpack(GUI):
         - 手中无物品 → 拿起槽位中半组物品（向上取整）
         - 手中有物品 → 放入 1 个或交换（调用 _place_one_or_swap_with_slot）
         """
-        if isinstance(slot, int):
+        descriptor = self._slot_descriptor(slot)
+        if descriptor is not None:
             self.render.client.sent_packet({
-                "__class__": "InventoryClick", "slot": slot, "button": 3,
-            })
-            return
-        if self._is_crafting_slot(slot):
-            self.render.client.sent_packet({
-                "__class__": "CraftingClick", "slot": slot[1], "button": 3,
+                "__class__": "ContainerClick",
+                "container": descriptor[0],
+                "slot": descriptor[1],
+                "button": 3,
             })
             return
         target = self._get_slot_stack(slot)
@@ -470,13 +507,15 @@ class Backpack(GUI):
         crafting_slots = [slot[1] for slot in self.drag_slots if self._is_crafting_slot(slot)]
         if inventory_slots:
             self.render.client.sent_packet({
-                "__class__": "InventoryDrag",
+                "__class__": "ContainerDrag",
+                "container": "inventory",
                 "slots": inventory_slots,
                 "button": self.drag_button,
             })
         if crafting_slots:
             self.render.client.sent_packet({
-                "__class__": "CraftingDrag",
+                "__class__": "ContainerDrag",
+                "container": "crafting",
                 "slots": crafting_slots,
                 "button": self.drag_button,
             })
@@ -561,11 +600,6 @@ class Backpack(GUI):
         self._drag_material = None
 
     def drop_item_stack(self, item_stack):
-        """
-        丢弃物品到世界的钩子方法。
-        从物品栏/鼠标上移除物品后调用，将物品生成为世界中的掉落物实体。
-        可在掉落物实体实现后替换或扩展此方法。
-        """
         player = self.render.client.client_player
         if hasattr(player, "drop_item_stack"):
             player.drop_item_stack(item_stack)
@@ -580,7 +614,9 @@ class Backpack(GUI):
         if self._is_empty(self.dragging_item):
             return
         self.render.client.sent_packet({
-            "__class__": "InventoryDrop", "cursor": True,
+            "__class__": "ContainerDrop",
+            "container": "inventory",
+            "cursor": True,
             "amount": 1 if single else None,
         })
 
@@ -590,12 +626,18 @@ class Backpack(GUI):
         :param slot: 要丢弃物品的槽位索引
         :param single: True=只丢弃1个，False=丢弃整组
         """
+        descriptor = self._slot_descriptor(slot)
+        if descriptor is None:
+            return
         target = self._get_slot_stack(slot)
-        if self._is_empty(target) or not isinstance(slot, int):
+        if self._is_empty(target):
             return
         self.render.client.sent_packet({
-            "__class__": "InventoryDrop", "cursor": False,
-            "slot": slot, "amount": 1 if single else None,
+            "__class__": "ContainerDrop",
+            "container": descriptor[0],
+            "cursor": False,
+            "slot": descriptor[1],
+            "amount": 1 if single else None,
         })
 
     def _handle_click_outside(self, button):
@@ -716,17 +758,50 @@ class Backpack(GUI):
         支持的操作：
         - 左键点击槽位：拿起/放下整组物品
         - 右键点击槽位：拿起半组/放下1个
+        - Shift+左键：在当前界面的两部分之间快速移动
+        - Shift+双击：鼠标持物时批量移动同类物品
+        - 1-9/F：与对应快捷栏/副手槽交换
         - 拖拽：均匀分发物品到多个槽位
         - 打开/关闭背包键：切换背包显示
-        - Q键：丢弃鼠标上的物品或悬停槽位的物品
-        - Ctrl+Q：仅丢弃1个
+        - Q键：丢弃1个；Ctrl+Q：丢弃整组
         """
         for event in events[:]:
             # ---- 鼠标按下（左键=1, 右键=3） ----
             if event.type == pygame.MOUSEBUTTONDOWN and event.button in (1, 3):
                 slot = self._slot_target_at_pos(event.pos)
                 if slot == "output":
-                    self._handle_crafting_click(slot, event.button)
+                    mods = getattr(event, "mod", None)
+                    if mods is None:
+                        mods = pygame.key.get_mods()
+                    if event.button == 1 and mods & pygame.KMOD_SHIFT:
+                        self.render.client.sent_packet({
+                            "__class__": "CraftingQuickTake",
+                            "width": self.crafting_columns,
+                            "height": self.crafting_rows,
+                        })
+                    else:
+                        self._handle_crafting_click(slot, event.button)
+                    events.remove(event)
+                    continue
+                mods = getattr(event, "mod", None)
+                if mods is None:
+                    mods = pygame.key.get_mods()
+                if (
+                    event.button == 1
+                    and slot is not None
+                    and mods & pygame.KMOD_SHIFT
+                ):
+                    # A normal Shift-click does nothing while the cursor holds
+                    # an item.  That preserves the cursor through click one so
+                    # pygame's second-click marker can trigger Java's batch move.
+                    if (
+                        getattr(event, "clicks", 1) >= 2
+                        and not self._is_empty(self.dragging_item)
+                    ):
+                        self._send_quick_move(slot, all_matching=True)
+                    elif self._is_empty(self.dragging_item):
+                        self._send_quick_move(slot)
+                    self._reset_drag()
                     events.remove(event)
                     continue
                 if self._is_empty(self.dragging_item):
@@ -777,6 +852,7 @@ class Backpack(GUI):
 
             # ---- 键盘事件 ----
             elif event.type == pygame.KEYDOWN:
+                self._pressed_keys.add(event.key)
                 # ESC closes the currently open container instead of opening
                 # the pause menu through the global game-event handler.
                 if event.key == pygame.K_ESCAPE:
@@ -791,19 +867,58 @@ class Backpack(GUI):
                 elif event.key in reverse_search_dict(self.render.client.key_map, self.render.client.client_player.game_mode.open_inventory):
                     self.render.client.client_player.game_mode.open_inventory()
                     events.remove(event)
+                elif pygame.K_1 <= event.key <= pygame.K_9:
+                    preset = event.key - pygame.K_1
+                    game_mode = getattr(
+                        self.render.client.client_player.game_mode,
+                        "name_id",
+                        "survival",
+                    )
+                    if game_mode == "creative" and pygame.K_c in self._pressed_keys:
+                        self.render.client.sent_packet({
+                            "__class__": "SaveHotbar", "preset": preset,
+                        })
+                    elif game_mode == "creative" and pygame.K_x in self._pressed_keys:
+                        self.render.client.sent_packet({
+                            "__class__": "LoadHotbar", "preset": preset,
+                        })
+                    else:
+                        slot = self._slot_target_at_pos(
+                            (self.render.mouse_x, self.render.mouse_y)
+                        )
+                        if slot != "output":
+                            self._send_slot_swap(slot, "inventory", preset)
+                    events.remove(event)
+                elif event.key == pygame.K_f:
+                    slot = self._slot_target_at_pos(
+                        (self.render.mouse_x, self.render.mouse_y)
+                    )
+                    if slot != "output":
+                        self._send_slot_swap(slot, "equipment", "offhand")
+                    events.remove(event)
                 # Q键丢弃物品
                 elif event.key == pygame.K_q:
-                    # Ctrl+Q = 只丢弃1个，单独Q = 丢弃整组
-                    single = not pygame.key.get_mods() & pygame.KMOD_CTRL
+                    # Java: Q drops one item, Ctrl+Q drops the entire stack.
+                    mods = getattr(event, "mod", None)
+                    if mods is None:
+                        mods = pygame.key.get_mods()
+                    single = not bool(mods & pygame.KMOD_CTRL)
                     if not self._is_empty(self.dragging_item):
                         # 丢弃鼠标上拿着的物品
                         self._drop_cursor_item(single=single)
                     else:
                         # 丢弃鼠标悬停槽位中的物品
-                        slot = self._slot_at_pos((self.render.mouse_x, self.render.mouse_y))
-                        if slot is not None:
+                        slot = self._slot_target_at_pos(
+                            (self.render.mouse_x, self.render.mouse_y)
+                        )
+                        if slot is not None and slot != "output":
                             self._drop_slot_item(slot, single=single)
                     events.remove(event)
+                elif event.key in (pygame.K_c, pygame.K_x):
+                    # Creative save/load activators are completed by 1-9.
+                    events.remove(event)
+            elif event.type == pygame.KEYUP:
+                self._pressed_keys.discard(event.key)
 
     def on_open(self):
         """背包打开时的回调：增加鼠标锁定计数，使玩家视角无法旋转"""
@@ -816,6 +931,7 @@ class Backpack(GUI):
                 self.crafting_slots[index] = self._empty_stack()
         self._refresh_crafting()
         self._reset_drag()
+        self._pressed_keys.clear()
         if not self._is_empty(self.dragging_item):
             self.dragging_item = self._empty_stack()
         self.render.client.sent_packet({"__class__": "CraftingClose"})

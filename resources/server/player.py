@@ -26,6 +26,14 @@ class Player(Entity):
     NATURAL_REGEN_FOOD_LEVEL = 18
     NATURAL_REGEN_TICKS = 80
     STARVATION_TICKS = 80
+    # This project stores the visually highest player-inventory row at 27..35
+    # and the visually lowest row at 9..17.  Keep all GUI ordering here so
+    # future Inventory-backed containers can reuse the same transfer engine.
+    MAIN_TOP_LEFT_ORDER = tuple(range(27, 36)) + tuple(range(18, 27)) + tuple(range(9, 18))
+    MAIN_BOTTOM_RIGHT_ORDER = tuple(range(17, 8, -1)) + tuple(range(26, 17, -1)) + tuple(range(35, 26, -1))
+    HOTBAR_LEFT_ORDER = tuple(range(9))
+    HOTBAR_RIGHT_ORDER = tuple(range(8, -1, -1))
+    PLAYER_JAVA_RECEIVE_ORDER = HOTBAR_RIGHT_ORDER + MAIN_BOTTOM_RIGHT_ORDER
 
     sounds = {
         "hurt": "game.player.hurt",
@@ -67,6 +75,10 @@ class Player(Entity):
         }
         self.crafting_grid = Inventory(9)
         self.cursor_stack = EmptyItemStack()
+        self.saved_hotbars = [Inventory(9) for _ in range(9)]
+        # Future block/entity containers register here only while the server
+        # has authorized them as open for this player.
+        self.open_inventory_containers: dict[str, Inventory] = {}
         self._initialize_inventory()
         self.selected_slot = 0
         # The miner predicts progress locally.  The 20 TPS server keeps an
@@ -703,6 +715,182 @@ class Player(Entity):
     def _click_inventory(self, slot: int, button: int) -> None:
         self._click_container(self.inventory, slot, button)
 
+    def get_inventory_container(self, container_id: str):
+        """Resolve a server-owned slot collection by stable protocol id."""
+        container_id = str(container_id)
+        built_in = {
+            "inventory": self.inventory,
+            "crafting": self.crafting_grid,
+            "equipment": self.equipment,
+        }.get(container_id)
+        if built_in is not None:
+            return built_in
+        return self.open_inventory_containers.get(container_id)
+
+    def register_inventory_container(self, container_id: str,
+                                     container: Inventory) -> None:
+        """Expose one already-authorized Inventory to generic slot actions."""
+        container_id = str(container_id)
+        if container_id in {"inventory", "crafting", "equipment"}:
+            raise ValueError(f"reserved container id: {container_id}")
+        if not isinstance(container, Inventory):
+            raise TypeError("containers must inherit Inventory")
+        self.open_inventory_containers[container_id] = container
+
+    def unregister_inventory_container(self, container_id: str) -> None:
+        self.open_inventory_containers.pop(str(container_id), None)
+
+    @staticmethod
+    def _container_slot_valid(container, slot) -> bool:
+        if container is None:
+            return False
+        if isinstance(container, dict):
+            return slot in container
+        try:
+            slot = int(slot)
+        except (TypeError, ValueError):
+            return False
+        return 0 <= slot < len(container)
+
+    @staticmethod
+    def _container_get(container, slot) -> ItemStack:
+        return container[slot if isinstance(container, dict) else int(slot)]
+
+    @staticmethod
+    def _container_set(container, slot, stack: ItemStack) -> None:
+        container[slot if isinstance(container, dict) else int(slot)] = stack
+
+    def container_click(self, container_id: str, slot, button: int) -> None:
+        """Apply a normal click to any server-owned Inventory container."""
+        container = self.get_inventory_container(container_id)
+        if isinstance(container, Inventory):
+            self._click_container(container, int(slot), int(button))
+        self.sync_inventory()
+
+    def container_drag(self, container_id: str, slots, button: int) -> None:
+        """Distribute the cursor stack over any Inventory-backed container."""
+        container = self.get_inventory_container(container_id)
+        if isinstance(container, Inventory):
+            self._drag_container(container, slots, int(button))
+        self.sync_inventory()
+
+    def container_swap(self, source_container_id: str, source_slot,
+                       target_container_id: str, target_slot) -> None:
+        """Swap two authoritative slots (number keys and offhand key)."""
+        source_container_id = str(source_container_id)
+        target_container_id = str(target_container_id)
+        allowed_target = (
+            target_container_id == "inventory"
+            and str(target_slot).lstrip("-").isdigit()
+            and 0 <= int(target_slot) < 9
+        ) or (
+            target_container_id == "equipment" and target_slot == "offhand"
+        )
+        source = self.get_inventory_container(source_container_id)
+        if not isinstance(source, Inventory) or not allowed_target:
+            self.sync_inventory()
+            return
+        target = self.get_inventory_container(target_container_id)
+        if not self._container_slot_valid(source, source_slot):
+            self.sync_inventory()
+            return
+        if not self._container_slot_valid(target, target_slot):
+            self.sync_inventory()
+            return
+        source_key = source_slot if isinstance(source, dict) else int(source_slot)
+        target_key = target_slot if isinstance(target, dict) else int(target_slot)
+        if source is target and source_key == target_key:
+            self.sync_inventory()
+            return
+        source_stack = self._container_get(source, source_key)
+        target_stack = self._container_get(target, target_key)
+        self._container_set(source, source_key, target_stack)
+        self._container_set(target, target_key, source_stack)
+        self._equipment_attribute_signature = None
+        self.sync_inventory()
+
+    def _quick_move_route(self, source_container_id: str, source_slot: int,
+                          screen: str, crafting_size: int):
+        """Return the authoritative destination and ordered target slots."""
+        if screen.startswith("container:"):
+            external_id = screen.removeprefix("container:")
+            external = self.open_inventory_containers.get(external_id)
+            if source_container_id == "inventory" and external is not None:
+                return external, tuple(range(len(external)))
+            if source_container_id == external_id and external is not None:
+                return self.inventory, self.PLAYER_JAVA_RECEIVE_ORDER
+            return None, ()
+        if source_container_id == "crafting":
+            return self.inventory, self.PLAYER_JAVA_RECEIVE_ORDER
+        if source_container_id != "inventory":
+            return None, ()
+        if screen == "crafting_table":
+            return self.crafting_grid, tuple(range(9))
+        if screen == "inventory":
+            if source_slot < 9:
+                return self.inventory, self.MAIN_TOP_LEFT_ORDER
+            return self.inventory, self.HOTBAR_LEFT_ORDER
+        return None, ()
+
+    def container_quick_move(self, source_container_id: str, source_slot,
+                             *, screen: str = "inventory",
+                             crafting_size: int = 4,
+                             all_matching: bool = False) -> None:
+        """Perform Java-style Shift movement using server-owned ordering."""
+        source_container_id = str(source_container_id)
+        screen = str(screen)
+        source = self.get_inventory_container(source_container_id)
+        try:
+            source_slot = int(source_slot)
+        except (TypeError, ValueError):
+            self.sync_inventory()
+            return
+        crafting_size = 9 if screen == "crafting_table" else 4
+        if not isinstance(source, Inventory) or not 0 <= source_slot < len(source):
+            self.sync_inventory()
+            return
+        if source_container_id == "crafting" and source_slot >= crafting_size:
+            self.sync_inventory()
+            return
+        reference = source[source_slot]
+        if reference.is_empty():
+            self.sync_inventory()
+            return
+
+        destination, target_slots = self._quick_move_route(
+            source_container_id, source_slot, screen, crafting_size,
+        )
+        if not isinstance(destination, Inventory):
+            self.sync_inventory()
+            return
+
+        if all_matching and source is destination and screen == "inventory":
+            source.consolidate_matching(
+                reference,
+                source_slots=self.MAIN_TOP_LEFT_ORDER + self.HOTBAR_LEFT_ORDER,
+                destination_slots=self.MAIN_TOP_LEFT_ORDER,
+            )
+        elif all_matching:
+            source_slots = (
+                self.MAIN_TOP_LEFT_ORDER + self.HOTBAR_LEFT_ORDER
+                if source_container_id == "inventory"
+                else (
+                    tuple(range(min(len(source), max(0, crafting_size))))
+                    if source_container_id == "crafting"
+                    else tuple(range(len(source)))
+                )
+            )
+            for slot in source_slots:
+                stack = source[slot]
+                if stack.is_empty() or not stack.is_stackable_with(
+                    reference, require_full_fit=False
+                ):
+                    continue
+                source.transfer_stack_to(slot, destination, target_slots)
+        else:
+            source.transfer_stack_to(source_slot, destination, target_slots)
+        self.sync_inventory()
+
     def _click_container(self, container, slot: int, button: int) -> None:
         if not 0 <= int(slot) < len(container) or button not in (1, 3):
             return
@@ -771,6 +959,29 @@ class Player(Entity):
                 self.crafting_grid[index] = EmptyItemStack()
         self.sync_inventory()
 
+    def crafting_quick_take(self, width: int = 2, height: int = 2) -> None:
+        """Craft repeatedly while complete results fit in the player inventory."""
+        from resources.server.crafting import find_recipe
+        if width not in (2, 3) or height not in (2, 3) or width * height > len(self.crafting_grid):
+            self.sync_inventory()
+            return
+        slots = self.PLAYER_JAVA_RECEIVE_ORDER
+        while True:
+            match = find_recipe(list(self.crafting_grid)[:width * height], width, height)
+            if match is None:
+                break
+            result, inputs = match
+            if self.inventory.capacity_for(result, slots) < result.amount:
+                break
+            moving = Inventory.copy_stack(result)
+            if self.inventory.insert_stack(moving, slots) != result.amount:
+                break
+            for index in inputs:
+                self.crafting_grid[index].reduce_amount(1)
+                if self.crafting_grid[index].is_empty():
+                    self.crafting_grid[index] = EmptyItemStack()
+        self.sync_inventory()
+
     def crafting_close(self) -> None:
         for index in range(len(self.crafting_grid)):
             stack = self.crafting_grid[index]
@@ -778,8 +989,7 @@ class Player(Entity):
                 continue
             self.give_item_stack(stack, sync=False)
             if stack.amount > 0:
-                from resources.server.entities.item import Item
-                self.world.spawn_entity(Item(self.x + self.width / 2, self.y + 0.5, self.world, stack))
+                self.drop_item_stack(stack, pickup_delay=40)
             self.crafting_grid[index] = EmptyItemStack()
         self.sync_inventory()
 
@@ -826,8 +1036,19 @@ class Player(Entity):
         if self.cursor_stack.amount <= 0:
             self.cursor_stack = EmptyItemStack()
 
-    def drop_inventory(self, cursor: bool = True, slot: int | None = None, amount: int | None = None) -> None:
-        stack = self.cursor_stack if cursor else self.inventory[int(slot)]
+    def drop_container(self, container_id: str = "inventory", slot=None,
+                       *, cursor: bool = False, amount: int | None = None) -> None:
+        container = None if cursor else self.get_inventory_container(container_id)
+        if not cursor and not isinstance(container, Inventory):
+            self.sync_inventory()
+            return
+        if cursor:
+            stack = self.cursor_stack
+        elif self._container_slot_valid(container, slot):
+            stack = self._container_get(container, slot)
+        else:
+            self.sync_inventory()
+            return
         if stack.is_empty():
             self.sync_inventory()
             return
@@ -835,15 +1056,47 @@ class Player(Entity):
             self.sync_inventory()
             return
         amount = stack.amount if amount is None else max(1, min(int(amount), stack.amount))
-        dropped = ItemStack(stack.material, amount, stack.nbt)
+        dropped = Inventory.copy_stack(stack, amount)
         stack.amount -= amount
         if stack.amount <= 0:
             if cursor:
                 self.cursor_stack = EmptyItemStack()
             else:
-                self.inventory[int(slot)] = EmptyItemStack()
-        from resources.server.entities.item import Item
-        self.world.spawn_entity(Item(self.x + self.width / 2, self.y + 0.5, self.world, dropped))
+                self._container_set(container, slot, EmptyItemStack())
+        self.drop_item_stack(dropped, pickup_delay=40)
+        self.sync_inventory()
+
+    def drop_inventory(self, cursor: bool = True, slot: int | None = None,
+                       amount: int | None = None) -> None:
+        """Backward-compatible wrapper for older clients and gameplay code."""
+        self.drop_container(
+            "inventory", slot, cursor=cursor, amount=amount,
+        )
+
+    def save_hotbar(self, preset: int) -> None:
+        """Save the current creative hotbar into one of nine persistent presets."""
+        try:
+            preset = int(preset)
+        except (TypeError, ValueError):
+            return
+        if getattr(self.gamemode, "name_id", "survival") != "creative" or not 0 <= preset < 9:
+            self.sync_inventory()
+            return
+        for slot in range(9):
+            self.saved_hotbars[preset][slot] = Inventory.copy_stack(self.inventory[slot])
+        self.sync_inventory()
+
+    def load_hotbar(self, preset: int) -> None:
+        """Load one saved hotbar, replacing all nine creative hotbar slots."""
+        try:
+            preset = int(preset)
+        except (TypeError, ValueError):
+            return
+        if getattr(self.gamemode, "name_id", "survival") != "creative" or not 0 <= preset < 9:
+            self.sync_inventory()
+            return
+        for slot in range(9):
+            self.inventory[slot] = Inventory.copy_stack(self.saved_hotbars[preset][slot])
         self.sync_inventory()
 
     def count_item_stack(self, item_stack: ItemStack) -> int:

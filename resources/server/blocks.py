@@ -781,9 +781,14 @@ class SNOW(BottomSupport):
         self.layer = max(1, int(layer))
 
     def get_collision_box(self):
-        # Snow layers occupy one to eight sixteenths of a block.  Keep this
-        # instance-dependent so NBT/state changes are reflected immediately.
-        return BlockCollisionBox.from_box(0, 0, 1, max(0, (self.layer - 2) / 8))
+        # Match Minecraft's collision shape: one visual layer is non-colliding,
+        # while layers 2..8 are 1/8..7/8 blocks high.  Do not construct a
+        # zero-height CollisionBox because empty shapes are represented by
+        # the shared EMPTY value.
+        collision_height = (self.layer - 1) / 8
+        if collision_height <= 0:
+            return EMPTY
+        return BlockCollisionBox.from_box(0, 0, 1, collision_height)
 
     @client_method
     def get_texture(self, size, client):

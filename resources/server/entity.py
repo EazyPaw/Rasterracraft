@@ -1187,22 +1187,47 @@ class Entity:
             },
         ))
 
-    def spawn_drops(self) -> None:
+    def drop_item_stack(self, stack, *, speed: float = 0.3,
+                        pickup_delay: int = 10):
+        """Throw an item stack from the entity's head-facing direction.
+
+        Inventory drops, crafting overflow, and ordinary entity drops all use
+        this single physical spawn path.  The caller remains responsible for
+        removing the stack from its authoritative container first.
+        """
+        if stack is None or stack.is_empty() or stack.amount <= 0:
+            return None
         spawn_entity = getattr(self.world, "spawn_entity", None)
         if not callable(spawn_entity):
-            return
+            return None
         from resources.server.entities.item import Item
 
+        direction = 1.0 if int(getattr(self, "facing", 1)) == 1 else -1.0
+        angle = math.radians(float(getattr(self, "look_angle", 0.0)))
+        forward_x = direction * math.cos(angle)
+        forward_y = direction * math.sin(angle)
+        head_x = self.x + self.width * 0.5
+        head_y = self.y + max(0.1, self.height * 0.85)
+        launch_offset = max(0.2, self.width * 0.5 + 0.08)
+        dropped = Item(
+            head_x + forward_x * launch_offset,
+            head_y + forward_y * launch_offset,
+            self.world,
+            stack,
+            int(getattr(self, "z", 0)),
+        )
+        launch_speed = max(0.0, float(speed))
+        dropped.motion.x = forward_x * launch_speed
+        dropped.motion.y = forward_y * launch_speed
+        dropped.pickup_delay = max(0, int(pickup_delay))
+        spawn_entity(dropped)
+        return dropped
+
+    def spawn_drops(self) -> None:
         for stack in self.get_drops():
             if stack is None or stack.is_empty() or stack.amount <= 0:
                 continue
-            spawn_entity(Item(
-                self.x + self.width * 0.5,
-                self.y + min(self.height * 0.5, 0.5),
-                self.world,
-                stack,
-                getattr(self, "z", 0),
-            ))
+            self.drop_item_stack(stack, speed=0.1, pickup_delay=10)
 
     def get_armor_attr(self):
         """

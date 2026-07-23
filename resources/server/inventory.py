@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from resources.server.item_class import ItemStack, EmptyItemStack
 from resources.server.materials import get_material_by_id
 
@@ -97,6 +99,143 @@ class Inventory:
                 return i
         return -1
 
+    def _normalize_slots(self, slots=None) -> list[int]:
+        """Return unique, valid slot indices while preserving caller order."""
+        if slots is None:
+            return list(range(self.max_slots))
+        result = []
+        for slot in slots:
+            try:
+                slot = int(slot)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= slot < self.max_slots and slot not in result:
+                result.append(slot)
+        return result
+
+    @staticmethod
+    def copy_stack(stack: ItemStack, amount: int | None = None) -> ItemStack:
+        """Create an independent stack suitable for moving between containers."""
+        if amount is None:
+            amount = stack.amount
+        return ItemStack(stack.material, int(amount), deepcopy(stack.nbt))
+
+    def capacity_for(self, stack: ItemStack, slots=None) -> int:
+        """Return how many items from ``stack`` the selected slots can accept."""
+        if stack is None or stack.is_empty() or stack.amount <= 0:
+            return 0
+        capacity = 0
+        for slot in self._normalize_slots(slots):
+            target = self[slot]
+            if target.is_empty():
+                capacity += stack.max_stack_size
+            elif target.is_stackable_with(stack, require_full_fit=False):
+                capacity += max(0, target.max_stack_size - target.amount)
+        return capacity
+
+    def insert_stack(self, stack: ItemStack, slots=None) -> int:
+        """Insert as much of ``stack`` as possible using Minecraft ordering.
+
+        Compatible partial stacks are always filled before an empty slot is
+        used.  ``slots`` controls only the deterministic order within those two
+        passes, so GUIs can express visual top-left or Java hotbar-right-first
+        policies without duplicating stack arithmetic.
+        """
+        if stack is None or stack.is_empty() or stack.amount <= 0:
+            return 0
+        ordered_slots = self._normalize_slots(slots)
+        before = stack.amount
+
+        for slot in ordered_slots:
+            target = self[slot]
+            if target.is_empty() or not target.is_stackable_with(
+                stack, require_full_fit=False
+            ):
+                continue
+            moved = min(
+                stack.amount,
+                max(0, target.max_stack_size - target.amount),
+            )
+            if moved <= 0:
+                continue
+            target.amount += moved
+            stack.amount -= moved
+            if stack.amount <= 0:
+                return before
+
+        for slot in ordered_slots:
+            if not self[slot].is_empty():
+                continue
+            moved = min(stack.amount, stack.max_stack_size)
+            self[slot] = self.copy_stack(stack, moved)
+            stack.amount -= moved
+            if stack.amount <= 0:
+                break
+        return before - max(0, stack.amount)
+
+    def transfer_stack_to(self, source_slot: int, destination: 'Inventory',
+                          destination_slots=None) -> int:
+        """Move one source stack into another inventory, retaining overflow."""
+        source_slot = int(source_slot)
+        if not 0 <= source_slot < self.max_slots:
+            return 0
+        source = self[source_slot]
+        if source.is_empty() or source.amount <= 0:
+            return 0
+        slots = destination._normalize_slots(destination_slots)
+        if destination is self:
+            slots = [slot for slot in slots if slot != source_slot]
+        moved = destination.insert_stack(source, slots)
+        if source.amount <= 0:
+            self[source_slot] = EmptyItemStack()
+        return moved
+
+    def swap_slots(self, source_slot: int, destination: 'Inventory',
+                   destination_slot: int) -> bool:
+        """Swap two slots across arbitrary Inventory instances."""
+        source_slot = int(source_slot)
+        destination_slot = int(destination_slot)
+        if not 0 <= source_slot < self.max_slots:
+            return False
+        if not 0 <= destination_slot < len(destination):
+            return False
+        if self is destination and source_slot == destination_slot:
+            return False
+        self[source_slot], destination[destination_slot] = (
+            destination[destination_slot], self[source_slot],
+        )
+        return True
+
+    def consolidate_matching(self, reference: ItemStack, source_slots=None,
+                             destination_slots=None) -> int:
+        """Pack matching stacks into the destination order without item loss.
+
+        This covers Java's Shift+double-click behavior when source and
+        destination are two regions of the same player inventory.  Items that
+        do not fit in the destination are restored to their original region.
+        """
+        if reference is None or reference.is_empty():
+            return 0
+        sources = self._normalize_slots(source_slots)
+        matching = [
+            slot for slot in sources
+            if not self[slot].is_empty()
+            and self[slot].is_stackable_with(reference, require_full_fit=False)
+        ]
+        if not matching:
+            return 0
+        original = [(slot, self.copy_stack(self[slot])) for slot in matching]
+        total = sum(stack.amount for _, stack in original)
+        moving = self.copy_stack(reference, total)
+        for slot in matching:
+            self[slot] = EmptyItemStack()
+
+        inserted = self.insert_stack(moving, destination_slots)
+        if moving.amount > 0:
+            restore_slots = [slot for slot, _ in original if self[slot].is_empty()]
+            self.insert_stack(moving, restore_slots)
+        return inserted
+
     def add_item(self, item: ItemStack, put_in_empty_slot: bool = False) -> bool:
         """
         向物品栏中添加物品，返回是否添加成功
@@ -114,26 +253,8 @@ class Inventory:
             self[slot] = ItemStack(item.material, moved, item.nbt)
             item.amount -= moved
             return item.amount <= 0
-        else:
-            for i in range(self.max_slots):
-                target = self[i]
-                if target.is_empty():
-                    continue
-                space = target.max_stack_size - target.amount
-                if target.material == item.material and target.nbt == item.nbt and space > 0:
-                    moved = min(space, item.amount)
-                    target.amount += moved
-                    item.amount -= moved
-                    if item.amount <= 0:
-                        return True
-            for i in range(self.max_slots):
-                if self[i].is_empty():
-                    moved = min(item.amount, item.max_stack_size)
-                    self[i] = ItemStack(item.material, moved, item.nbt)
-                    item.amount -= moved
-                    if item.amount <= 0:
-                        return True
-            return False
+        self.insert_stack(item)
+        return item.amount <= 0
 
     def set_item(self, solt, item: ItemStack):
         self[solt] = item

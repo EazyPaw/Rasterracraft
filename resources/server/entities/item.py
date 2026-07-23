@@ -25,7 +25,7 @@ class Item(Entity):
         self.drag_vertical = 0.88
         self.air_friction = 0.82
         self.damping = self.air_friction
-        self.pickup_delay = 40
+        self.pickup_delay = 10
         self.age = 0
         self.motion.x = random.uniform(-0.075, 0.075)
         self.motion.y = random.uniform(0.08, 0.15)

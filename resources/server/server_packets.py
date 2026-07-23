@@ -479,6 +479,46 @@ def decode_packet(packet: dict, player: Player):
             player.inventory_click(int(packet.get('slot')), int(packet.get('button')))
         except (TypeError, ValueError):
             player.sync_inventory()
+    elif packet['__class__'] == 'ContainerClick':
+        try:
+            player.container_click(
+                str(packet.get('container', '')),
+                packet.get('slot'),
+                int(packet.get('button')),
+            )
+        except (TypeError, ValueError, IndexError):
+            player.sync_inventory()
+    elif packet['__class__'] == 'ContainerQuickMove':
+        try:
+            player.container_quick_move(
+                str(packet.get('container', '')),
+                packet.get('slot'),
+                screen=str(packet.get('screen', 'inventory')),
+                crafting_size=int(packet.get('crafting_size', 4)),
+                all_matching=bool(packet.get('all_matching', False)),
+            )
+        except (TypeError, ValueError, IndexError):
+            player.sync_inventory()
+    elif packet['__class__'] == 'ContainerSwap':
+        try:
+            player.container_swap(
+                str(packet.get('container', '')),
+                packet.get('slot'),
+                str(packet.get('target_container', '')),
+                packet.get('target_slot'),
+            )
+        except (TypeError, ValueError, IndexError):
+            player.sync_inventory()
+    elif packet['__class__'] == 'ContainerDrop':
+        try:
+            player.drop_container(
+                str(packet.get('container', 'inventory')),
+                packet.get('slot'),
+                cursor=bool(packet.get('cursor', False)),
+                amount=packet.get('amount'),
+            )
+        except (TypeError, ValueError, IndexError):
+            player.sync_inventory()
     elif packet['__class__'] == 'CreativeSetSlot':
         if getattr(player.gamemode, 'name_id', 'survival') != 'creative':
             player.sync_inventory()
@@ -499,6 +539,16 @@ def decode_packet(packet: dict, player: Player):
         except (TypeError, ValueError):
             button = 0
         player.inventory_drag(packet.get('slots', []), button)
+    elif packet['__class__'] == 'ContainerDrag':
+        try:
+            button = int(packet.get('button'))
+        except (TypeError, ValueError):
+            button = 0
+        player.container_drag(
+            str(packet.get('container', '')),
+            packet.get('slots', []),
+            button,
+        )
     elif packet['__class__'] == 'CraftingDrag':
         try:
             button = int(packet.get('button'))
@@ -530,8 +580,18 @@ def decode_packet(packet: dict, player: Player):
         except (TypeError, ValueError):
             width, height = 2, 2
         player.crafting_take(width, height)
+    elif packet['__class__'] == 'CraftingQuickTake':
+        try:
+            width, height = int(packet.get('width', 2)), int(packet.get('height', 2))
+        except (TypeError, ValueError):
+            width, height = 2, 2
+        player.crafting_quick_take(width, height)
     elif packet['__class__'] == 'CraftingClose':
         player.crafting_close()
+    elif packet['__class__'] == 'SaveHotbar':
+        player.save_hotbar(packet.get('preset'))
+    elif packet['__class__'] == 'LoadHotbar':
+        player.load_hotbar(packet.get('preset'))
     elif packet['__class__'] == 'SelectHotbarSlot':
         old_slot = player.selected_slot
         try:

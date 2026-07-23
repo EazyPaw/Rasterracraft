@@ -58,7 +58,7 @@ class Chunk:
             return value
 
         for value in self.region_array.flat:
-            block = cast(Block, value)
+            block = cast(Block, cast(object, value))
             nbt = block.parse_nbt()
             key = (block.block_id, freeze(nbt))
             index = block_lookup.get(key)
