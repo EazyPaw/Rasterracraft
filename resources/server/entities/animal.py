@@ -179,6 +179,14 @@ class Animal(Entity):
             return False
         child.set_age(-self.baby_growth_ticks)
         self.world.spawn_entity(child)
+        spawn_experience = getattr(self.world, "spawn_experience", None)
+        if callable(spawn_experience):
+            spawn_experience(
+                child.x + child.width * 0.5,
+                child.y + child.height * 0.5,
+                child.z,
+                random.randint(1, 7),
+            )
         self.set_age(self.breeding_cooldown_ticks)
         mate.set_age(mate.breeding_cooldown_ticks)
         self.love_ticks = mate.love_ticks = 0
@@ -199,6 +207,9 @@ class Animal(Entity):
 
     def get_drops(self):
         return [] if self.is_baby else super().get_drops()
+
+    def get_experience_reward(self) -> int:
+        return 0 if self.is_baby else random.randint(1, 3)
 
 
 def crop_x_side(

@@ -5,6 +5,10 @@ from resources.client.game_mode import SurvivalMode
 from resources.server.attributes import EATING_SPEED_MODIFIER
 from resources.server.damange_type import DamageType, FALL, GENERIC, STARVE
 from resources.server.entity import Entity
+from resources.server.experience import (
+    experience_to_next_level,
+    total_experience_for_level,
+)
 from resources.server.inventory import Inventory, serialize_inventory, stack_to_payload
 from resources.server.item_class import EmptyItemStack, ItemStack
 from resources.server.location import Location, decide_x_or_loc
@@ -67,6 +71,10 @@ class Player(Entity):
         self.saturation = 5.0
         self.experience = 0
         self.experience_level = 0
+        self.experience_total = 0
+        self.score = 0
+        self.take_xp_delay = 0
+        self._last_level_up_sound_tick = -100
         self.gamemode = gamemode if gamemode is not None else SurvivalMode
         self.inventory = Inventory(36)
         self.equipment = {
@@ -362,15 +370,89 @@ class Player(Entity):
 
         tool = held_stack.material
         self.clear_breaking(notify=False)
-        experience = world.break_block(x, y, z, tool=tool)
+        world.break_block(x, y, z, tool=tool)
         self.add_exhaustion(0.005)
         self._send_break_progress(target, 0.0, False)
-        if experience:
-            self.experience += experience
-            world.server.send_client_socket(
-                self, {'__class__': 'Experience', 'amount': experience}, 'Forward'
-            )
         return True
+
+    def experience_to_next_level(self) -> int:
+        return experience_to_next_level(self.experience_level)
+
+    def sync_experience(self) -> None:
+        server = getattr(self.world, "server", None)
+        if server is None:
+            return
+        server.send_client_socket(self, {
+            "__class__": "Experience",
+            "experience": max(0, int(self.experience)),
+            "experience_level": max(0, int(self.experience_level)),
+            "experience_total": max(0, int(self.experience_total)),
+            "score": max(0, int(self.score)),
+        }, "Forward")
+
+    def _play_level_up_sound(self) -> None:
+        current_tick = int(getattr(self.world.server, "server_ticks", 0))
+        if current_tick - self._last_level_up_sound_tick < 100:
+            return
+        self._last_level_up_sound_tick = current_tick
+        volume = min(1.0, self.experience_level / 30.0) * 0.75
+        self.world.server.broadcast_sound(
+            "random.levelup",
+            self.x,
+            self.y,
+            getattr(self, "z", 0),
+            volume=volume,
+        )
+
+    def add_experience(self, amount: int) -> int:
+        """Add points authoritatively and return the number of gained levels."""
+        amount = max(0, int(amount))
+        if amount <= 0:
+            return 0
+        self.experience += amount
+        self.experience_total += amount
+        self.score += amount
+        old_level = self.experience_level
+        while self.experience >= self.experience_to_next_level():
+            self.experience -= self.experience_to_next_level()
+            self.experience_level += 1
+            if self.experience_level % 5 == 0:
+                self._play_level_up_sound()
+        self.sync_experience()
+        return self.experience_level - old_level
+
+    def normalize_experience_state(self) -> None:
+        """Repair legacy saves whose current-level points exceed one level."""
+        self.experience = max(0, int(self.experience))
+        self.experience_level = max(0, int(self.experience_level))
+        while self.experience >= self.experience_to_next_level():
+            self.experience -= self.experience_to_next_level()
+            self.experience_level += 1
+        minimum_total = (
+            total_experience_for_level(self.experience_level) + self.experience
+        )
+        self.experience_total = max(
+            minimum_total, int(getattr(self, "experience_total", minimum_total))
+        )
+        self.score = max(0, int(getattr(self, "score", self.experience_total)))
+
+    def drop_experience_on_death(self, *, sync: bool = True) -> int:
+        """Drop the supported vanilla death reward, then clear level progress."""
+        amount = min(max(0, int(self.experience_level)) * 7, 100)
+        spawner = getattr(self.world, "spawn_experience", None)
+        if amount > 0 and callable(spawner):
+            spawner(
+                self.x + self.width * 0.5,
+                self.y + self.height * 0.5,
+                getattr(self, "z", 0),
+                amount,
+            )
+        self.experience = 0
+        self.experience_level = 0
+        self.experience_total = 0
+        if sync:
+            self.sync_experience()
+        return amount
 
     def request_eating(self) -> bool:
         if self.breaking_target is not None:
@@ -590,6 +672,8 @@ class Player(Entity):
         if self.attack_animation_ticks > 0:
             self.attack_animation_ticks -= 1
         self.attack_strength_ticker += 1
+        if self.take_xp_delay > 0:
+            self.take_xp_delay -= 1
         self._tick_survival_state()
         self.tick_breaking()
         self.tick_eating()
@@ -703,9 +787,15 @@ class Player(Entity):
             "motion": {"x": self.motion.x, "y": self.motion.y},
         }
         if self.health <= 0:
-            self.emit_death_effects()
+            death_score = max(0, int(self.score))
+            if self.emit_death_effects():
+                self.drop_experience_on_death(sync=False)
+                self.score = 0
             packet["death_message"] = self.get_death_message()
+            packet["score"] = death_score
         server.send_client_socket(self, packet, "Forward")
+        if self.health <= 0:
+            self.sync_experience()
         for other in tuple(server.players):
             if other is self or other.world is not self.world:
                 continue

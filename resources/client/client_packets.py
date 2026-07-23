@@ -126,6 +126,7 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             for key in (
                 'health', 'hurt_time', 'last_hurt_damage', 'food_level',
                 'saturation', 'experience', 'experience_level',
+                'experience_total', 'score',
             ):
                 if key in packet:
                     setattr(client.client_player, key, packet[key])
@@ -310,7 +311,10 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             player.motion.x = float(motion.get('x', player.motion.x))
             player.motion.y = float(motion.get('y', player.motion.y))
             if player.health <= 0:
-                client.show_death_screen(packet.get('death_message'))
+                client.show_death_screen(
+                    packet.get('death_message'),
+                    score=int(packet.get('score', getattr(player, 'score', 0))),
+                )
     elif packet['__class__'] == 'AttributeUpdate':
         player = client.client_player
         target_uuid = str(packet.get('uuid', ''))
@@ -329,7 +333,16 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             player.motion.y = float(motion.get('y', player.motion.y))
     elif packet['__class__'] == 'Experience':
         if client.client_player is not None:
-            client.client_player.add_experience(int(packet.get('amount', 0)))
+            player = client.client_player
+            if 'experience' in packet and 'experience_level' in packet:
+                player.experience = max(0, int(packet['experience']))
+                player.experience_level = max(0, int(packet['experience_level']))
+                player.experience_total = max(
+                    0, int(packet.get('experience_total', player.experience_total))
+                )
+                player.score = max(0, int(packet.get('score', player.score)))
+            else:
+                player.add_experience(int(packet.get('amount', 0)))
     elif packet['__class__'] in ('EntitySpawn', 'EntityUpdate'):
         client.client_world.update_entity(packet)
     elif packet['__class__'] == 'EntityRemove':

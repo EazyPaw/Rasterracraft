@@ -377,16 +377,22 @@ class Client:
         self.capture_save_icon()
         self.render.show_gui(PauseMenu(self.render))
 
-    def show_death_screen(self, death_message: dict | None = None) -> None:
+    def show_death_screen(
+        self, death_message: dict | None = None, *, score: int | None = None
+    ) -> None:
         if self.client_player is None:
             return
         self.client_player.dead = True
         if self.death_screen is not None:
             self.death_screen.update_death_message(death_message)
+            if score is not None:
+                self.death_screen.score = max(0, int(score))
             return
         for gui in self.render.drawing_GUIs[:]:
             self.render.close_gui(gui)
-        self.death_screen = DeathScreen(self.render, death_message, score=0)
+        if score is None:
+            score = int(getattr(self.client_player, "score", 0))
+        self.death_screen = DeathScreen(self.render, death_message, score=score)
         self.render.show_gui(self.death_screen)
 
     def close_death_screen(self) -> None:

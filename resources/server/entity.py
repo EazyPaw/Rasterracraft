@@ -27,6 +27,7 @@ class Entity:
     # bounds.  Non-blocking entity types (notably dropped items) can opt out
     # without teaching the generic packet handler about concrete subclasses.
     blocks_block_placement = True
+    attackable = True
     translation_key: str | None = None
     ambient_sound_interval = (160, 360)
     initial_ambient_sound_interval = (80, 220)
@@ -288,6 +289,7 @@ class Entity:
             'aggressive': self.get_target() is not None,
             'look_angle': self.look_angle,
             'attack_animation_ticks': self.attack_animation_ticks,
+            'attackable': bool(self.attackable),
         }
         if hasattr(self, 'z'):
             data['z'] = getattr(self, 'z')
@@ -815,6 +817,57 @@ class Entity:
 
         self.on_ground = (collided_y and requested_dy < 0) or self._check_support_at()
 
+    def escape_solid_block(self) -> bool:
+        """Apply velocity toward the nearest free side without teleporting."""
+        if not self._check_collision_at(self.x, self.y):
+            return False
+
+        boxes = []
+        min_block_x = math.floor(self.x) - 1
+        max_block_x = math.floor(self.x + self.width) + 2
+        min_block_y = math.floor(self.y) - 1
+        max_block_y = math.floor(self.y + self.height) + 2
+        for block_x in range(min_block_x, max_block_x):
+            for block_y in range(min_block_y, max_block_y):
+                boxes.extend(
+                    self._get_collision_boxes(
+                        block_x, block_y, getattr(self, "z", 0)
+                    )
+                )
+        overlapping = [
+            box for box in boxes
+            if box.overlaps(
+                self.x, self.y, self.x + self.width, self.y + self.height
+            )
+        ]
+        if not overlapping:
+            return False
+
+        epsilon = 0.001
+        side_candidates = []
+        upward_candidates = []
+        for box in overlapping:
+            side_candidates.extend((
+                box.min_x - self.width - epsilon,
+                box.max_x + epsilon,
+            ))
+            upward_candidates.append(box.max_y + epsilon)
+
+        speed = max(0.0, float(getattr(self, "escape_speed", 0.1)))
+        for candidate_x in sorted(
+            set(side_candidates), key=lambda candidate: abs(candidate - self.x)
+        ):
+            if not self._check_collision_at(candidate_x, self.y):
+                self.motion.x = (-speed if candidate_x < self.x else speed)
+                return True
+        for candidate_y in sorted(
+            set(upward_candidates), key=lambda candidate: abs(candidate - self.y)
+        ):
+            if not self._check_collision_at(self.x, candidate_y):
+                self.motion.y = max(speed, self.motion.y)
+                return True
+        return False
+
     def _movement_multiplier(self) -> float:
         multiplier = self.get_attribute_value("sneaking_speed") if self.sneaking else 1.0
         if self.sprinting:
@@ -1167,7 +1220,25 @@ class Entity:
             )
         self.spawn_death_particles()
         self.spawn_drops()
+        self.spawn_experience_reward()
         return True
+
+    def get_experience_reward(self) -> int:
+        return max(0, int(getattr(self, "experience_reward", 0)))
+
+    def spawn_experience_reward(self) -> None:
+        source = self.last_damage_source
+        if getattr(source, "entity_id", None) != "player":
+            return
+        reward = self.get_experience_reward()
+        spawner = getattr(self.world, "spawn_experience", None)
+        if reward > 0 and callable(spawner):
+            spawner(
+                self.x + self.width * 0.5,
+                self.y + self.height * 0.5,
+                getattr(self, "z", 0),
+                reward,
+            )
 
     def spawn_death_particles(self) -> None:
         spawn_particle = getattr(self.world, "spawn_particle", None)

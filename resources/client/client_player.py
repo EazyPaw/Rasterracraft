@@ -7,6 +7,7 @@ from resources.client.entity_skeleton import PlayerSkeleton
 from resources.client.game_mode import CreativeMode, SurvivalMode
 from resources.server.damange_type import GENERIC, DamageType
 from resources.server.entity import Entity
+from resources.server.experience import experience_to_next_level
 from resources.server.inventory import Inventory
 from resources.server.item_class import EmptyItemStack
 
@@ -40,6 +41,8 @@ class ClientPlayer(Entity):
         self.dead = False
         self.experience = 0
         self.experience_level = 0
+        self.experience_total = 0
+        self.score = 0
         self.choosing_block = None
         self.choosing_entity = None
         self.flyable = False
@@ -113,18 +116,16 @@ class ClientPlayer(Entity):
             })
 
     def add_experience(self, amount: int):
-        self.experience += max(0, int(amount))
+        amount = max(0, int(amount))
+        self.experience += amount
+        self.experience_total += amount
+        self.score += amount
         while self.experience >= self.experience_to_next_level():
             self.experience -= self.experience_to_next_level()
             self.experience_level += 1
 
     def experience_to_next_level(self) -> int:
-        level = self.experience_level
-        if level < 16:
-            return 7 + level * 2
-        if level < 31:
-            return 37 + (level - 15) * 5
-        return 112 + (level - 30) * 9
+        return experience_to_next_level(self.experience_level)
 
     def _request_nearby_item_pickups(self):
         if self.client.client_ticks % 5:

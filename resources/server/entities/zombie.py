@@ -24,6 +24,7 @@ class Zombie(Entity):
         "hurt": "mob.zombie.hurt",
         "death": "mob.zombie.death",
     }
+    experience_reward = 5
 
     def __init__(self, x: float, y: float, world, z: int = 0):
         super().__init__(float(x), float(y), world)

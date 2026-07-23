@@ -546,6 +546,12 @@ class World:
             if player.is_loading_position(math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)):
                 self.server.send_client_socket(player, entity, "EntitySpawn")
 
+    def spawn_experience(self, x: float, y: float, z: int, amount: int):
+        """Create the server-owned orb split for one experience award."""
+        from resources.server.entities.experience_orb import ExperienceOrb
+
+        return ExperienceOrb.award(self, x, y, z, amount)
+
     def queue_saved_entities(self, records) -> None:
         """Queue legacy ``level.msgpack`` entities for one-time migration."""
         self._legacy_saved_entities_by_chunk.clear()
@@ -950,6 +956,8 @@ class World:
             from resources.server.entities.item import Item
             self.spawn_entity(Item(x + 0.5, y + 0.45, self, stack, z))
         experience = block.get_experience(tool)
+        if experience > 0:
+            self.spawn_experience(x + 0.5, y + 0.5, z, experience)
         for player in self.server.players:
             if player.is_loading_position(x, y, z):
                 self.server.send_client_socket(player, location, "BreakBlock")

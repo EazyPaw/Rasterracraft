@@ -114,6 +114,7 @@ def _load_builtin_entities() -> None:
     from resources.server.entities import (  # noqa: F401
         chicken,
         cow,
+        experience_orb,
         falling_block,
         item,
         pig,

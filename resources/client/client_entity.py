@@ -1,6 +1,8 @@
 import math
 import time
 
+import pygame
+
 from resources.client.entity_skeleton import PlayerSkeleton
 from resources.server.entities.falling_block import FallingBlockSkeleton
 from resources.server.entities.primed_tnt import PrimedTNTSkeleton
@@ -15,6 +17,7 @@ from resources.server.location import Location, Vector
 from resources.server.materials import get_material_by_id
 from resources.server.utils import client_method
 from resources.server.attributes import AttributeMap
+from resources.server.experience import experience_orb_icon
 
 
 class ItemEntityRenderer:
@@ -79,6 +82,79 @@ class ItemEntityRenderer:
             ))
 
 
+class ExperienceOrbRenderer:
+    """Render one 16×16 value cell from the grayscale 64×64 orb sheet."""
+
+    TEXTURE_KEY = "entity.experience_orb"
+
+    @client_method
+    def __init__(self, entity, client=None):
+        self.client = client
+        self.entity = entity
+        self._frame_icon = None
+        self._frame = None
+        self._render_cache_key = None
+        self._rendered_surface = None
+
+    @staticmethod
+    def get_frame_rect(value: int) -> tuple[int, int, int, int]:
+        icon = experience_orb_icon(value)
+        return (icon % 4 * 16, icon // 4 * 16, 16, 16)
+
+    @staticmethod
+    def get_color(age: float) -> tuple[int, int, int]:
+        phase = float(age) / 2.0
+        red = int((math.sin(phase) + 1.0) * 0.5 * 255.0)
+        blue = int(
+            (math.sin(phase + math.pi * 4.0 / 3.0) + 1.0) * 0.1 * 255.0
+        )
+        return red, 255, blue
+
+    def _get_frame(self):
+        value = max(1, int(getattr(self.entity, "experience_value", 1)))
+        icon = experience_orb_icon(value)
+        if self._frame is not None and icon == self._frame_icon:
+            return self._frame
+        sheet = self.client.resources_manager.get_texture_img(self.TEXTURE_KEY)
+        self._frame = sheet.subsurface(self.get_frame_rect(value)).copy()
+        self._frame_icon = icon
+        return self._frame
+
+    def update(self):
+        pass
+
+    def draw(self):
+        render = self.client.render
+        frame = self._get_frame()
+        age = float(getattr(self.entity, "orb_age", 0))
+        size = max(1, round(render.block_size * 0.5))
+        # Vanilla experience orbs add seven block-light levels.  Blend the
+        # ordinary world tint toward white by the same 7/15 fraction.
+        world_tint = render.get_world_light_tint(self.entity.x, self.entity.y)
+        glow_tint = tuple(
+            round(channel + (255 - channel) * 7 / 15)
+            for channel in world_tint
+        )
+        color = self.get_color(age)
+        cache_key = (self._frame_icon, color, size, glow_tint)
+        if cache_key != self._render_cache_key:
+            colored = self.client.resources_manager.stain_grayscale(frame, color)
+            colored = pygame.transform.scale(colored, (size, size))
+            colored.set_alpha(128)
+            self._rendered_surface = render.get_tinted_surface(
+                colored, glow_tint
+            )
+            self._render_cache_key = cache_key
+        colored = self._rendered_surface
+        center_x = self.entity.x + self.entity.width * 0.5
+        center_y = self.entity.y + self.entity.height * 0.5 + 0.1
+        sx, sy = render.trans_world_location((center_x, center_y))
+        render.blit(colored, (
+            round(sx - colored.get_width() * 0.5),
+            round(sy - colored.get_height() * 0.5),
+        ))
+
+
 class ClientEntity:
     def __init__(self, client, packet: dict):
         self.client = client
@@ -101,6 +177,10 @@ class ClientEntity:
         self.aggressive = bool(packet.get('aggressive', False))
         self.look_angle = float(packet.get('look_angle', 0.0))
         self.attack_animation_ticks = int(packet.get('attack_animation_ticks', 0))
+        self.attackable = bool(packet.get('attackable', True))
+        self.experience_value = max(1, int(packet.get('experience_value', 1)))
+        self.orb_age = max(0, int(packet.get('orb_age', 0)))
+        self.orb_count = max(1, int(packet.get('orb_count', 1)))
         self.is_baby = bool(packet.get('is_baby', False))
         self.age_scale = float(packet.get('age_scale', 1.0))
         self.flap_speed = float(packet.get('flap_speed', 0.0))
@@ -148,6 +228,12 @@ class ClientEntity:
         self.attack_animation_ticks = int(packet.get(
             'attack_animation_ticks', self.attack_animation_ticks
         ))
+        self.attackable = bool(packet.get('attackable', self.attackable))
+        self.experience_value = max(
+            1, int(packet.get('experience_value', self.experience_value))
+        )
+        self.orb_age = max(0, int(packet.get('orb_age', self.orb_age)))
+        self.orb_count = max(1, int(packet.get('orb_count', self.orb_count)))
         self.is_baby = bool(packet.get('is_baby', self.is_baby))
         self.age_scale = float(packet.get('age_scale', self.age_scale))
         self.flap_speed = float(packet.get('flap_speed', self.flap_speed))
@@ -216,6 +302,8 @@ class ClientEntity:
             self.skeleton = FallingBlockSkeleton(self)
         elif self.entity_id == "item":
             self.skeleton = ItemEntityRenderer(self)
+        elif self.entity_id == "experience_orb":
+            self.skeleton = ExperienceOrbRenderer(self)
         elif self.entity_id == "zombie":
             self.skeleton = ZombieSkeleton(self)
         elif self.entity_id == "chicken":

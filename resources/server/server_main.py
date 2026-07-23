@@ -21,6 +21,7 @@ from resources.server.inventory import (
     restore_inventory, serialize_inventory, stack_to_payload,
 )
 from resources.server.crafting import load_recipes
+from resources.server.experience import total_experience_for_level
 from resources.server.player import Player
 from resources.server.server_packets import encode_packet, decode_packet
 from resources.server.text import Text
@@ -437,6 +438,14 @@ class Server:
         player.food_tick_timer = max(0, min(80, int(data.get("food_tick_timer", 0))))
         player.experience = max(0, int(data.get("experience", 0)))
         player.experience_level = max(0, int(data.get("experience_level", 0)))
+        legacy_total = (
+            total_experience_for_level(player.experience_level) + player.experience
+        )
+        player.experience_total = max(
+            0, int(data.get("experience_total", legacy_total))
+        )
+        player.score = max(0, int(data.get("score", player.experience_total)))
+        player.normalize_experience_state()
         # 恢复玩家的游戏模式（优先读取玩家存档，回退到世界默认模式）
         saved_gamemode = data.get("gamemode") or self.level_data.get("game_mode")
         if saved_gamemode:
@@ -551,6 +560,8 @@ class Server:
                            "food_tick_timer": int(getattr(player, "food_tick_timer", 0)),
                            "experience": int(getattr(player, "experience", 0)),
                            "experience_level": int(getattr(player, "experience_level", 0)),
+                           "experience_total": int(getattr(player, "experience_total", 0)),
+                           "score": int(getattr(player, "score", 0)),
                            "gamemode": player.gamemode.name_id if hasattr(player.gamemode, "name_id") else "survival",
                            "selected_slot": max(0, min(8, int(getattr(player, "selected_slot", 0)))),
                            "equipment": {

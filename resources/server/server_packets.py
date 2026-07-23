@@ -21,6 +21,8 @@ def encode_packet(obj, obj_type, args) -> dict:
                   'health': obj.health, 'hurt_time': obj.hurt_time, 'last_hurt_damage': obj.last_hurt_damage,
                   'food_level': getattr(obj, 'food_level', 20), 'saturation': getattr(obj, 'saturation', 5.0),
                   'experience': getattr(obj, 'experience', 0), 'experience_level': getattr(obj, 'experience_level', 0),
+                  'experience_total': getattr(obj, 'experience_total', 0),
+                  'score': getattr(obj, 'score', 0),
                   'selected_slot': getattr(obj, 'selected_slot', 0),
                   'teleport_id': getattr(obj, '_pending_teleport_id', None),
                   'inventory': serialize_inventory(obj.inventory), 'cursor': stack_to_payload(obj.cursor_stack),
@@ -111,6 +113,8 @@ def _can_player_reach_entity(player: Player, target: Entity) -> bool:
     if target is player or getattr(target, "world", None) is not player.world:
         return False
     if getattr(target, "removed", False) or getattr(target, "health", 0) <= 0:
+        return False
+    if not bool(getattr(target, "attackable", True)):
         return False
     if int(getattr(player, "z", 0)) != int(getattr(target, "z", 0)):
         return False
@@ -622,6 +626,7 @@ def decode_packet(packet: dict, player: Player):
         player.exhaustion = 0.0
         player.food_tick_timer = 0
         player.fall_distance = 0.0
+        player.score = 0
         player.clear_breaking()
         player.clear_eating()
         block = player.world.find_top_block(player.spawn_point, 0)

@@ -526,7 +526,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         entities.sort(key=lambda entity: entity.y)
         for entity in entities:
             if entity.entity_id in (
-                "falling_block", "item", "zombie", "primed_tnt",
+                "falling_block", "item", "experience_orb", "zombie", "primed_tnt",
                 "chicken", "cow", "pig", "sheep",
             ):
                 if entity.z != z_filter:
@@ -557,6 +557,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         candidates = []
         for entity in self.client_world.iter_entities():
             if getattr(entity, "health", 0) <= 0:
+                continue
+            if not bool(getattr(entity, "attackable", True)):
                 continue
             if int(getattr(entity, "z", 0)) != int(getattr(player, "z", 0)):
                 continue
