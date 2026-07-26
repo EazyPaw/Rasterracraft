@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 from abc import ABC
 
 from resources.server.entity import Entity

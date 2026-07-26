@@ -1,4 +1,4 @@
-"""Chunk-generation creature spawning adapted to PyCraft2D's two layers."""
+# Commented and arranged by ChatGPT
 
 from __future__ import annotations
 
@@ -34,8 +34,7 @@ def _surface_y(world, x: int, z: int = 0) -> int | None:
         block = world.get_block(x, y, z)
         if BlockTag.ANIMALS_SPAWNABLE_ON not in getattr(block, "Tags", ()):
             continue
-        # Tall grass and other zero-collision decorations are valid spawn
-        # cells; the later entity AABB check rejects trunks, fluids and solids.
+
         return y + 1
     return None
 
@@ -56,14 +55,15 @@ def _can_fit(world, entity) -> bool:
         for y in range(bottom, top + 1):
             block = world.get_block(x, y, entity.z)
             getter = getattr(block, "get_collision_box", None)
-            shape = getter() if callable(getter) else getattr(block, "collision_box", None)
+            shape = (
+                getter() if callable(getter) else getattr(block, "collision_box", None)
+            )
             if shape or getattr(block, "is_fluid", False):
                 return False
     return True
 
 
 def spawn_animals_for_chunk(world, rx: int) -> list:
-    """Run the vanilla-style creature-probability loop for a new chunk only."""
     if bool(getattr(world, "disable_mob_generation", False)):
         return []
     rng = random.Random(f"{world.seed}:{world.id_name}:{int(rx)}:initial_animals")
@@ -77,7 +77,9 @@ def spawn_animals_for_chunk(world, rx: int) -> list:
         for _ in range(4):
             placed = False
             for _attempt in range(4):
-                block_x = max(rx * 16, min(rx * 16 + 15, group_origin + rng.randint(-4, 4)))
+                block_x = max(
+                    rx * 16, min(rx * 16 + 15, group_origin + rng.randint(-4, 4))
+                )
                 spawn_y = _surface_y(world, block_x, 0)
                 if spawn_y is None:
                     continue

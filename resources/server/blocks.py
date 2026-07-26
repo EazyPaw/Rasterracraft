@@ -1,9 +1,10 @@
+# Commented and arranged by ChatGPT
 import os
 import random
 
 from resources.server.biome import get_biome_by_id, get_precipitation_type
 
-if os.environ.get('PYCRAFT_CLIENT') == '1':
+if os.environ.get("PYCRAFT_CLIENT") == "1":
     pass
 
 from resources.server.block_class import *
@@ -21,8 +22,8 @@ from resources.server.inventory import Inventory
 
 
 class AIR(Block):
-    block_id = 'air'
-    name = 'tile.air.name'
+    block_id = "air"
+    name = "tile.air.name"
     _texture_path = None
     solid = False
     collision_box = EMPTY
@@ -38,12 +39,10 @@ class AIR(Block):
 
 
 class TillableBlockMixin:
-    """Shared server-authoritative hoe interaction for tillable blocks."""
-
-    till_sound = 'item.hoe.till'
+    till_sound = "item.hoe.till"
 
     def accepts_item_use(self, material) -> bool:
-        return getattr(material, 'tool_type', None) == 'hoe'
+        return getattr(material, "tool_type", None) == "hoe"
 
     def on_right_click(self, player) -> bool:
         material = player.get_held_item().material
@@ -57,8 +56,8 @@ class TillableBlockMixin:
         world.set_block(farmland, location)
         if world.get_block(location) is not farmland:
             return False
-        server = getattr(world, 'server', None)
-        broadcast_sound = getattr(server, 'broadcast_sound', None)
+        server = getattr(world, "server", None)
+        broadcast_sound = getattr(server, "broadcast_sound", None)
         if callable(broadcast_sound):
             broadcast_sound(
                 self.till_sound,
@@ -68,98 +67,109 @@ class TillableBlockMixin:
             )
         return True
 
+
 class STONE(Block):
-    block_id = 'stone'
-    name = 'tile.stone.stone.name'
-    _texture_path = 'blocks.stone'
+    block_id = "stone"
+    name = "tile.stone.stone.name"
+    _texture_path = "blocks.stone"
     blast_resistance = 6.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
     drops = (BlockDrop(COBBLESTONE_ITEM),)
 
+
 class COBBLESTONE(Block):
-    block_id = 'cobblestone'
-    name = 'tile.stonebrick.name'
-    _texture_path = 'blocks.cobblestone'
+    block_id = "cobblestone"
+    name = "tile.stonebrick.name"
+    _texture_path = "blocks.cobblestone"
     blast_resistance = 6.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
+
 
 class OBSIDIAN(Block):
-    block_id = 'obsidian'
-    name = 'tile.obsidian.name'
-    _texture_path = 'blocks.obsidian'
+    block_id = "obsidian"
+    name = "tile.obsidian.name"
+    _texture_path = "blocks.obsidian"
     hardness = 50.0
     blast_resistance = 1200.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
-    required_tool_tier = 'diamond'
+    required_tool_tier = "diamond"
+
 
 class GRANITE(Block):
-    block_id = 'granite'
-    name = 'tile.stone.granite.name'
-    _texture_path = 'blocks.stone_granite'
-    preferred_tool = 'pickaxe'
+    block_id = "granite"
+    name = "tile.stone.granite.name"
+    _texture_path = "blocks.stone_granite"
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
+
 
 class DIORITE(Block):
-    block_id = 'diorite'
-    name = 'tile.stone.diorite.name'
-    _texture_path = 'blocks.stone_diorite'
-    preferred_tool = 'pickaxe'
+    block_id = "diorite"
+    name = "tile.stone.diorite.name"
+    _texture_path = "blocks.stone_diorite"
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
+
 
 class ANDESITE(Block):
-    block_id = 'andesite'
-    name = 'tile.stone.andesite.name'
-    _texture_path = 'blocks.stone_andesite'
-    preferred_tool = 'pickaxe'
+    block_id = "andesite"
+    name = "tile.stone.andesite.name"
+    _texture_path = "blocks.stone_andesite"
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
 
+
 class BEDROCK(Block):
-    block_id = 'bedrock'
-    name = 'tile.bedrock.name'
-    _texture_path = 'blocks.bedrock'
+    block_id = "bedrock"
+    name = "tile.bedrock.name"
+    _texture_path = "blocks.bedrock"
     breakable = False
     hardness = -1
     blast_resistance = 3_600_000.0
 
+
 class DIRT(TillableBlockMixin, Block):
-    block_id = 'dirt'
-    name = 'tile.dirt.name'
-    _texture_path = 'blocks.dirt'
-    break_sound = 'dig.gravel'
+    block_id = "dirt"
+    name = "tile.dirt.name"
+    _texture_path = "blocks.dirt"
+    break_sound = "dig.gravel"
     hardness = 0.5
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
+
 
 class COARSE_DIRT(Block):
-    block_id = 'coarse_dirt'
-    name = 'tile.dirt.coarse.name'
-    _texture_path = 'blocks.coarse_dirt'
-    break_sound = 'dig.gravel'
+    block_id = "coarse_dirt"
+    name = "tile.dirt.coarse.name"
+    _texture_path = "blocks.coarse_dirt"
+    break_sound = "dig.gravel"
     hardness = 0.5
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
+
 
 class PODZOL(Block):
-    block_id = 'podzol'
-    name = 'tile.dirt.podzol.name'
-    _texture_path = 'blocks.dirt_podzol_side'
-    break_sound = 'dig.gravel'
+    block_id = "podzol"
+    name = "tile.dirt.podzol.name"
+    _texture_path = "blocks.dirt_podzol_side"
+    break_sound = "dig.gravel"
     hardness = 0.5
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
     Tags = [BlockTag.GRASS_BLOCKS]
 
+
 class GRASS_BLOCK(TillableBlockMixin, Block):
-    block_id = 'grass_block'
-    name = 'tile.grass.name'
+    block_id = "grass_block"
+    name = "tile.grass.name"
     light_attenuation = 5
-    break_sound = 'dig.gravel'
+    break_sound = "dig.gravel"
     hardness = 0.6
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
     _side_texture_cache = {}  # 缓存不同尺寸的侧面纹理
     Tags = [BlockTag.GRASS_BLOCKS, BlockTag.ANIMALS_SPAWNABLE_ON]
 
-    def __init__(self, snowed = False):
+    def __init__(self, snowed=False):
         super().__init__()
         self.snowed = snowed
 
@@ -187,7 +197,9 @@ class GRASS_BLOCK(TillableBlockMixin, Block):
 
         # 1. 获取基础材质
         base_side = client.resources_manager.get_texture_img("blocks.grass_side")
-        overlay_raw = client.resources_manager.get_texture_img("blocks.grass_side_overlay")
+        overlay_raw = client.resources_manager.get_texture_img(
+            "blocks.grass_side_overlay"
+        )
 
         if base_side is None or overlay_raw is None:
             # 如果缺少任一材质，返回默认纹理或基础纹理
@@ -199,7 +211,9 @@ class GRASS_BLOCK(TillableBlockMixin, Block):
 
         # 3. 染色 overlay (使用 RGB 元组 (30, 50, 70))
         # 注意：grass_side_overlay 通常是灰度图或带有透明度变化的图
-        stained_overlay = client.resources_manager.biome_stain(overlay_scaled, self.location).convert_alpha()
+        stained_overlay = client.resources_manager.biome_stain(
+            overlay_scaled, self.location
+        ).convert_alpha()
 
         # 4. 组合图层
         # 使用 stain.py 中的 overlay_surfaces 逻辑，或者直接使用 pygame 的 blit
@@ -212,12 +226,15 @@ class GRASS_BLOCK(TillableBlockMixin, Block):
         return final_texture
 
     def on_update(self):
-        self.snowed = isinstance(self.location.world.get_block(self.location.add(0, 1, 0)), SNOW)
+        self.snowed = isinstance(
+            self.location.world.get_block(self.location.add(0, 1, 0)), SNOW
+        )
+
 
 class FARMLAND(Block):
-    block_id = 'farmland'
-    name = 'tile.farmland.name'
-    _texture_path = 'blocks.farmland_dry'
+    block_id = "farmland"
+    name = "tile.farmland.name"
+    _texture_path = "blocks.farmland_dry"
     _texture_cache = {}
     solid = True
     has_transparent_pixels = True
@@ -228,11 +245,11 @@ class FARMLAND(Block):
         super().__init__(nbt)
 
     def accepts_item_use(self, material) -> bool:
-        return callable(getattr(material, 'create_crop', None))
+        return callable(getattr(material, "create_crop", None))
 
     def on_right_click(self, player) -> bool:
         stack = player.get_held_item()
-        create_crop = getattr(stack.material, 'create_crop', None)
+        create_crop = getattr(stack.material, "create_crop", None)
         if stack.is_empty() or not callable(create_crop) or self.location is None:
             return False
         world = self.location.world
@@ -245,7 +262,7 @@ class FARMLAND(Block):
         world.set_block(crop, crop_location)
         if world.get_block(crop_location) is not crop:
             return False
-        if getattr(player.gamemode, 'name_id', 'survival') != 'creative':
+        if getattr(player.gamemode, "name_id", "survival") != "creative":
             stack.reduce_amount(1)
             player.sync_inventory()
         return True
@@ -254,9 +271,13 @@ class FARMLAND(Block):
     def get_texture(self, size, client):
         wet = self.moisture == self.MAX_MOISTURE
         if wet:
-            base_texture = client.resources_manager.get_texture_img('blocks.farmland_wet')
+            base_texture = client.resources_manager.get_texture_img(
+                "blocks.farmland_wet"
+            )
         else:
-            base_texture = client.resources_manager.get_texture_img('blocks.farmland_dry')
+            base_texture = client.resources_manager.get_texture_img(
+                "blocks.farmland_dry"
+            )
         cache_key = (int(size), wet, base_texture)
         if cache_key in self._texture_cache:
             return self._texture_cache[cache_key]
@@ -270,7 +291,7 @@ class FARMLAND(Block):
         return self._texture_cache[cache_key]
 
     def get_collision_box(self) -> BlockCollisionBox:
-        return BlockCollisionBox.from_box(0, 0, 1, 7/8)
+        return BlockCollisionBox.from_box(0, 0, 1, 7 / 8)
 
     def _has_nearby_water(self) -> bool:
         loc = self.location
@@ -278,17 +299,22 @@ class FARMLAND(Block):
         for x in range(int(loc.x) - 4, int(loc.x) + 5):
             for y in (int(loc.y), int(loc.y) + 1):
                 for z in (0, 1):
-                    if world.get_block(x, y, z).block_id == 'water':
+                    if world.get_block(x, y, z).block_id == "water":
                         return True
         return False
 
     def _is_rained_on(self) -> bool:
         loc = self.location
         world = loc.world
-        weather = getattr(getattr(world, 'weather', None), 'value', None)
-        if weather != 'rain':
+        weather = getattr(getattr(world, "weather", None), "value", None)
+        if weather != "rain":
             return False
-        if get_precipitation_type(world.get_biome(int(loc.x), int(loc.y) + 1), int(loc.y) + 1) != 'rain':
+        if (
+            get_precipitation_type(
+                world.get_biome(int(loc.x), int(loc.y) + 1), int(loc.y) + 1
+            )
+            != "rain"
+        ):
             return False
         max_height = int(world.attribute.MAX_BUILD_HEIGHT)
         return not any(
@@ -321,12 +347,12 @@ class FARMLAND(Block):
             self._set_moisture(self.moisture - 1)
             return
         above = world.get_block(self.location.add(0, 1, 0))
-        if not getattr(above, 'maintains_farmland', False):
+        if not getattr(above, "maintains_farmland", False):
             world.set_block(DIRT(), self.location)
 
     def on_fallen_on(self, entity, fall_distance: float) -> bool:
-        volume = float(getattr(entity, 'width', 0.0)) ** 2 * float(
-            getattr(entity, 'height', 0.0)
+        volume = float(getattr(entity, "width", 0.0)) ** 2 * float(
+            getattr(entity, "height", 0.0)
         )
         if (
             self.location is not None
@@ -337,14 +363,16 @@ class FARMLAND(Block):
             return True
         return False
 
+
 class WHEAT(Crop):
-    block_id = 'wheat'
-    _texture_path = 'blocks.wheat'
-    name = 'tile.crops.name'
+    block_id = "wheat"
+    _texture_path = "blocks.wheat"
+    name = "tile.crops.name"
     max_age = 7
 
     def get_drops(self, material):
         from resources.server.item_class import ItemStack
+
         if not self.is_mature:
             return [ItemStack(WHEAT_SEEDS_ITEM(), 1)]
         drops = [ItemStack(WHEAT_ITEM(), 1)]
@@ -358,13 +386,12 @@ class WHEAT(Crop):
 
 
 class RootCrop(Crop):
-    """Shared vanilla-style harvest behavior for self-planting root crops."""
-
     produce_material_type = None
     max_age = 3
 
     def get_drops(self, material):
         from resources.server.item_class import ItemStack
+
         amount = 1
         if self.is_mature:
             amount += sum(random.random() < 4 / 7 for _ in range(3))
@@ -375,20 +402,21 @@ class RootCrop(Crop):
 
 
 class CARROTS(RootCrop):
-    block_id = 'carrots'
-    _texture_path = 'blocks.carrots'
-    name = 'tile.carrots.name'
+    block_id = "carrots"
+    _texture_path = "blocks.carrots"
+    name = "tile.carrots.name"
     produce_material_type = CARROT_ITEM
 
 
 class POTATOES(RootCrop):
-    block_id = 'potatoes'
-    _texture_path = 'blocks.potatoes'
-    name = 'tile.potatoes.name'
+    block_id = "potatoes"
+    _texture_path = "blocks.potatoes"
+    name = "tile.potatoes.name"
     produce_material_type = POTATO_ITEM
 
     def get_drops(self, material):
         from resources.server.item_class import ItemStack
+
         drops = super().get_drops(material)
         if self.is_mature and random.random() < 0.02:
             drops.append(ItemStack(POISONOUS_POTATO_ITEM(), 1))
@@ -398,6 +426,7 @@ class POTATOES(RootCrop):
 class SeedDroppingGrass:
     def get_drops(self, material):
         from resources.server.item_class import ItemStack
+
         if random.randrange(8) == 0:
             return [ItemStack(WHEAT_SEEDS_ITEM(), 1)]
         return []
@@ -407,9 +436,9 @@ class SeedDroppingGrass:
 
 
 class SHORT_GRASS(SeedDroppingGrass, GrassStain):
-    block_id = 'short_grass'
-    name = 'tile.tallgrass.grass.name'
-    _texture_path = 'blocks.tallgrass'
+    block_id = "short_grass"
+    name = "tile.tallgrass.grass.name"
+    _texture_path = "blocks.tallgrass"
     hardness = 0.0
     replaceable = True
 
@@ -462,46 +491,46 @@ class DoublePlantTopMixin:
 
 
 class TALL_GRASS(DoublePlantBottomMixin, SeedDroppingGrass, GrassStain):
-    block_id = 'tall_grass'
-    name = 'tile.doublePlant.grass.name'
-    _texture_path = 'blocks.double_plant_grass_bottom'
-    top_block_id = 'tall_grass_top'
+    block_id = "tall_grass"
+    name = "tile.doublePlant.grass.name"
+    _texture_path = "blocks.double_plant_grass_bottom"
+    top_block_id = "tall_grass_top"
 
 
 class TALL_GRASS_TOP(DoublePlantTopMixin, SeedDroppingGrass, GrassStain):
-    block_id = 'tall_grass_top'
-    name = 'tile.doublePlant.grass.name'
-    _texture_path = 'blocks.double_plant_grass_top'
-    bottom_block_id = 'tall_grass'
+    block_id = "tall_grass_top"
+    name = "tile.doublePlant.grass.name"
+    _texture_path = "blocks.double_plant_grass_top"
+    bottom_block_id = "tall_grass"
 
 
 class LARGE_FERN(DoublePlantBottomMixin, SeedDroppingGrass, GrassStain):
-    block_id = 'large_fern'
-    name = 'tile.doublePlant.fern.name'
-    _texture_path = 'blocks.double_plant_fern_bottom'
-    top_block_id = 'large_fern_top'
+    block_id = "large_fern"
+    name = "tile.doublePlant.fern.name"
+    _texture_path = "blocks.double_plant_fern_bottom"
+    top_block_id = "large_fern_top"
 
 
 class LARGE_FERN_TOP(DoublePlantTopMixin, SeedDroppingGrass, GrassStain):
-    block_id = 'large_fern_top'
-    name = 'tile.doublePlant.fern.name'
-    _texture_path = 'blocks.double_plant_fern_top'
-    bottom_block_id = 'large_fern'
+    block_id = "large_fern_top"
+    name = "tile.doublePlant.fern.name"
+    _texture_path = "blocks.double_plant_fern_top"
+    bottom_block_id = "large_fern"
 
 
 class SUNFLOWER(DoublePlantBottomMixin, Plant):
-    block_id = 'sunflower'
-    name = 'tile.doublePlant.sunflower.name'
-    _texture_path = 'blocks.double_plant_sunflower_bottom'
-    top_block_id = 'sunflower_top'
+    block_id = "sunflower"
+    name = "tile.doublePlant.sunflower.name"
+    _texture_path = "blocks.double_plant_sunflower_bottom"
+    top_block_id = "sunflower_top"
 
 
 class SUNFLOWER_TOP(DoublePlantTopMixin, Plant):
-    block_id = 'sunflower_top'
-    name = 'tile.doublePlant.sunflower.name'
-    _texture_path = 'blocks.double_plant_sunflower_top'
-    _front_texture_path = 'blocks.double_plant_sunflower_front'
-    bottom_block_id = 'sunflower'
+    block_id = "sunflower_top"
+    name = "tile.doublePlant.sunflower.name"
+    _texture_path = "blocks.double_plant_sunflower_top"
+    _front_texture_path = "blocks.double_plant_sunflower_front"
+    bottom_block_id = "sunflower"
     _texture_cache = {}
 
     @client_method
@@ -522,108 +551,116 @@ class SUNFLOWER_TOP(DoublePlantTopMixin, Plant):
 
         cls = type(self)
         if cls.has_transparent_pixels is None:
-            cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(final)
+            cls.has_transparent_pixels = (
+                client.resources_manager.has_transparent_pixels(final)
+            )
         self._texture_cache[cache_key] = final
         return final
 
 
 class ROSE_BUSH(DoublePlantBottomMixin, Plant):
-    block_id = 'rose_bush'
-    name = 'tile.doublePlant.rose.name'
-    _texture_path = 'blocks.double_plant_rose_bottom'
-    top_block_id = 'rose_bush_top'
+    block_id = "rose_bush"
+    name = "tile.doublePlant.rose.name"
+    _texture_path = "blocks.double_plant_rose_bottom"
+    top_block_id = "rose_bush_top"
 
 
 class ROSE_BUSH_TOP(DoublePlantTopMixin, Plant):
-    block_id = 'rose_bush_top'
-    name = 'tile.doublePlant.rose.name'
-    _texture_path = 'blocks.double_plant_rose_top'
-    bottom_block_id = 'rose_bush'
+    block_id = "rose_bush_top"
+    name = "tile.doublePlant.rose.name"
+    _texture_path = "blocks.double_plant_rose_top"
+    bottom_block_id = "rose_bush"
 
 
 class PEONY(DoublePlantBottomMixin, Plant):
-    block_id = 'peony'
-    name = 'tile.doublePlant.paeonia.name'
-    _texture_path = 'blocks.double_plant_paeonia_bottom'
-    top_block_id = 'peony_top'
+    block_id = "peony"
+    name = "tile.doublePlant.paeonia.name"
+    _texture_path = "blocks.double_plant_paeonia_bottom"
+    top_block_id = "peony_top"
 
 
 class PEONY_TOP(DoublePlantTopMixin, Plant):
-    block_id = 'peony_top'
-    name = 'tile.doublePlant.paeonia.name'
-    _texture_path = 'blocks.double_plant_paeonia_top'
-    bottom_block_id = 'peony'
+    block_id = "peony_top"
+    name = "tile.doublePlant.paeonia.name"
+    _texture_path = "blocks.double_plant_paeonia_top"
+    bottom_block_id = "peony"
 
 
 class LILAC(DoublePlantBottomMixin, Plant):
-    block_id = 'lilac'
-    name = 'tile.doublePlant.syringa.name'
-    _texture_path = 'blocks.double_plant_syringa_bottom'
-    top_block_id = 'lilac_top'
+    block_id = "lilac"
+    name = "tile.doublePlant.syringa.name"
+    _texture_path = "blocks.double_plant_syringa_bottom"
+    top_block_id = "lilac_top"
 
 
 class LILAC_TOP(DoublePlantTopMixin, Plant):
-    block_id = 'lilac_top'
-    name = 'tile.doublePlant.syringa.name'
-    _texture_path = 'blocks.double_plant_syringa_top'
-    bottom_block_id = 'lilac'
+    block_id = "lilac_top"
+    name = "tile.doublePlant.syringa.name"
+    _texture_path = "blocks.double_plant_syringa_top"
+    bottom_block_id = "lilac"
+
 
 class OAK_PLANK(Block):
-    block_id = 'oak_planks'
-    name = 'tile.wood.oak.name'
-    _texture_path = 'blocks.planks_oak'
-    break_sound = 'dig.wood'
+    block_id = "oak_planks"
+    name = "tile.wood.oak.name"
+    _texture_path = "blocks.planks_oak"
+    break_sound = "dig.wood"
     hardness = 2.0
-    preferred_tool = 'axe'
+    preferred_tool = "axe"
+
 
 class BIRCH_PLANK(Block):
-    block_id = 'birch_planks'
-    name = 'tile.wood.birch.name'
-    _texture_path = 'blocks.planks_birch'
-    break_sound = 'dig.wood'
+    block_id = "birch_planks"
+    name = "tile.wood.birch.name"
+    _texture_path = "blocks.planks_birch"
+    break_sound = "dig.wood"
     hardness = 2.0
-    preferred_tool = 'axe'
+    preferred_tool = "axe"
+
 
 class SPRUCE_PLANK(Block):
-    block_id = 'spruce_planks'
-    name = 'tile.wood.spruce.name'
-    _texture_path = 'blocks.planks_spruce'
-    break_sound = 'dig.wood'
+    block_id = "spruce_planks"
+    name = "tile.wood.spruce.name"
+    _texture_path = "blocks.planks_spruce"
+    break_sound = "dig.wood"
     hardness = 2.0
-    preferred_tool = 'axe'
+    preferred_tool = "axe"
+
 
 class JUNGLE_PLANK(Block):
-    block_id = 'jungle_planks'
-    name = 'tile.wood.jungle.name'
-    _texture_path = 'blocks.planks_jungle'
-    break_sound = 'dig.wood'
+    block_id = "jungle_planks"
+    name = "tile.wood.jungle.name"
+    _texture_path = "blocks.planks_jungle"
+    break_sound = "dig.wood"
     hardness = 2.0
-    preferred_tool = 'axe'
+    preferred_tool = "axe"
+
 
 class ACACIA_PLANK(Block):
-    block_id = 'acacia_planks'
-    name = 'tile.wood.acacia.name'
-    _texture_path = 'blocks.planks_acacia'
-    break_sound = 'dig.wood'
+    block_id = "acacia_planks"
+    name = "tile.wood.acacia.name"
+    _texture_path = "blocks.planks_acacia"
+    break_sound = "dig.wood"
     hardness = 2.0
-    preferred_tool = 'axe'
+    preferred_tool = "axe"
+
 
 class DARK_OAK_PLANK(Block):
-    block_id = 'dark_oak_planks'
-    name = 'tile.wood.big_oak.name'
-    _texture_path = 'blocks.planks_big_oak'
-    break_sound = 'dig.wood'
+    block_id = "dark_oak_planks"
+    name = "tile.wood.big_oak.name"
+    _texture_path = "blocks.planks_big_oak"
+    break_sound = "dig.wood"
     hardness = 2.0
-    preferred_tool = 'axe'
+    preferred_tool = "axe"
 
 
 class CRAFTING_TABLE(Block):
-    block_id = 'crafting_table'
-    name = 'tile.workbench.name'
-    _texture_path = 'blocks.crafting_table_front'
-    break_sound = 'dig.wood'
+    block_id = "crafting_table"
+    name = "tile.workbench.name"
+    _texture_path = "blocks.crafting_table_front"
+    break_sound = "dig.wood"
     hardness = 2.5
-    preferred_tool = 'axe'
+    preferred_tool = "axe"
 
 
 class FurnaceInventory(Inventory):
@@ -633,6 +670,7 @@ class FurnaceInventory(Inventory):
 
     def can_place(self, slot, stack) -> bool:
         from resources.server.smelting import find_smelting_recipe, is_fuel
+
         slot = int(slot)
         if stack is None or stack.is_empty():
             return True
@@ -681,11 +719,14 @@ class FURNACE(Block):
         if self.location is None:
             return "furnace:unplaced"
         return "furnace:{},{},{}".format(
-            int(self.location.x), int(self.location.y), int(self.location.z),
+            int(self.location.x),
+            int(self.location.y),
+            int(self.location.z),
         )
 
     def parse_nbt(self) -> dict:
         from resources.server.inventory import serialize_inventory
+
         return {
             "items": serialize_inventory(self.inventory),
             "burn_time": max(0, int(self.burn_time)),
@@ -706,27 +747,31 @@ class FURNACE(Block):
         if not isinstance(nbt, dict):
             return
         restore_inventory(self.inventory, nbt.get("items", []))
-        for key in ("burn_time", "burn_time_total", "cook_time",
-                    "cook_time_total", "stored_output_items"):
+        for key in (
+            "burn_time",
+            "burn_time_total",
+            "cook_time",
+            "cook_time_total",
+            "stored_output_items",
+        ):
             try:
                 value = int(nbt.get(key, getattr(self, key)))
             except (TypeError, ValueError):
                 continue
-            setattr(self, key, max(1, value) if key == "cook_time_total" else max(0, value))
+            setattr(
+                self, key, max(1, value) if key == "cook_time_total" else max(0, value)
+            )
         try:
             self.stored_experience = max(
-                0.0, float(nbt.get("stored_experience", self.stored_experience)),
+                0.0,
+                float(nbt.get("stored_experience", self.stored_experience)),
             )
         except (TypeError, ValueError):
             pass
         self.lit = bool(nbt.get("lit", self.burn_time > 0))
 
     def get_texture_path(self) -> str:
-        return (
-            "blocks.furnace_front_on"
-            if self.lit
-            else "blocks.furnace_front_off"
-        )
+        return "blocks.furnace_front_on" if self.lit else "blocks.furnace_front_off"
 
     @client_method
     def get_texture(self, size, client):
@@ -766,6 +811,7 @@ class FURNACE(Block):
 
     def _state_packet(self, packet_class="FurnaceUpdate") -> dict:
         from resources.server.inventory import serialize_inventory
+
         packet = {
             "__class__": packet_class,
             "container": self.container_id,
@@ -805,7 +851,9 @@ class FURNACE(Block):
         server = getattr(self.location.world, "server", None)
         if server is not None:
             server.send_client_socket(
-                player, self._state_packet("FurnaceOpen"), "Forward",
+                player,
+                self._state_packet("FurnaceOpen"),
+                "Forward",
             )
 
     def close_for(self, player) -> None:
@@ -905,8 +953,11 @@ class FURNACE(Block):
         from resources.server.smelting import find_smelting_recipe
 
         old_state = (
-            self.burn_time, self.burn_time_total, self.cook_time,
-            self.cook_time_total, self.lit,
+            self.burn_time,
+            self.burn_time_total,
+            self.cook_time,
+            self.cook_time_total,
+            self.lit,
         )
         if self.burn_time > 0:
             self.burn_time -= 1
@@ -929,8 +980,11 @@ class FURNACE(Block):
 
         self._set_lit(self.burn_time > 0)
         new_state = (
-            self.burn_time, self.burn_time_total, self.cook_time,
-            self.cook_time_total, self.lit,
+            self.burn_time,
+            self.burn_time_total,
+            self.cook_time,
+            self.cook_time_total,
+            self.lit,
         )
         if old_state != new_state:
             self._mark_contents_dirty()
@@ -964,13 +1018,15 @@ class FURNACE(Block):
             stack = self.inventory[index]
             if stack.is_empty():
                 continue
-            world.spawn_entity(Item(
-                self.location.x + 0.5,
-                self.location.y + 0.45,
-                world,
-                stack,
-                int(self.location.z),
-            ))
+            world.spawn_entity(
+                Item(
+                    self.location.x + 0.5,
+                    self.location.y + 0.45,
+                    world,
+                    stack,
+                    int(self.location.z),
+                )
+            )
             self.inventory[index] = EmptyItemStack()
         experience = self._rounded_experience(self.stored_experience)
         if experience > 0:
@@ -984,15 +1040,17 @@ class FURNACE(Block):
         self.stored_output_items = 0
         self.close_all_viewers()
 
+
 class GLOWSTONE(Block):
-    block_id = 'glowstone'
-    name = 'tile.lightgem.name'
-    _texture_path = 'blocks.glowstone'
+    block_id = "glowstone"
+    name = "tile.lightgem.name"
+    _texture_path = "blocks.glowstone"
     light_source = 15
     light_attenuation = 0
-    break_sound = 'dig.glass'
+    break_sound = "dig.glass"
     hardness = 0.3
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
+
 
 class GLASS(Block):
     block_id = "glass"
@@ -1005,157 +1063,176 @@ class GLASS(Block):
     redstone_conducting = False
     drops = ()
 
+
 class POPPY(Plant):
-    block_id = 'poppy'
-    name = 'tile.flower2.poppy.name'
-    _texture_path = 'blocks.flower_rose'
+    block_id = "poppy"
+    name = "tile.flower2.poppy.name"
+    _texture_path = "blocks.flower_rose"
+
 
 class DANDELION(Plant):
-    block_id = 'dandelion'
-    name = 'tile.flower1.dandelion.name'
-    _texture_path = 'blocks.flower_dandelion'
+    block_id = "dandelion"
+    name = "tile.flower1.dandelion.name"
+    _texture_path = "blocks.flower_dandelion"
+
 
 class OAK_LEAVES(Leaves):
-    block_id = 'oak_leaves'
-    name = 'tile.leaves.oak.name'
-    _texture_path = 'blocks.leaves_oak'
+    block_id = "oak_leaves"
+    name = "tile.leaves.oak.name"
+    _texture_path = "blocks.leaves_oak"
+
 
 class OAK_LOG(Log):
-    block_id = 'oak_log'
-    name = 'tile.log.oak.name'
-    _texture_path = 'blocks.log_oak'
+    block_id = "oak_log"
+    name = "tile.log.oak.name"
+    _texture_path = "blocks.log_oak"
+
 
 class BIRCH_LEAVES(Leaves):
-    block_id = 'birch_leaves'
-    name = 'tile.leaves.birch.name'
-    _texture_path = 'blocks.leaves_birch'
+    block_id = "birch_leaves"
+    name = "tile.leaves.birch.name"
+    _texture_path = "blocks.leaves_birch"
+
 
 class BIRCH_LOG(Log):
-    block_id = 'birch_log'
-    name = 'tile.log.birch.name'
-    _texture_path = 'blocks.log_birch'
+    block_id = "birch_log"
+    name = "tile.log.birch.name"
+    _texture_path = "blocks.log_birch"
+
 
 class SPRUCE_LEAVES(Leaves):
-    block_id = 'spruce_leaves'
-    name = 'tile.leaves.spruce.name'
-    _texture_path = 'blocks.leaves_spruce'
+    block_id = "spruce_leaves"
+    name = "tile.leaves.spruce.name"
+    _texture_path = "blocks.leaves_spruce"
+
 
 class SPRUCE_LOG(Log):
-    block_id = 'spruce_log'
-    name = 'tile.log.spruce.name'
-    _texture_path = 'blocks.log_spruce'
+    block_id = "spruce_log"
+    name = "tile.log.spruce.name"
+    _texture_path = "blocks.log_spruce"
+
 
 class JUNGLE_LEAVES(Leaves):
-    block_id = 'jungle_leaves'
-    name = 'tile.leaves.jungle.name'
-    _texture_path = 'blocks.leaves_jungle'
+    block_id = "jungle_leaves"
+    name = "tile.leaves.jungle.name"
+    _texture_path = "blocks.leaves_jungle"
+
 
 class JUNGLE_LOG(Log):
-    block_id = 'jungle_log'
-    name = 'tile.log.jungle.name'
-    _texture_path = 'blocks.log_jungle'
+    block_id = "jungle_log"
+    name = "tile.log.jungle.name"
+    _texture_path = "blocks.log_jungle"
+
 
 class ACACIA_LEAVES(Leaves):
-    block_id = 'acacia_leaves'
-    name = 'tile.leaves.acacia.name'
-    _texture_path = 'blocks.leaves_acacia'
+    block_id = "acacia_leaves"
+    name = "tile.leaves.acacia.name"
+    _texture_path = "blocks.leaves_acacia"
+
 
 class ACACIA_LOG(Log):
-    block_id = 'acacia_log'
-    name = 'tile.log.acacia.name'
-    _texture_path = 'blocks.log_acacia'
+    block_id = "acacia_log"
+    name = "tile.log.acacia.name"
+    _texture_path = "blocks.log_acacia"
+
 
 class DARK_OAK_LEAVES(Leaves):
-    block_id = 'dark_oak_leaves'
-    name = 'tile.leaves.big_oak.name'
-    _texture_path = 'blocks.leaves_big_oak'
+    block_id = "dark_oak_leaves"
+    name = "tile.leaves.big_oak.name"
+    _texture_path = "blocks.leaves_big_oak"
+
 
 class DARK_OAK_LOG(Log):
-    block_id = 'dark_oak_log'
-    name = 'tile.log.big_oak.name'
-    _texture_path = 'blocks.log_big_oak'
+    block_id = "dark_oak_log"
+    name = "tile.log.big_oak.name"
+    _texture_path = "blocks.log_big_oak"
+
 
 class SAND(GravityBlock):
-    block_id = 'sand'
-    name = 'tile.sand.name'
-    _texture_path = 'blocks.sand'
+    block_id = "sand"
+    name = "tile.sand.name"
+    _texture_path = "blocks.sand"
     break_sound = "dig.sand"
     hardness = 0.5
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
+
 
 class RED_SAND(GravityBlock):
-    block_id = 'red_sand'
-    name = 'tile.sand.red.name'
-    _texture_path = 'blocks.red_sand'
+    block_id = "red_sand"
+    name = "tile.sand.red.name"
+    _texture_path = "blocks.red_sand"
     break_sound = "dig.sand"
     hardness = 0.5
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
+
 
 class SANDSTONE(Block):
-    block_id = 'sandstone'
-    name = 'tile.sandStone.name'
-    _texture_path = 'blocks.sandstone_normal'
+    block_id = "sandstone"
+    name = "tile.sandStone.name"
+    _texture_path = "blocks.sandstone_normal"
     hardness = 0.8
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
+
 
 class RED_SANDSTONE(Block):
-    block_id = 'red_sandstone'
-    name = 'tile.redSandStone.name'
-    _texture_path = 'blocks.red_sandstone_normal'
+    block_id = "red_sandstone"
+    name = "tile.redSandStone.name"
+    _texture_path = "blocks.red_sandstone_normal"
     hardness = 0.8
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
+
 
 class GRAVEL(GravityBlock):
-    block_id = 'gravel'
-    name = 'tile.gravel.name'
-    _texture_path = 'blocks.gravel'
-    break_sound = 'dig.gravel'
+    block_id = "gravel"
+    name = "tile.gravel.name"
+    _texture_path = "blocks.gravel"
+    break_sound = "dig.gravel"
     hardness = 0.6
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
+
 
 class CLAY(Block):
-    block_id = 'clay'
-    name = 'tile.clay.name'
-    _texture_path = 'blocks.clay'
-    break_sound = 'dig.gravel'
+    block_id = "clay"
+    name = "tile.clay.name"
+    _texture_path = "blocks.clay"
+    break_sound = "dig.gravel"
     hardness = 0.6
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
+
 
 class HARDENED_CLAY(Block):
-    block_id = 'hardened_clay'
-    name = 'tile.clayHardened.name'
-    _texture_path = 'blocks.hardened_clay'
+    block_id = "hardened_clay"
+    name = "tile.clayHardened.name"
+    _texture_path = "blocks.hardened_clay"
     hardness = 1.25
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
 
+
 class SNOW(BottomSupport):
-    block_id = 'snow'
-    name = 'tile.snow.name'
-    _texture_path = 'blocks.snow'
-    break_sound = 'dig.snow'
+    block_id = "snow"
+    name = "tile.snow.name"
+    _texture_path = "blocks.snow"
+    break_sound = "dig.snow"
     solid = False
     collision_box = EMPTY
     light_attenuation = 1
     has_transparent_pixels = True
     hardness = 0.1
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
 
     _texture_cache = {}
 
-    def __init__(self, layer = 1):
+    def __init__(self, layer=1):
         super().__init__()
         if layer > 8:
-            raise Exception('layer > 8')
+            raise Exception("layer > 8")
         self.layer = max(1, int(layer))
 
     def get_collision_box(self):
-        # Match Minecraft's collision shape: one visual layer is non-colliding,
-        # while layers 2..8 are 1/8..7/8 blocks high.  Do not construct a
-        # zero-height CollisionBox because empty shapes are represented by
-        # the shared EMPTY value.
+
         collision_height = (self.layer - 1) / 8
         if collision_height <= 0:
             return EMPTY
@@ -1181,60 +1258,63 @@ class SNOW(BottomSupport):
 
         return final_texture
 
+
 class SNOW_BLOCK(Block):
-    block_id = 'snow_block'
-    name = 'tile.snow.name'
-    _texture_path = 'blocks.snow'
-    break_sound = 'dig.snow'
+    block_id = "snow_block"
+    name = "tile.snow.name"
+    _texture_path = "blocks.snow"
+    break_sound = "dig.snow"
     hardness = 0.2
-    preferred_tool = 'shovel'
+    preferred_tool = "shovel"
+
 
 class ICE(Block):
-    block_id = 'ice'
-    name = 'tile.ice.name'
-    _texture_path = 'blocks.ice'
-    break_sound = 'dig.glass'
+    block_id = "ice"
+    name = "tile.ice.name"
+    _texture_path = "blocks.ice"
+    break_sound = "dig.glass"
     friction = 0.98
     hardness = 0.5
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
+
 
 class WATER(FluidBlock):
-    block_id = 'water'
-    name = 'tile.water.name'
-    _texture_path = 'blocks.water_still'
-    _flow_texture_path = 'blocks.water_flow'
+    block_id = "water"
+    name = "tile.water.name"
+    _texture_path = "blocks.water_still"
+    _flow_texture_path = "blocks.water_flow"
     _texture_cache = {}
     _scaled_atlas_cache = {}
     _precomposed_texture_cache = {}
     horizontal_flow_range = 4
-    flowing_sound = 'liquid.water'
-    source_sound = 'liquid.water'
+    flowing_sound = "liquid.water"
+    source_sound = "liquid.water"
+
 
 class LAVA(FluidBlock):
-    block_id = 'lava'
-    name = 'tile.lava.name'
-    _texture_path = 'blocks.lava_still'
-    _flow_texture_path = 'blocks.lava_flow'
+    block_id = "lava"
+    name = "tile.lava.name"
+    _texture_path = "blocks.lava_still"
+    _flow_texture_path = "blocks.lava_flow"
     _texture_cache = {}
     _scaled_atlas_cache = {}
     _precomposed_texture_cache = {}
-    # LEVEL remains the vanilla 0..7 range; the two-level drop-off means
-    # normal horizontal spreading uses 0, 2, 4, 6, then stops.
+
     max_level = 7
-    # Vanilla lava drops two legacy levels per horizontal spread and searches
-    # only two cells for a lower slope in the normal dimension.
+
     flow_level_step = 2
     horizontal_flow_range = 2
     light_source = 15
     can_create_source = False
     flow_speed_ticks = 30
-    flowing_sound = 'liquid.lava'
-    source_sound = 'liquid.lavapop'
+    flowing_sound = "liquid.lava"
+    source_sound = "liquid.lavapop"
+
 
 class SUGAR_CANE(Plant):
-    block_id = 'sugar_cane'
-    name = 'tile.reeds.name'
-    _texture_path = 'blocks.reeds'
+    block_id = "sugar_cane"
+    name = "tile.reeds.name"
+    _texture_path = "blocks.reeds"
 
     def on_update(self):
         below = self.location.world.get_block(self.location.add(0, -1, 0))
@@ -1251,156 +1331,172 @@ class SUGAR_CANE(Plant):
                 return
         self.location.world.break_block(self.location)
 
+
 class FERN(SeedDroppingGrass, GrassStain):
-    block_id = 'fern'
-    name = 'tile.tallgrass.fern.name'
-    _texture_path = 'blocks.fern'
+    block_id = "fern"
+    name = "tile.tallgrass.fern.name"
+    _texture_path = "blocks.fern"
+
 
 class DEAD_BUSH(Plant):
-    block_id = 'dead_bush'
-    name = 'tile.deadbush.name'
-    _texture_path = 'blocks.deadbush'
+    block_id = "dead_bush"
+    name = "tile.deadbush.name"
+    _texture_path = "blocks.deadbush"
 
 
 class CACTUS(Block):
-    block_id = 'cactus'
-    name = 'tile.cactus.name'
-    _texture_path = 'blocks.cactus_side'
-    break_sound = 'dig.cloth'
+    block_id = "cactus"
+    name = "tile.cactus.name"
+    _texture_path = "blocks.cactus_side"
+    break_sound = "dig.cloth"
     hardness = 0.4
-    preferred_tool = 'axe'
+    preferred_tool = "axe"
 
     def on_update(self):
         below = self.location.world.get_block(self.location.add(0, -1, 0))
         if not isinstance(below, (CACTUS, SAND, RED_SAND)):
             self.location.world.break_block(self.location)
 
+
 class BROWN_MUSHROOM(Plant):
-    block_id = 'brown_mushroom'
-    name = 'tile.mushroom.name'
-    _texture_path = 'blocks.mushroom_brown'
+    block_id = "brown_mushroom"
+    name = "tile.mushroom.name"
+    _texture_path = "blocks.mushroom_brown"
 
     def on_update(self):
         pass
+
 
 class RED_MUSHROOM(Plant):
-    block_id = 'red_mushroom'
-    name = 'tile.mushroom.name'
-    _texture_path = 'blocks.mushroom_red'
+    block_id = "red_mushroom"
+    name = "tile.mushroom.name"
+    _texture_path = "blocks.mushroom_red"
 
     def on_update(self):
         pass
 
+
 class VINE(GrassStain):
-    block_id = 'vine'
-    name = 'tile.vine.name'
-    _texture_path = 'blocks.vine'
+    block_id = "vine"
+    name = "tile.vine.name"
+    _texture_path = "blocks.vine"
     light_attenuation = 1
 
     def on_update(self):
-        # World-generated vines are decorative foreground growth and do not
-        # require bottom support like ordinary plants.
+
         pass
 
+
 class COAL_ORE(Block):
-    block_id = 'coal_ore'
-    name = 'tile.oreCoal.name'
-    _texture_path = 'blocks.coal_ore'
+    block_id = "coal_ore"
+    name = "tile.oreCoal.name"
+    _texture_path = "blocks.coal_ore"
     hardness = 3.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
+
 
 class IRON_ORE(Block):
-    block_id = 'iron_ore'
-    name = 'tile.oreIron.name'
-    _texture_path = 'blocks.iron_ore'
+    block_id = "iron_ore"
+    name = "tile.oreIron.name"
+    _texture_path = "blocks.iron_ore"
     hardness = 3.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
-    required_tool_tier = 'stone'
+    required_tool_tier = "stone"
+
 
 class GOLD_ORE(Block):
-    block_id = 'gold_ore'
-    name = 'tile.oreGold.name'
-    _texture_path = 'blocks.gold_ore'
+    block_id = "gold_ore"
+    name = "tile.oreGold.name"
+    _texture_path = "blocks.gold_ore"
     hardness = 3.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
-    required_tool_tier = 'iron'
+    required_tool_tier = "iron"
+
 
 class DIAMOND_ORE(Block):
-    block_id = 'diamond_ore'
-    name = 'tile.oreDiamond.name'
-    _texture_path = 'blocks.diamond_ore'
+    block_id = "diamond_ore"
+    name = "tile.oreDiamond.name"
+    _texture_path = "blocks.diamond_ore"
     hardness = 3.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
-    required_tool_tier = 'iron'
+    required_tool_tier = "iron"
+
 
 class EMERALD_ORE(Block):
-    block_id = 'emerald_ore'
-    name = 'tile.oreEmerald.name'
-    _texture_path = 'blocks.emerald_ore'
+    block_id = "emerald_ore"
+    name = "tile.oreEmerald.name"
+    _texture_path = "blocks.emerald_ore"
     hardness = 3.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
-    required_tool_tier = 'iron'
+    required_tool_tier = "iron"
+
 
 class LAPIS_ORE(Block):
-    block_id = 'lapis_ore'
-    name = 'tile.oreLapis.name'
-    _texture_path = 'blocks.lapis_ore'
+    block_id = "lapis_ore"
+    name = "tile.oreLapis.name"
+    _texture_path = "blocks.lapis_ore"
     hardness = 3.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
-    required_tool_tier = 'stone'
+    required_tool_tier = "stone"
+
 
 class REDSTONE_ORE(Block):
-    block_id = 'redstone_ore'
-    name = 'tile.oreRedstone.name'
-    _texture_path = 'blocks.redstone_ore'
+    block_id = "redstone_ore"
+    name = "tile.oreRedstone.name"
+    _texture_path = "blocks.redstone_ore"
     hardness = 3.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
-    required_tool_tier = 'iron'
+    required_tool_tier = "iron"
+
 
 class BLUE_ORCHID(Plant):
-    block_id = 'blue_orchid'
-    name = 'tile.flower2.blueOrchid.name'
-    _texture_path = 'blocks.flower_blue_orchid'
+    block_id = "blue_orchid"
+    name = "tile.flower2.blueOrchid.name"
+    _texture_path = "blocks.flower_blue_orchid"
+
 
 class ALLIUM(Plant):
-    block_id = 'allium'
-    name = 'tile.flower2.allium.name'
-    _texture_path = 'blocks.flower_allium'
+    block_id = "allium"
+    name = "tile.flower2.allium.name"
+    _texture_path = "blocks.flower_allium"
+
 
 class AZURE_BLUET(Plant):
-    block_id = 'azure_bluet'
-    name = 'tile.flower2.houstonia.name'
-    _texture_path = 'blocks.flower_houstonia'
+    block_id = "azure_bluet"
+    name = "tile.flower2.houstonia.name"
+    _texture_path = "blocks.flower_houstonia"
+
 
 class OXEYE_DAISY(Plant):
-    block_id = 'oxeye_daisy'
-    name = 'tile.flower2.oxeyeDaisy.name'
-    _texture_path = 'blocks.flower_oxeye_daisy'
+    block_id = "oxeye_daisy"
+    name = "tile.flower2.oxeyeDaisy.name"
+    _texture_path = "blocks.flower_oxeye_daisy"
+
 
 class DIAMOND_BLOCK(Block):
-    block_id = 'diamond_block'
-    name = 'tile.blockDiamond.name'
-    _texture_path = 'blocks.diamond_block'
+    block_id = "diamond_block"
+    name = "tile.blockDiamond.name"
+    _texture_path = "blocks.diamond_block"
     hardness = 5.0
-    preferred_tool = 'pickaxe'
+    preferred_tool = "pickaxe"
     requires_correct_tool = True
-    required_tool_tier = 'iron'
+    required_tool_tier = "iron"
 
 
 class TORCH(ParticleEmitterBlock):
-    block_id = 'torch'
-    name = 'tile.torch.name'
+    block_id = "torch"
+    name = "tile.torch.name"
     hardness = 0
     solid = False
     collision_box = EMPTY
-    _texture_path = 'blocks.torch_on'
+    _texture_path = "blocks.torch_on"
     light_source = 15
     break_sound = "dig.wood"
     has_transparent_pixels = True
@@ -1434,7 +1530,9 @@ class TORCH(ParticleEmitterBlock):
         # 面向未来 API 的别名，存档仍统一使用 facing 字段。
         if isinstance(facing, dict) and nbt is None:
             nbt, facing = facing, "up"
-        self.facing = self.normalize_facing(direction if direction is not None else facing)
+        self.facing = self.normalize_facing(
+            direction if direction is not None else facing
+        )
         super().__init__(nbt)
         self.facing = self.normalize_facing(self.facing)
 
@@ -1491,8 +1589,9 @@ class TORCH(ParticleEmitterBlock):
             return (-1, 0, 0)
         return super().get_support_offset()
 
-    def get_placement_location(self, target, *, player=None, fore_place=False,
-                               context=None):
+    def get_placement_location(
+        self, target, *, player=None, fore_place=False, context=None
+    ):
         """按射线命中面选择火把形态；支撑与可替换性仍由自身校验。"""
         target_location = getattr(target, "location", None)
         if target_location is None or not self.is_full_block(target):
@@ -1520,16 +1619,24 @@ class TORCH(ParticleEmitterBlock):
                 # 自动选择另一层，仍由 can_survive 检查实际支撑。
                 self.facing = self.FACING_FORWARD
                 forward_z = 0 if target_location.z == 1 else 1
-                place_location = Location(world, target_location.x, target_location.y, forward_z)
+                place_location = Location(
+                    world, target_location.x, target_location.y, forward_z
+                )
             elif hit_face == "left":
                 self.facing = self.FACING_LEFT
-                place_location = Location(world, target_location.x - 1, target_location.y, target_z)
+                place_location = Location(
+                    world, target_location.x - 1, target_location.y, target_z
+                )
             elif hit_face == "right":
                 self.facing = self.FACING_RIGHT
-                place_location = Location(world, target_location.x + 1, target_location.y, target_z)
+                place_location = Location(
+                    world, target_location.x + 1, target_location.y, target_z
+                )
             elif hit_face == "top":
                 self.facing = self.FACING_UP
-                place_location = Location(world, target_location.x, target_location.y + 1, target_z)
+                place_location = Location(
+                    world, target_location.x, target_location.y + 1, target_z
+                )
             else:
                 return None
 
@@ -1547,7 +1654,7 @@ class TORCH(ParticleEmitterBlock):
 
     @classmethod
     @client_method
-    def _get_oriented_texture(cls, texture, size, facing, client = None):
+    def _get_oriented_texture(cls, texture, size, facing, client=None):
         m = client.render.block_size // 16
         size = max(1, int(round(size)))
         scaled = pygame.transform.scale(texture, (size, size)).convert_alpha()
@@ -1558,15 +1665,17 @@ class TORCH(ParticleEmitterBlock):
             height = max(1, int(round(size * cls._NON_UP_HEIGHT_RATIO)))
             b = pygame.transform.scale(scaled, (size, height)).convert_alpha()
             result = pygame.Surface(b.get_size(), pygame.SRCALPHA)
-            result.blit(b, (0, -3*m))
+            result.blit(b, (0, -3 * m))
             return result
 
-        angle = cls._SIDE_TILT_ANGLE if facing == cls.FACING_LEFT else -cls._SIDE_TILT_ANGLE
+        angle = (
+            cls._SIDE_TILT_ANGLE if facing == cls.FACING_LEFT else -cls._SIDE_TILT_ANGLE
+        )
         rotated = pygame.transform.rotate(scaled, angle)
         # 旋转后纹理居中，需要平移使火把根部紧贴支撑方块。
         # FACING_LEFT:  支撑方块在右侧，向右平移。正值越大越靠右。
         # FACING_RIGHT: 支撑方块在左侧，向左平移。负值越大越靠左。
-        shift_x = 3*m if facing == cls.FACING_LEFT else -7.7*m
+        shift_x = 3 * m if facing == cls.FACING_LEFT else -7.7 * m
         result = pygame.Surface(rotated.get_size(), pygame.SRCALPHA)
         result.blit(rotated, (shift_x, 0))
         return result
@@ -1578,7 +1687,9 @@ class TORCH(ParticleEmitterBlock):
             return None
         cls = type(self)
         if cls.has_transparent_pixels is None:
-            cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(texture)
+            cls.has_transparent_pixels = (
+                client.resources_manager.has_transparent_pixels(texture)
+            )
         size = max(1, int(round(size)))
         cache = cls.__dict__.get("_oriented_texture_cache")
         if cache is None:
@@ -1595,29 +1706,29 @@ class TORCH(ParticleEmitterBlock):
                 cache.pop(next(iter(cache)))
         return oriented
 
+
 class OAK_SLAB(SLABS):
-    block_id = 'oak_slab'
-    name = 'tile.oak_slab.name'
-    _texture_path = 'blocks.planks_oak'
+    block_id = "oak_slab"
+    name = "tile.oak_slab.name"
+    _texture_path = "blocks.planks_oak"
+
 
 class TNT(Block):
-    block_id = 'tnt'
-    name = 'tile.tnt.name'
-    _texture_path = 'blocks.tnt_side'
+    block_id = "tnt"
+    name = "tile.tnt.name"
+    _texture_path = "blocks.tnt_side"
     hardness = 0.0
     blast_resistance = 0.0
-    break_sound = 'dig.grass'
+    break_sound = "dig.grass"
 
     def accepts_item_use(self, material) -> bool:
         return bool(getattr(material, "ignites_blocks", False))
 
     def prime(self, *, fuse: int = 80, igniter=None) -> bool:
-        """Replace this block with a server-authoritative primed TNT entity."""
         if self.location is None:
             return False
         world = self.location.world
-        # Guard against stale block instances (for example two interactions in
-        # the same server tick) spawning duplicate fuses.
+
         if world.get_block(self.location) is not self:
             return False
         from resources.server.entities.primed_tnt import PrimedTNT
@@ -1637,35 +1748,39 @@ class TNT(Block):
         return self.prime(fuse=80, igniter=player)
 
     def on_exploded(self, power: float, source=None) -> bool:
-        # Vanilla shortens the fuse of TNT reached by another blast to a
-        # random 10--30 ticks instead of dropping or deleting the block.
+
         self.prime(fuse=random.randint(10, 30), igniter=source)
         return False
 
+
 class MYCELIUM(Block):
     block_id = "mycelium"
-    name = 'tile.mycelium.name'
-    _texture_path = 'blocks.mycelium_side'
+    name = "tile.mycelium.name"
+    _texture_path = "blocks.mycelium_side"
+
 
 class MUSHROOM_STEM(Block):
     block_id = "mushroom_stem"
-    name = 'tile.mushroom_stem.name'
-    _texture_path = 'blocks.mushroom_block_skin_stem'
+    name = "tile.mushroom_stem.name"
+    _texture_path = "blocks.mushroom_block_skin_stem"
+
 
 class RED_MUSHROOM_BLOCK(Block):
     block_id = "red_mushroom_block"
-    name = 'tile.red_mushroom_block.name'
-    _texture_path = 'blocks.mushroom_block_skin_red'
+    name = "tile.red_mushroom_block.name"
+    _texture_path = "blocks.mushroom_block_skin_red"
+
 
 class BROWN_MUSHROOM_BLOCK(Block):
     block_id = "brown_mushroom_block"
-    name = 'tile.brown_mushroom_block.name'
-    _texture_path = 'blocks.mushroom_block_skin_brown'
+    name = "tile.brown_mushroom_block.name"
+    _texture_path = "blocks.mushroom_block_skin_brown"
+
 
 class FIRE(Block):
-    block_id = 'fire'
-    name = 'tile.fire.name'
-    _texture_path = 'blocks.fire_layer_0'
+    block_id = "fire"
+    name = "tile.fire.name"
+    _texture_path = "blocks.fire_layer_0"
     light_source = 15
     solid = False
     collision_box = EMPTY
@@ -1678,6 +1793,7 @@ class FIRE(Block):
     def get_collision_box(self):
         return EMPTY
 
+
 # ---- block_id → Block 子类 缓存 ----
 _BLOCK_REGISTRY: dict[str, type] = None  # None = 尚未构建
 
@@ -1688,7 +1804,7 @@ def _build_block_id_cache() -> dict[str, type]:
 
     def collect(cls):
         for subclass in cls.__subclasses__():
-            bid = getattr(subclass, 'block_id', None)
+            bid = getattr(subclass, "block_id", None)
             if bid is not None:
                 cache[bid] = subclass
             collect(subclass)
@@ -1715,7 +1831,6 @@ def get_block_by_id(block_id: str) -> Block:
 
 
 def has_block_id(block_id: str) -> bool:
-    """Return whether a stable block id is registered without logging."""
     global _BLOCK_REGISTRY
     if _BLOCK_REGISTRY is None:
         _BLOCK_REGISTRY = _build_block_id_cache()

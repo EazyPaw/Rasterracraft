@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """
 渲染相关常量定义
 ==================

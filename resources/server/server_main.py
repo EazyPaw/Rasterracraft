@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import heapq
 import itertools
 import logging
@@ -17,8 +18,12 @@ import resources.server.generator as generator
 from resources.server import save_manager
 from resources.server.commands import CommandExecutor
 from resources.server.inventory import (
-    Inventory, normalize_inventory_payload, payload_to_stack,
-    restore_inventory, serialize_inventory, stack_to_payload,
+    Inventory,
+    normalize_inventory_payload,
+    payload_to_stack,
+    restore_inventory,
+    serialize_inventory,
+    stack_to_payload,
 )
 from resources.server.crafting import load_recipes
 from resources.server.experience import total_experience_for_level
@@ -30,12 +35,6 @@ from resources.server.world_class import Weather, World, WorldAttribute
 
 
 def _msgpack_default(value):
-    """Convert the uncommon numpy values which msgpack cannot encode itself.
-
-    Most packets already contain only native Python values.  Letting msgpack
-    walk those packets directly avoids recursively copying every dict/list on
-    every send, while retaining compatibility for numpy-backed payloads.
-    """
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.floating):
@@ -50,8 +49,9 @@ def _msgpack_default(value):
         return value.tolist()
     raise TypeError(f"Cannot serialize {type(value).__name__}")
 
+
 class Server:
-    def __init__(self, integrated = False, client = None, save_id: str | None = None):
+    def __init__(self, integrated=False, client=None, save_id: str | None = None):
         self.running = True
         self.main_world_id = "overworld"
         self.worlds: dict[str, World] = {}
@@ -68,22 +68,22 @@ class Server:
         self.save_id = save_id
         self.level_data: dict[str, Any] | None = None
         self._save_lock = threading.RLock()
-        # Match Minecraft's normal five-minute (6000 tick) autosave cadence.
-        # The old five-second cadence compressed dirty regions on the tick
-        # thread often enough to create a periodic hitch by itself.
+
         self.autosave_interval_ticks = self.rate * 300
         self.socket_server = self.SocketServer(self)
         self.initialized = False
-        self.input_thread = threading.Thread(target=self.check_input, name="Command thread")
+        self.input_thread = threading.Thread(
+            target=self.check_input, name="Command thread"
+        )
         self.input_thread.daemon = True
         self.commands_error_traceback = False
         self.input_thread.start()
         self.command_executor = CommandExecutor(self)
         self.client = client
-        # Noise/numpy release the GIL in places, but block construction remains
-        # Python-heavy.  Two workers keep generation parallel without eight
-        # CPU-bound threads starving the 20 TPS simulation thread.
-        self.chunk_gen_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ChunkGen")
+
+        self.chunk_gen_pool = ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="ChunkGen"
+        )
         self._chunk_gen_futures: dict[tuple[World, int], Future] = {}
         self.chunk_send_budget_per_tick = 1
         self._chunk_send_cursor = 0
@@ -111,7 +111,7 @@ class Server:
             result = result.replace("§c", "\x1b[31;21m")
             logging.info(result)
 
-    def register_event(self, func, *args, ticks = 1):
+    def register_event(self, func, *args, ticks=1):
         tick = self.ticks + ticks
         event = (tick, next(self._event_sequence), func, args)
         with self._event_lock:
@@ -136,7 +136,6 @@ class Server:
             self.server.ready.wait()
             logging.info("Server ready, accepting connections.")
             while self.running:
-
                 try:
                     client_sock, client_addr = self.server_sock.accept()
                 except OSError:
@@ -144,17 +143,14 @@ class Server:
                         logging.error("Socket server accept failed")
                     break
 
-                # This hook intentionally runs before a Player is created or
-                # added to the server.  Server implementations can override
-                # ``check_player_connection`` to reject an address, token,
-                # whitelist entry, etc.  Returning None accepts the client;
-                # returning Text or str sends a Disconnect packet instead.
                 try:
                     rejection_reason = self.server.check_player_connection(
                         client_sock, client_addr
                     )
                 except Exception:
-                    logging.exception("Player connection check failed for %s", client_addr)
+                    logging.exception(
+                        "Player connection check failed for %s", client_addr
+                    )
                     self.server.reject_connection(client_sock, None)
                     continue
                 if rejection_reason is not None:
@@ -163,42 +159,53 @@ class Server:
 
                 spawn_x, spawn_y = self.server.get_player_spawn()
                 player = Player(spawn_x, spawn_y, self.server.worlds["overworld"])
-                # The first local integrated player is the only implicit
-                # operator. Standalone/network players require an explicit
-                # server-side permission assignment.
-                player.is_operator = bool(self.server.integrated and not self.server.players)
+
+                player.is_operator = bool(
+                    self.server.integrated and not self.server.players
+                )
                 self.server.restore_player_state(player)
                 self.connections[player] = (client_sock, client_addr)
                 self.send_locks[player] = threading.Lock()
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
                 for other in self.server.players:
-                    if other is not player and other.is_loading_position(int(player.x), int(player.y), 0):
+                    if other is not player and other.is_loading_position(
+                        int(player.x), int(player.y), 0
+                    ):
                         self.server.send_client_socket(other, player, "EntitySpawn")
-                self.server.broadcast_chat(f"{player.name} joined the game", (255, 255, 85))
+                self.server.broadcast_chat(
+                    f"{player.name} joined the game", (255, 255, 85)
+                )
                 initial_center = int(player.x // 16)
                 self.server.send_client_socket(
                     player,
                     {
-                        '__class__': 'WorldLoadStart',
-                        'regions': list(range(
-                            initial_center - self.server.view_distance,
-                            initial_center + self.server.view_distance + 1,
-                        )),
+                        "__class__": "WorldLoadStart",
+                        "regions": list(
+                            range(
+                                initial_center - self.server.view_distance,
+                                initial_center + self.server.view_distance + 1,
+                            )
+                        ),
                     },
                     "Forward",
                 )
-                # Use Player.teleport_to even for the initial position so the
-                # first client movement cannot race ahead of its spawn packet.
+
                 player.teleport_to(player.x, player.y)
-                self.server.send_client_socket(player, player.world.get_weather_packet(), "Forward")
+                self.server.send_client_socket(
+                    player, player.world.get_weather_packet(), "Forward"
+                )
                 self.server.send_client_socket(
                     player,
-                    {'__class__': 'TimeUpdate', 'time': int(player.world.world_time)},
+                    {"__class__": "TimeUpdate", "time": int(player.world.world_time)},
                     "Forward",
                 )
                 self.server.send_client_socket(player, player, "GamemodeUpdate")
-                client_thread = threading.Thread(target=self.handle_client, args=(client_sock, client_addr, player), name="SocketClientThread")
+                client_thread = threading.Thread(
+                    target=self.handle_client,
+                    args=(client_sock, client_addr, player),
+                    name="SocketClientThread",
+                )
                 client_thread.daemon = True
                 client_thread.start()
 
@@ -212,15 +219,17 @@ class Server:
                         logging.info(f"Client {client_addr} disconnected")
                         self.server.on_player_disconnect(player)
                         break
-                    
-                    msg_len = struct.unpack('>I', raw_len)[0]
-                    
+
+                    msg_len = struct.unpack(">I", raw_len)[0]
+
                     # 验证长度合理性（防止恶意数据或损坏）
                     if msg_len <= 0 or msg_len > 1048576:  # 最大1MB
-                        logging.error(f"Invalid message length: {msg_len} from {client_addr}")
+                        logging.error(
+                            f"Invalid message length: {msg_len} from {client_addr}"
+                        )
                         self.server.on_player_disconnect(player)
                         break
-                    
+
                     # 读取消息体
                     msg_body = recv_exact(client_sock, msg_len)
                     if not msg_body or len(msg_body) < msg_len:
@@ -253,11 +262,13 @@ class Server:
     def process_events(self):
         while True:
             with self._event_lock:
-                if not self.registered_events or self.registered_events[0][0] > self.ticks:
+                if (
+                    not self.registered_events
+                    or self.registered_events[0][0] > self.ticks
+                ):
                     return
                 _, _, func, args = heapq.heappop(self.registered_events)
-            # Run callbacks outside the heap lock; callbacks may schedule the
-            # next occurrence themselves.
+
             func(*args)
 
     def integrated_check(self):
@@ -265,7 +276,7 @@ class Server:
         检测 subprocess 模式下否因为客户端意外结束导致服务端持续运行，成为僵尸线程
         :return:
         """
-        if not self.players: # 无玩家
+        if not self.players:  # 无玩家
             logging.warning("Null client, closing integrated server.")
             self.close_server()
             self.register_event(self.integrated_check, ticks=20)
@@ -299,9 +310,7 @@ class Server:
                 time.sleep(sleep_time)
             else:
                 behind_seconds = -sleep_time
-                # Minecraft 1.21.4 warns only after roughly 40 missed 20-TPS
-                # ticks and rate-limits this message to about 15 seconds.  A
-                # one-tick Windows scheduling wobble is not server overload.
+
                 overload_threshold = 1.0 + 20.0 * interval
                 warning_interval = 10.0 + 100.0 * interval
                 if (
@@ -313,7 +322,9 @@ class Server:
                         key=lambda item: item[1],
                         reverse=True,
                     )[:3]
-                    detail = ", ".join(f"{name}={value:.1f}ms" for name, value in sections)
+                    detail = ", ".join(
+                        f"{name}={value:.1f}ms" for name, value in sections
+                    )
                     logging.warning(
                         "Overloaded! Server is %.1fms (%.1f ticks) behind; "
                         "last tick %.1fms%s",
@@ -322,8 +333,7 @@ class Server:
                         tick_elapsed * 1000.0,
                         f"; slowest: {detail}" if detail else "",
                     )
-                    # Rebase the deadline instead of busy-running old ticks to
-                    # catch up, matching Minecraft's overload recovery loop.
+
                     next_time += int(behind_seconds / interval) * interval
                     last_overload_warning = now
             self.ticks += 1
@@ -336,32 +346,43 @@ class Server:
         world_time = 0
         if self.save_id:
             self.level_data = save_manager.ensure_level(self.save_id)
-            world_meta = self.level_data.setdefault("worlds", {}).setdefault(self.main_world_id, {})
+            world_meta = self.level_data.setdefault("worlds", {}).setdefault(
+                self.main_world_id, {}
+            )
             seed = int(world_meta.get("seed", seed))
             world_time = int(world_meta.get("world_time", 0))
             world_meta["seed"] = seed
             world_meta["generator"] = "MinecraftLike2D"
             world_meta["max_build_height"] = 256
             save_manager.save_level(self.save_id, self.level_data)
-        self.worlds["overworld"] = World(self
-                                         ,"overworld"
-                                         , generator.MinecraftLike2D
-                                         , WorldAttribute()
-                                         , seed)
+        self.worlds["overworld"] = World(
+            self, "overworld", generator.MinecraftLike2D, WorldAttribute(), seed
+        )
         self.worlds["overworld"].world_time = world_time
         if self.save_id:
             self.worlds["overworld"].disable_mob_generation = bool(
                 world_meta.get("disable_mob_generation", False)
             )
-            self.worlds["overworld"].queue_saved_entities(world_meta.get("entities", ()))
-        weather_name = str(world_meta.get("weather", Weather.CLEAR.value)) if self.save_id else Weather.CLEAR.value
+            self.worlds["overworld"].queue_saved_entities(
+                world_meta.get("entities", ())
+            )
+        weather_name = (
+            str(world_meta.get("weather", Weather.CLEAR.value))
+            if self.save_id
+            else Weather.CLEAR.value
+        )
         try:
             self.worlds["overworld"].weather = Weather(weather_name)
         except ValueError:
             self.worlds["overworld"].weather = Weather.CLEAR
         if self.save_id:
             self.worlds["overworld"].weather_tick = max(
-                1, int(world_meta.get("weather_tick", self.worlds["overworld"].weather_tick))
+                1,
+                int(
+                    world_meta.get(
+                        "weather_tick", self.worlds["overworld"].weather_tick
+                    )
+                ),
             )
         self.initialized = True
         self.ready.set()  # 通知 socket 线程服务器已就绪
@@ -393,8 +414,8 @@ class Server:
             for player in self.players:
                 self.send_client_socket(
                     player,
-                    {'__class__': 'TimeUpdate', 'time': int(player.world.world_time)},
-                    "Forward"
+                    {"__class__": "TimeUpdate", "time": int(player.world.world_time)},
+                    "Forward",
                 )
         finish_section("time_sync")
         self.load_chunks()
@@ -406,7 +427,12 @@ class Server:
             world.update_entities()
         finish_section("entities")
         for world in self.worlds.values():
-            for entity_name, update_ms, tracking_ms, send_ms in world.last_entity_timings_ms:
+            for (
+                entity_name,
+                update_ms,
+                tracking_ms,
+                send_ms,
+            ) in world.last_entity_timings_ms:
                 timings[f"entity[{entity_name}].update"] = update_ms
                 timings[f"entity[{entity_name}].tracking"] = tracking_ms
                 timings[f"entity[{entity_name}].send"] = send_ms
@@ -432,9 +458,13 @@ class Server:
             return
         data = self.level_data.get("player", {})
         player.attributes.load_persistent_data(data.get("attributes", []))
-        player.health = max(0.0, min(player.max_health, float(data.get("health", player.max_health))))
+        player.health = max(
+            0.0, min(player.max_health, float(data.get("health", player.max_health)))
+        )
         player.food_level = max(0, min(20, int(data.get("food_level", 20))))
-        player.saturation = max(0.0, min(float(player.food_level), float(data.get("saturation", 5.0))))
+        player.saturation = max(
+            0.0, min(float(player.food_level), float(data.get("saturation", 5.0)))
+        )
         player.exhaustion = max(0.0, min(40.0, float(data.get("exhaustion", 0.0))))
         player.food_tick_timer = max(0, min(80, int(data.get("food_tick_timer", 0))))
         player.experience = max(0, int(data.get("experience", 0)))
@@ -451,6 +481,7 @@ class Server:
         saved_gamemode = data.get("gamemode") or self.level_data.get("game_mode")
         if saved_gamemode:
             from resources.client.game_mode import get_gamemode_by_id
+
             player.gamemode = get_gamemode_by_id(saved_gamemode)
         saved_inventory = data.get("inventory")
         if isinstance(saved_inventory, list):
@@ -553,30 +584,41 @@ class Server:
             player = self.players[0]
         if player is not None:
             player.refresh_attribute_modifiers()
-            player_data = {"x": float(player.x), "y": float(player.y), "health": float(player.health),
-                           "attributes": player.attributes.to_persistent_data(),
-                           "food_level": int(getattr(player, "food_level", 20)),
-                           "saturation": float(getattr(player, "saturation", 5.0)),
-                           "exhaustion": float(getattr(player, "exhaustion", 0.0)),
-                           "food_tick_timer": int(getattr(player, "food_tick_timer", 0)),
-                           "experience": int(getattr(player, "experience", 0)),
-                           "experience_level": int(getattr(player, "experience_level", 0)),
-                           "experience_total": int(getattr(player, "experience_total", 0)),
-                           "score": int(getattr(player, "score", 0)),
-                           "gamemode": player.gamemode.name_id if hasattr(player.gamemode, "name_id") else "survival",
-                           "selected_slot": max(0, min(8, int(getattr(player, "selected_slot", 0)))),
-                           "equipment": {
-                               slot: stack_to_payload(stack)
-                               for slot, stack in player.equipment.items()
-                           },
-                           "cursor": stack_to_payload(player.cursor_stack), "inventory": normalize_inventory_payload(
+            player_data = {
+                "x": float(player.x),
+                "y": float(player.y),
+                "health": float(player.health),
+                "attributes": player.attributes.to_persistent_data(),
+                "food_level": int(getattr(player, "food_level", 20)),
+                "saturation": float(getattr(player, "saturation", 5.0)),
+                "exhaustion": float(getattr(player, "exhaustion", 0.0)),
+                "food_tick_timer": int(getattr(player, "food_tick_timer", 0)),
+                "experience": int(getattr(player, "experience", 0)),
+                "experience_level": int(getattr(player, "experience_level", 0)),
+                "experience_total": int(getattr(player, "experience_total", 0)),
+                "score": int(getattr(player, "score", 0)),
+                "gamemode": player.gamemode.name_id
+                if hasattr(player.gamemode, "name_id")
+                else "survival",
+                "selected_slot": max(
+                    0, min(8, int(getattr(player, "selected_slot", 0)))
+                ),
+                "equipment": {
+                    slot: stack_to_payload(stack)
+                    for slot, stack in player.equipment.items()
+                },
+                "cursor": stack_to_payload(player.cursor_stack),
+                "inventory": normalize_inventory_payload(
                     serialize_inventory(player.inventory)
-                ), "crafting": normalize_inventory_payload(
+                ),
+                "crafting": normalize_inventory_payload(
                     serialize_inventory(player.crafting_grid), 9
-                ), "saved_hotbars": [
+                ),
+                "saved_hotbars": [
                     normalize_inventory_payload(serialize_inventory(hotbar), 9)
                     for hotbar in player.saved_hotbars
-                ]}
+                ],
+            }
             self.level_data["player"] = player_data
         save_manager.save_level(self.save_id, self.level_data)
 
@@ -588,7 +630,7 @@ class Server:
         if isinstance(msg, Text):
             text = msg.to_dict()
             if color is None and msg.text:
-                color = msg.text[0]['color'].value
+                color = msg.text[0]["color"].value
         else:
             text = str(msg)
         if color is None:
@@ -600,25 +642,27 @@ class Server:
     def send_chat_to_player(self, player: Player, msg, color=None):
         """向单个玩家发送聊天消息。
 
-        Parameters
-        ----------
-        player : Player
+        :param player: Player
             目标玩家。
-        msg : str | Text
+        :param msg: str | Text
             消息文本或 Text 对象。Text 对象会提取第一段的颜色。
-        color : tuple | None
+        :param color: tuple | None
             RGB 颜色元组。若为 None 且 msg 为 Text，使用 Text 的颜色。
+
         """
         text, color = self._resolve_chat_msg(msg, color)
-        packet = {'__class__': 'ChatMessage', 'text': text, 'color': list(color)}
+        packet = {"__class__": "ChatMessage", "text": text, "color": list(color)}
         self.send_client_socket(player, packet, "Forward")
 
-    def broadcast_sound(self, sound_id: str, x: float, y: float, z: float = 0.0, *, volume: float = 1.0) -> None:
-        """Broadcast a server-authoritative sound event to every player."""
+    def broadcast_sound(
+        self, sound_id: str, x: float, y: float, z: float = 0.0, *, volume: float = 1.0
+    ) -> None:
         packet = {
             "__class__": "SoundEffect",
             "sound_id": str(sound_id),
-            "x": float(x), "y": float(y), "z": float(z),
+            "x": float(x),
+            "y": float(y),
+            "z": float(z),
             "volume": float(volume),
             "global": True,
         }
@@ -628,22 +672,21 @@ class Server:
     def broadcast_chat(self, msg, color=None, exclude=None):
         """向所有玩家广播聊天消息。
 
-        Parameters
-        ----------
-        msg : str | Text
+        :param msg: str | Text
             消息文本或 Text 对象。
-        color : tuple | None
+        :param color: tuple | None
             RGB 颜色元组。若为 None 且 msg 为 Text，使用 Text 的颜色。
-        exclude : Player | None
+        :param exclude: Player | None
             要排除的玩家。
+
         """
         text, color = self._resolve_chat_msg(msg, color)
-        packet = {'__class__': 'ChatMessage', 'text': text, 'color': list(color)}
+        packet = {"__class__": "ChatMessage", "text": text, "color": list(color)}
         for p in self.players:
             if p != exclude:
                 self.send_client_socket(p, packet, "Forward")
 
-    def send_client_socket(self, player: Player, obj, obj_type = None, args = None) -> bool:
+    def send_client_socket(self, player: Player, obj, obj_type=None, args=None) -> bool:
         """
         发送数据包至客户端
         :param player: 发送的玩家
@@ -661,7 +704,6 @@ class Server:
             return False
 
     def send_client_sockets(self, players, obj, obj_type=None, args=None) -> int:
-        """Encode a shared packet once and send the same frame to many players."""
         players = tuple(players)
         if not players:
             return 0
@@ -671,8 +713,7 @@ class Server:
             self._log_send_error(players[0], e)
             return 0
         return sum(
-            self._send_packet_frame(player, encoded_obj, frame)
-            for player in players
+            self._send_packet_frame(player, encoded_obj, frame) for player in players
         )
 
     @staticmethod
@@ -681,12 +722,14 @@ class Server:
         packet_data = msgpack.packb(
             encoded_obj, use_bin_type=True, default=_msgpack_default
         )
-        return encoded_obj, struct.pack('>I', len(packet_data)) + packet_data
+        return encoded_obj, struct.pack(">I", len(packet_data)) + packet_data
 
-    def _send_packet_frame(self, player: Player, encoded_obj: dict, frame: bytes) -> bool:
+    def _send_packet_frame(
+        self, player: Player, encoded_obj: dict, frame: bytes
+    ) -> bool:
         if (
-            getattr(player, '_disconnecting', False)
-            and encoded_obj.get('__class__') != 'Disconnect'
+            getattr(player, "_disconnecting", False)
+            and encoded_obj.get("__class__") != "Disconnect"
         ):
             return False
         try:
@@ -709,12 +752,6 @@ class Server:
         logging.error(traceback.format_exc())
 
     def load_chunks(self):
-        """Advance the asynchronous chunk pipeline without waiting in a tick.
-
-        Generation futures persist between ticks.  Completed chunks are sent
-        nearest-first under a small serialization budget, keeping normal game
-        simulation below its 50 ms deadline while the initial view streams in.
-        """
         players = list(self.players)
         if players:
             start = self._chunk_send_cursor % len(players)
@@ -743,8 +780,6 @@ class Server:
                         )
             wanted_by_player.append((player, missing_for_player))
 
-        # Reap only futures which are already complete.  Calling result() on a
-        # pending task here was the main source of multi-hundred-ms ticks.
         for key, future in list(self._chunk_gen_futures.items()):
             if not future.done():
                 if key not in wanted_keys:
@@ -757,7 +792,9 @@ class Server:
                 future.result()
             except Exception as e:
                 world, x = key
-                logging.error(f"Chunk generation failed for region {world.id_name}:{x}: {e}")
+                logging.error(
+                    f"Chunk generation failed for region {world.id_name}:{x}: {e}"
+                )
 
         sends_remaining = max(0, int(self.chunk_send_budget_per_tick))
         for player, missing_regions in wanted_by_player:
@@ -776,7 +813,9 @@ class Server:
                             neighbor = player.world.regions.get(neighbor_rx)
                             if neighbor is not None:
                                 self.send_client_socket(
-                                    player, neighbor.get_light_update_packet(), "LightUpdate"
+                                    player,
+                                    neighbor.get_light_update_packet(),
+                                    "LightUpdate",
                                 )
                 except Exception as e:
                     if x in player.loading_regions:
@@ -785,21 +824,23 @@ class Server:
                 sends_remaining -= 1
                 break
 
-        # Tell the client that the complete initial view-distance batch has
-        # been queued.  It still waits for every corresponding ChunkReady, so
-        # this packet cannot make the loading screen disappear early.
         for player in players:
             if player.initial_load_complete_sent:
                 continue
             center_rx = int(player.x // 16)
-            initial_regions = set(range(
-                center_rx - self.view_distance,
-                center_rx + self.view_distance + 1,
-            ))
+            initial_regions = set(
+                range(
+                    center_rx - self.view_distance,
+                    center_rx + self.view_distance + 1,
+                )
+            )
             if initial_regions.issubset(set(player.loading_regions)):
                 self.send_client_socket(
                     player,
-                    {'__class__': 'WorldLoadComplete', 'regions': sorted(initial_regions)},
+                    {
+                        "__class__": "WorldLoadComplete",
+                        "regions": sorted(initial_regions),
+                    },
                     "Forward",
                 )
                 player.initial_load_complete_sent = True
@@ -823,22 +864,28 @@ class Server:
             for player in self.players:
                 if player.world is world:
                     center_rx = int(player.x // 16)
-                    protected.update(range(
-                        center_rx - self.view_distance - self.chunk_unload_margin,
-                        center_rx + self.view_distance + self.chunk_unload_margin + 1,
-                    ))
+                    protected.update(
+                        range(
+                            center_rx - self.view_distance - self.chunk_unload_margin,
+                            center_rx
+                            + self.view_distance
+                            + self.chunk_unload_margin
+                            + 1,
+                        )
+                    )
             protected.update(
-                rx for pending_world, rx in self._chunk_gen_futures
+                rx
+                for pending_world, rx in self._chunk_gen_futures
                 if pending_world is world
             )
-            unload_rxs = [rx for rx in list(world.regions.keys()) if rx not in protected]
+            unload_rxs = [
+                rx for rx in list(world.regions.keys()) if rx not in protected
+            ]
             if not unload_rxs:
                 continue
             chunks_saved = self._save_world_chunks(world, unload_rxs)
             entities_saved = (
-                self._save_world_entities(world, unload_rxs)
-                if chunks_saved
-                else False
+                self._save_world_entities(world, unload_rxs) if chunks_saved else False
             )
             if chunks_saved and entities_saved:
                 world.unload_entities_in_chunks(unload_rxs)
@@ -874,8 +921,7 @@ class Server:
         if len(self.players) >= self.max_players:
             return "disconnect.serverFull"
         # 其它规则示例（默认关闭）：
-        # if some_condition(client_addr):
-        #     return Text("This server is not accepting your connection")
+
         return None
 
     def reject_connection(self, client_sock, reason: Text | str | None) -> bool:
@@ -883,7 +929,7 @@ class Server:
         packet = self._disconnect_packet(reason, default_key="disconnect.loginFailed")
         try:
             payload = msgpack.packb(packet, use_bin_type=True)
-            client_sock.sendall(struct.pack('>I', len(payload)) + payload)
+            client_sock.sendall(struct.pack(">I", len(payload)) + payload)
             try:
                 client_sock.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -912,25 +958,22 @@ class Server:
                 ("disconnect.", "connect.", "gui.")
             )
         return {
-            '__class__': 'Disconnect',
-            'reason': reason,
-            'reason_is_translation_key': reason_is_translation_key,
+            "__class__": "Disconnect",
+            "reason": reason,
+            "reason_is_translation_key": reason_is_translation_key,
         }
 
     def kick_player(self, player: Player, reason: Text | str | None = None) -> bool:
         """主动断开一个已加入玩家的连接（游戏内踢出接口）。"""
-        if player not in self.players or getattr(player, '_disconnecting', False):
+        if player not in self.players or getattr(player, "_disconnecting", False):
             return False
-        setattr(player, '_disconnecting', True)
+        setattr(player, "_disconnecting", True)
         sent = self.send_client_socket(
             player,
             self._disconnect_packet(reason, default_key="disconnect.kicked"),
             "Forward",
         )
         if sent:
-            # Normal path: the client acknowledges the Disconnect packet and
-            # acknowledge_disconnect closes the socket. This timeout handles a
-            # frozen or malicious client that never sends the acknowledgement.
             self.register_event(
                 self._force_kicked_disconnect,
                 player,
@@ -941,8 +984,7 @@ class Server:
         return sent
 
     def acknowledge_disconnect(self, player: Player) -> None:
-        """Finish a kick after the client confirms the reason was decoded."""
-        if not getattr(player, '_disconnecting', False):
+        if not getattr(player, "_disconnecting", False):
             return
         self._close_player_connection(player)
         self.on_player_disconnect(player)
@@ -974,7 +1016,9 @@ class Server:
         player.clear_eating()
         self.save_all(player, force=True)
         # 广播离开消息（黄色，排除已离开的玩家）
-        self.broadcast_chat(f"{player.name} left the game", (255, 255, 85), exclude=player)
+        self.broadcast_chat(
+            f"{player.name} left the game", (255, 255, 85), exclude=player
+        )
         for other in self.players:
             if other is not player:
                 self.send_client_socket(other, player, "EntityRemove")

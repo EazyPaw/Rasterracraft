@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 from copy import deepcopy
 
 from resources.server.item_class import ItemStack, EmptyItemStack
@@ -5,23 +6,19 @@ from resources.server.materials import get_material_by_id
 
 
 def serialize_inventory(inventory) -> list[dict]:
-    """Convert an inventory into the packet/save representation.
-
-    Materials are persisted by their stable ``name_id`` rather than by Python
-    class, so this remains compatible across processes and future sessions.
-    """
     return [
         {
             "id": getattr(stack.material, "name_id", "air"),
             "amount": max(0, int(getattr(stack, "amount", 0))),
-            "nbt": getattr(stack, "nbt", {}) if isinstance(getattr(stack, "nbt", {}), dict) else {},
+            "nbt": getattr(stack, "nbt", {})
+            if isinstance(getattr(stack, "nbt", {}), dict)
+            else {},
         }
         for stack in inventory
     ]
 
 
 def normalize_inventory_payload(payload, size: int = 36) -> list[dict]:
-    """Validate a wire/save inventory and return exactly ``size`` slots."""
     entries = payload if isinstance(payload, list) else []
     normalized: list[dict] = []
     for entry in entries[:size]:
@@ -35,20 +32,27 @@ def normalize_inventory_payload(payload, size: int = 36) -> list[dict]:
         if getattr(material, "name_id", "air") == "air" or amount == 0:
             normalized.append({"id": "air", "amount": 0, "nbt": {}})
         else:
-            normalized.append({
-                "id": material.name_id,
-                "amount": amount,
-                "nbt": entry.get("nbt", {}) if isinstance(entry.get("nbt", {}), dict) else {},
-            })
-    normalized.extend({"id": "air", "amount": 0, "nbt": {}} for _ in range(size - len(normalized)))
+            normalized.append(
+                {
+                    "id": material.name_id,
+                    "amount": amount,
+                    "nbt": entry.get("nbt", {})
+                    if isinstance(entry.get("nbt", {}), dict)
+                    else {},
+                }
+            )
+    normalized.extend(
+        {"id": "air", "amount": 0, "nbt": {}} for _ in range(size - len(normalized))
+    )
     return normalized
 
 
 def restore_inventory(inventory, payload) -> None:
-    """Replace the contents of an ``Inventory`` from saved packet data."""
     for slot, entry in enumerate(normalize_inventory_payload(payload, len(inventory))):
         inventory[slot] = ItemStack(
-            get_material_by_id(entry["id"]), entry["amount"], entry["nbt"],
+            get_material_by_id(entry["id"]),
+            entry["amount"],
+            entry["nbt"],
         )
 
 
@@ -70,12 +74,12 @@ class Inventory:
             self._items.append(EmptyItemStack())
 
     def __getitem__(self, item):
-        if not(0 <= item < self.max_slots):
+        if not (0 <= item < self.max_slots):
             raise IndexError("Inventory index out of range")
         return self._items[item]
 
     def __setitem__(self, index, value):
-        if not(0 <= index < self.max_slots):
+        if not (0 <= index < self.max_slots):
             raise IndexError("Inventory index out of range")
         self._items[index] = value
 
@@ -100,7 +104,6 @@ class Inventory:
         return -1
 
     def _normalize_slots(self, slots=None) -> list[int]:
-        """Return unique, valid slot indices while preserving caller order."""
         if slots is None:
             return list(range(self.max_slots))
         result = []
@@ -114,18 +117,15 @@ class Inventory:
         return result
 
     def can_place(self, slot: int, stack: ItemStack) -> bool:
-        """Container hook; ordinary inventories accept every stack."""
         return True
 
     @staticmethod
     def copy_stack(stack: ItemStack, amount: int | None = None) -> ItemStack:
-        """Create an independent stack suitable for moving between containers."""
         if amount is None:
             amount = stack.amount
         return ItemStack(stack.material, int(amount), deepcopy(stack.nbt))
 
     def capacity_for(self, stack: ItemStack, slots=None) -> int:
-        """Return how many items from ``stack`` the selected slots can accept."""
         if stack is None or stack.is_empty() or stack.amount <= 0:
             return 0
         capacity = 0
@@ -138,13 +138,6 @@ class Inventory:
         return capacity
 
     def insert_stack(self, stack: ItemStack, slots=None) -> int:
-        """Insert as much of ``stack`` as possible using Minecraft ordering.
-
-        Compatible partial stacks are always filled before an empty slot is
-        used.  ``slots`` controls only the deterministic order within those two
-        passes, so GUIs can express visual top-left or Java hotbar-right-first
-        policies without duplicating stack arithmetic.
-        """
         if stack is None or stack.is_empty() or stack.amount <= 0:
             return 0
         ordered_slots = self._normalize_slots(slots)
@@ -181,9 +174,9 @@ class Inventory:
                 break
         return before - max(0, stack.amount)
 
-    def transfer_stack_to(self, source_slot: int, destination: 'Inventory',
-                          destination_slots=None) -> int:
-        """Move one source stack into another inventory, retaining overflow."""
+    def transfer_stack_to(
+        self, source_slot: int, destination: "Inventory", destination_slots=None
+    ) -> int:
         source_slot = int(source_slot)
         if not 0 <= source_slot < self.max_slots:
             return 0
@@ -198,9 +191,9 @@ class Inventory:
             self[source_slot] = EmptyItemStack()
         return moved
 
-    def swap_slots(self, source_slot: int, destination: 'Inventory',
-                   destination_slot: int) -> bool:
-        """Swap two slots across arbitrary Inventory instances."""
+    def swap_slots(
+        self, source_slot: int, destination: "Inventory", destination_slot: int
+    ) -> bool:
         source_slot = int(source_slot)
         destination_slot = int(destination_slot)
         if not 0 <= source_slot < self.max_slots:
@@ -210,23 +203,20 @@ class Inventory:
         if self is destination and source_slot == destination_slot:
             return False
         self[source_slot], destination[destination_slot] = (
-            destination[destination_slot], self[source_slot],
+            destination[destination_slot],
+            self[source_slot],
         )
         return True
 
-    def consolidate_matching(self, reference: ItemStack, source_slots=None,
-                             destination_slots=None) -> int:
-        """Pack matching stacks into the destination order without item loss.
-
-        This covers Java's Shift+double-click behavior when source and
-        destination are two regions of the same player inventory.  Items that
-        do not fit in the destination are restored to their original region.
-        """
+    def consolidate_matching(
+        self, reference: ItemStack, source_slots=None, destination_slots=None
+    ) -> int:
         if reference is None or reference.is_empty():
             return 0
         sources = self._normalize_slots(source_slots)
         matching = [
-            slot for slot in sources
+            slot
+            for slot in sources
             if not self[slot].is_empty()
             and self[slot].is_stackable_with(reference, require_full_fit=False)
         ]
@@ -266,5 +256,3 @@ class Inventory:
 
     def set_item(self, solt, item: ItemStack):
         self[solt] = item
-
-

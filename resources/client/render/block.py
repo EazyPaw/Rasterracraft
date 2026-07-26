@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """
 方块渲染 Mixin
 ==============
@@ -49,18 +50,17 @@ class BlockRenderMixin:
     ) -> tuple[int, int, int]:
         """根据亮度和天空/方块光源比例计算角落着色颜色。
 
-        算法：
-        - brightness=0 → (0,0,0)，brightness=1 → (255,255,255)
-        - 中间亮度时混入光源色调（天空色或方块光源暖色）
-        - 色调强度在亮度 0.5 时最大，两端收敛为纯灰阶
+                算法：
+                - brightness=0 → (0,0,0)，brightness=1 → (255,255,255)
+                - 中间亮度时混入光源色调（天空色或方块光源暖色）
+                - 色调强度在亮度 0.5 时最大，两端收敛为纯灰阶
 
-        参数:
-            brightness: 亮度值 [0, 1]
-            sky_ratio: 天空光照占比 [0, 1]（0=纯方块光源，1=纯天空光源）
-            sky_color: 天空颜色 RGB
+        :param brightness: 亮度值 [0, 1]
+        :param sky_ratio: 天空光照占比 [0, 1]（0=纯方块光源，1=纯天空光源）
+        :param sky_color: 天空颜色 RGB
 
-        返回:
-            着色后的 RGB 颜色元组
+        :return: 着色后的 RGB 颜色元组
+
         """
         b_key, b = quantize_unit(brightness, BLOCK_LIGHT_LEVELS)
         r_key, sky_ratio = quantize_unit(sky_ratio, BLOCK_RATIO_LEVELS)
@@ -99,8 +99,9 @@ class BlockRenderMixin:
             cache.popitem(last=False)
         return result
 
-    def _get_block_section_version_key(self, section_x: int) -> tuple[tuple[int, int], ...]:
-        """Return render versions for the chunk and its horizontal neighbors."""
+    def _get_block_section_version_key(
+        self, section_x: int
+    ) -> tuple[tuple[int, int], ...]:
         section_w = self.BLOCK_SECTION_WIDTH
         x0 = section_x * section_w
         x1 = x0 + section_w - 1
@@ -124,29 +125,29 @@ class BlockRenderMixin:
             cache[texture_path] = animated
             return animated
 
-        parts = texture_path.split('.')
+        parts = texture_path.split(".")
         if len(parts) < 2:
             cache[texture_path] = False
             return False
         category = parts[0]
-        file_path = '/'.join(parts[1:])
-        meta_path = f'assets/minecraft/textures/{category}/{file_path}.png.mcmeta'
+        file_path = "/".join(parts[1:])
+        meta_path = f"assets/minecraft/textures/{category}/{file_path}.png.mcmeta"
         animated = os.path.exists(meta_path)
         cache[texture_path] = animated
         return animated
 
-    def _block_can_animate(self, block: Optional['Block']) -> bool:
-        if block is None or block.block_id == 'air':
+    def _block_can_animate(self, block: Optional["Block"]) -> bool:
+        if block is None or block.block_id == "air":
             return False
         return self._texture_path_can_animate(self._get_block_texture_path(block))
 
-    def _animated_texture_path(self, block: Optional['Block']) -> str | None:
+    def _animated_texture_path(self, block: Optional["Block"]) -> str | None:
         if not self._block_can_animate(block):
             return None
         return self._get_block_texture_path(block)
 
     @staticmethod
-    def _get_block_texture_path(block: Optional['Block']) -> str | None:
+    def _get_block_texture_path(block: Optional["Block"]) -> str | None:
         if block is None:
             return None
         path_getter = getattr(block, "get_texture_path", None)
@@ -169,8 +170,8 @@ class BlockRenderMixin:
         cache[key] = has_partial
         return has_partial
 
-    def _block_has_partial_alpha(self, block: Optional['Block']) -> bool:
-        if block is None or block.block_id == 'air' or not block.has_transparent_pixels:
+    def _block_has_partial_alpha(self, block: Optional["Block"]) -> bool:
+        if block is None or block.block_id == "air" or not block.has_transparent_pixels:
             return False
         return self._surface_has_partial_alpha(block.get_texture(self.block_size))
 
@@ -180,7 +181,6 @@ class BlockRenderMixin:
         section_y: int,
         version_key: tuple[tuple[int, int], ...],
     ) -> bool:
-        """Detect sections where caching through a transparent surface would alter alpha compositing."""
         probe_key = (section_x, section_y, version_key)
         cache = self.block_section_direct_cache
         if probe_key in cache:
@@ -202,9 +202,11 @@ class BlockRenderMixin:
                 if b0 is None or not b0.has_transparent_pixels:
                     continue
                 b1 = get_block(x, y, 1)
-                if b1 is None or b1.block_id == 'air':
+                if b1 is None or b1.block_id == "air":
                     continue
-                if self._block_has_partial_alpha(b0) and self._block_has_partial_alpha(b1):
+                if self._block_has_partial_alpha(b0) and self._block_has_partial_alpha(
+                    b1
+                ):
                     if b0.can_precompose_with(b1):
                         continue
                     requires_direct = True
@@ -223,13 +225,6 @@ class BlockRenderMixin:
         section_y: int,
         version_key: tuple[tuple[int, int], ...],
     ) -> int:
-        """Return the exact pixel margin needed by render-offset blocks.
-
-        Most sections cache at their original size. Only sections containing a
-        visually shifted block allocate extra transparent pixels, so adding new
-        offset block types does not clip at section boundaries or penalize the
-        common path.
-        """
         bs = self.block_size
         probe_key = (section_x, section_y, bs, version_key)
         cache = self.block_section_padding_cache
@@ -247,7 +242,7 @@ class BlockRenderMixin:
             for y in range(y0, y0 + section_h):
                 for z in (0, 1):
                     offset_x, offset_y = getattr(
-                        get_block(x, y, z), 'render_offset_blocks', (0.0, 0.0)
+                        get_block(x, y, z), "render_offset_blocks", (0.0, 0.0)
                     )
                     max_offset = max(max_offset, abs(offset_x), abs(offset_y))
 
@@ -263,7 +258,6 @@ class BlockRenderMixin:
         section_y: int,
         version_key: tuple[tuple[int, int], ...],
     ):
-        """Return a bounded frame key for sections containing animated block textures."""
         probe_key = (section_x, section_y, version_key)
         cache = self.block_section_animation_cache
         if probe_key in cache:
@@ -323,7 +317,6 @@ class BlockRenderMixin:
         *,
         debug: bool = False,
     ) -> None:
-        """Render a rectangular block range to an arbitrary target surface."""
         cw = self.client_world
         light_map = cw.light_map
         sky_light_map = getattr(cw, "sky_light_map", {})
@@ -343,8 +336,8 @@ class BlockRenderMixin:
         y_len = y_max - y_min + 1
 
         block_info = [[0] * y_len for _ in range(x_len)]
-        blocks0: list[list[Optional['Block']]] = [[None] * y_len for _ in range(x_len)]
-        blocks1: list[list[Optional['Block']]] = [[None] * y_len for _ in range(x_len)]
+        blocks0: list[list[Optional["Block"]]] = [[None] * y_len for _ in range(x_len)]
+        blocks1: list[list[Optional["Block"]]] = [[None] * y_len for _ in range(x_len)]
         light_levels = [[0.0] * y_len for _ in range(x_len)]
         sky_levels = [[0.0] * y_len for _ in range(x_len)]
         block_light_levels = [[0.0] * y_len for _ in range(x_len)]
@@ -355,7 +348,9 @@ class BlockRenderMixin:
             chunk_sky_light = sky_light_map.get(x // 16)
             chunk_block_light = block_light_map.get(x // 16)
             if callable(get_light_snapshot):
-                chunk_light, chunk_sky_light, chunk_block_light = get_light_snapshot(x // 16)
+                chunk_light, chunk_sky_light, chunk_block_light = get_light_snapshot(
+                    x // 16
+                )
             local_x = x % 16
             for j in range(y_len):
                 y = y_min + j
@@ -379,9 +374,13 @@ class BlockRenderMixin:
                         block_light = 0.0
                     sky_levels[i][j] = sky_light / 15.0 * sky_light_weight
                     block_light_levels[i][j] = block_light / 15.0
-                    light_levels[i][j] = min(1.0, sky_levels[i][j] + block_light_levels[i][j])
+                    light_levels[i][j] = min(
+                        1.0, sky_levels[i][j] + block_light_levels[i][j]
+                    )
                 elif chunk_light is not None and 0 <= y < chunk_light.shape[1]:
-                    light_levels[i][j] = chunk_light[local_x, y] * sky_light_weight / 15.0
+                    light_levels[i][j] = (
+                        chunk_light[local_x, y] * sky_light_weight / 15.0
+                    )
                     sky_levels[i][j] = light_levels[i][j]
                     block_light_levels[i][j] = 0.0
 
@@ -411,11 +410,13 @@ class BlockRenderMixin:
             first_block = blocks0[1][1] if x_len > 2 and y_len > 2 else None
             can_tile_section = (
                 first_block is not None
-                and first_block.block_id != 'air'
+                and first_block.block_id != "air"
                 and not first_block.has_transparent_pixels
                 and first_block.render_offset_blocks == (0.0, 0.0)
             )
-            first_tex = first_block.get_texture(block_size) if can_tile_section else None
+            first_tex = (
+                first_block.get_texture(block_size) if can_tile_section else None
+            )
             if first_tex is None or first_tex.get_height() != block_size:
                 can_tile_section = False
 
@@ -449,7 +450,7 @@ class BlockRenderMixin:
                             b0 is None
                             or b0.block_id != first_block_id
                             or b1 is None
-                            or b1.block_id != 'air'
+                            or b1.block_id != "air"
                             or b0.has_transparent_pixels
                             or id(b0.get_texture(block_size)) != first_tex_id
                         ):
@@ -459,20 +460,41 @@ class BlockRenderMixin:
                         break
 
             if can_tile_section:
-                tile = pygame.Surface((block_size, block_size), pygame.SRCALPHA).convert_alpha()
+                tile = pygame.Surface(
+                    (block_size, block_size), pygame.SRCALPHA
+                ).convert_alpha()
                 tile.fill((0, 0, 0, 0))
                 self._draw_block_optimized(
-                    tile, block_size, x_start, y_start + 1, block_size, block_size,
-                    x_start, y_start, 0, first_block,
-                    light_levels, block_info, is_solid, get_light,
-                    get_sky, get_block_l, sky_color,
-                    x_min, y_min, ao_mul, False, font,
+                    tile,
+                    block_size,
+                    x_start,
+                    y_start + 1,
+                    block_size,
+                    block_size,
+                    x_start,
+                    y_start,
+                    0,
+                    first_block,
+                    light_levels,
+                    block_info,
+                    is_solid,
+                    get_light,
+                    get_sky,
+                    get_block_l,
+                    sky_color,
+                    x_min,
+                    y_min,
+                    ao_mul,
+                    False,
+                    font,
                 )
                 blits = []
                 for x in range(x_start, x_end + 1):
                     sx = (x - cam_x - 0.5) * block_size + width // 2
                     for y in range(y_start, y_end + 1):
-                        sy = height - (((y + 1) - cam_y + 0.5) * block_size + height // 2)
+                        sy = height - (
+                            ((y + 1) - cam_y + 0.5) * block_size + height // 2
+                        )
                         blits.append((tile, (sx, sy)))
                 target.blits(blits)
                 return
@@ -485,25 +507,64 @@ class BlockRenderMixin:
                 b1 = blocks1[i][j]
                 precomposed_texture = None
 
-                if b1 is not None and b1.block_id != 'air' and b0 is not None and b0.has_transparent_pixels:
+                if (
+                    b1 is not None
+                    and b1.block_id != "air"
+                    and b0 is not None
+                    and b0.has_transparent_pixels
+                ):
                     if b0.can_precompose_with(b1):
                         precomposed_texture = b0.get_precomposed_texture(block_size, b1)
                     if precomposed_texture is None:
                         self._draw_block_optimized(
-                            target, block_size, cam_x, cam_y, width, height,
-                            x, y, 1, b1,
-                            light_levels, block_info, is_solid, get_light,
-                            get_sky, get_block_l, sky_color,
-                            x_min, y_min, ao_mul, debug, font,
+                            target,
+                            block_size,
+                            cam_x,
+                            cam_y,
+                            width,
+                            height,
+                            x,
+                            y,
+                            1,
+                            b1,
+                            light_levels,
+                            block_info,
+                            is_solid,
+                            get_light,
+                            get_sky,
+                            get_block_l,
+                            sky_color,
+                            x_min,
+                            y_min,
+                            ao_mul,
+                            debug,
+                            font,
                         )
 
-                if b0 is not None and b0.block_id != 'air':
+                if b0 is not None and b0.block_id != "air":
                     self._draw_block_optimized(
-                        target, block_size, cam_x, cam_y, width, height,
-                        x, y, 0, b0,
-                        light_levels, block_info, is_solid, get_light,
-                        get_sky, get_block_l, sky_color,
-                        x_min, y_min, ao_mul, debug, font,
+                        target,
+                        block_size,
+                        cam_x,
+                        cam_y,
+                        width,
+                        height,
+                        x,
+                        y,
+                        0,
+                        b0,
+                        light_levels,
+                        block_info,
+                        is_solid,
+                        get_light,
+                        get_sky,
+                        get_block_l,
+                        sky_color,
+                        x_min,
+                        y_min,
+                        ao_mul,
+                        debug,
+                        font,
                         texture_override=precomposed_texture,
                     )
 
@@ -517,7 +578,6 @@ class BlockRenderMixin:
         version_key: tuple[tuple[int, int], ...],
         tick_key: int,
     ) -> pygame.Surface:
-        """Build or fetch a cached 16xN block section surface."""
         bs = self.block_size
         section_w = self.BLOCK_SECTION_WIDTH
         section_h = self.BLOCK_SECTION_HEIGHT
@@ -526,8 +586,12 @@ class BlockRenderMixin:
         x1 = x0 + section_w - 1
         y1 = y0 + section_h - 1
         key = (
-            section_x, section_y, bs,
-            lighting_key, tick_key, version_key,
+            section_x,
+            section_y,
+            bs,
+            lighting_key,
+            tick_key,
+            version_key,
         )
 
         cache = self.block_section_cache
@@ -544,8 +608,11 @@ class BlockRenderMixin:
 
         if tick_key != 0:
             old_keys = [
-                old_key for old_key in cache
-                if old_key[0] == section_x and old_key[1] == section_y and old_key[2] == bs
+                old_key
+                for old_key in cache
+                if old_key[0] == section_x
+                and old_key[1] == section_y
+                and old_key[2] == bs
             ]
             for old_key in old_keys:
                 old_surface = cache.pop(old_key)
@@ -565,14 +632,26 @@ class BlockRenderMixin:
         if pool:
             surface = pool.pop()
         else:
-            surface = pygame.Surface((surface_w, surface_h), pygame.SRCALPHA).convert_alpha()
+            surface = pygame.Surface(
+                (surface_w, surface_h), pygame.SRCALPHA
+            ).convert_alpha()
         surface.fill((0, 0, 0, 0))
 
         local_cam_x = x0 + section_w / 2 - 0.5
         local_cam_y = y0 + section_h / 2 + 0.5
         self._render_block_range(
-            surface, bs, local_cam_x, local_cam_y, surface_w, surface_h,
-            x0, x1, y0, y1, sky_light_weight, sky_color,
+            surface,
+            bs,
+            local_cam_x,
+            local_cam_y,
+            surface_w,
+            surface_h,
+            x0,
+            x1,
+            y0,
+            y1,
+            sky_light_weight,
+            sky_color,
             debug=False,
         )
 
@@ -647,29 +726,40 @@ class BlockRenderMixin:
             seen.add(candidate)
 
             version_key = self._get_block_section_version_key(section_x)
-            if self._block_section_requires_direct_draw(section_x, section_y, version_key):
+            if self._block_section_requires_direct_draw(
+                section_x, section_y, version_key
+            ):
                 continue
-            tick_key = self._get_block_section_animation_key(section_x, section_y, version_key)
+            tick_key = self._get_block_section_animation_key(
+                section_x, section_y, version_key
+            )
             if tick_key != 0:
                 continue
             key = (
-                section_x, section_y, self.block_size,
-                lighting_key, tick_key, version_key,
+                section_x,
+                section_y,
+                self.block_size,
+                lighting_key,
+                tick_key,
+                version_key,
             )
             if key in self.block_section_cache:
                 continue
 
             self._get_block_section_surface(
-                section_x, section_y,
-                sky_light_weight, sky_color,
-                lighting_key, version_key, tick_key,
+                section_x,
+                section_y,
+                sky_light_weight,
+                sky_color,
+                lighting_key,
+                version_key,
+                tick_key,
             )
             built += 1
             if built >= budget:
                 return
 
     def _draw_block_section_cached(self) -> bool:
-        """Draw visible terrain by blitting cached section surfaces."""
         if self.debug:
             return False
 
@@ -723,19 +813,36 @@ class BlockRenderMixin:
             for section_y in range(sy_start, sy_end + 1):
                 y0 = section_y * section_h
                 y1 = y0 + section_h - 1
-                if self._block_section_requires_direct_draw(section_x, section_y, version_key):
+                if self._block_section_requires_direct_draw(
+                    section_x, section_y, version_key
+                ):
                     self._render_block_range(
-                        screen, block_size, cam_x, cam_y, width, height,
-                        x0, x0 + section_w - 1, y0, y1,
-                        sky_light_weight, sky_color,
+                        screen,
+                        block_size,
+                        cam_x,
+                        cam_y,
+                        width,
+                        height,
+                        x0,
+                        x0 + section_w - 1,
+                        y0,
+                        y1,
+                        sky_light_weight,
+                        sky_color,
                         debug=False,
                     )
                     continue
-                tick_key = self._get_block_section_animation_key(section_x, section_y, version_key)
+                tick_key = self._get_block_section_animation_key(
+                    section_x, section_y, version_key
+                )
                 section = self._get_block_section_surface(
-                    section_x, section_y,
-                    sky_light_weight, sky_color,
-                    lighting_key, version_key, tick_key,
+                    section_x,
+                    section_y,
+                    sky_light_weight,
+                    sky_color,
+                    lighting_key,
+                    version_key,
+                    tick_key,
                 )
                 dest_x = (x0 - cam_x - 0.5) * block_size + width // 2
                 dest_y = height - (((y1 + 1) - cam_y + 0.5) * block_size + height // 2)
@@ -746,9 +853,15 @@ class BlockRenderMixin:
 
         self._trim_distant_animated_sections(sx_start, sx_end, sy_start, sy_end)
         self._prefetch_block_sections(
-            sx_start, sx_end, sy_start, sy_end,
-            velocity_x, velocity_y,
-            sky_light_weight, sky_color, lighting_key,
+            sx_start,
+            sx_end,
+            sy_start,
+            sy_end,
+            velocity_x,
+            velocity_y,
+            sky_light_weight,
+            sky_color,
+            lighting_key,
         )
         return True
 
@@ -821,8 +934,8 @@ class BlockRenderMixin:
         # sky_levels:   归一化天空光照贡献 [0, 1]
         # block_light_levels: 归一化方块光照贡献 [0, 1]
         block_info = [[0] * y_len for _ in range(x_len)]
-        blocks0: list[list[Optional['Block']]] = [[None] * y_len for _ in range(x_len)]
-        blocks1: list[list[Optional['Block']]] = [[None] * y_len for _ in range(x_len)]
+        blocks0: list[list[Optional["Block"]]] = [[None] * y_len for _ in range(x_len)]
+        blocks1: list[list[Optional["Block"]]] = [[None] * y_len for _ in range(x_len)]
         light_levels = [[0.0] * y_len for _ in range(x_len)]
         sky_levels = [[0.0] * y_len for _ in range(x_len)]
         block_light_levels = [[0.0] * y_len for _ in range(x_len)]
@@ -834,7 +947,9 @@ class BlockRenderMixin:
             chunk_sky_light = sky_light_map.get(x // 16)
             chunk_block_light = block_light_map.get(x // 16)
             if callable(get_light_snapshot):
-                chunk_light, chunk_sky_light, chunk_block_light = get_light_snapshot(x // 16)
+                chunk_light, chunk_sky_light, chunk_block_light = get_light_snapshot(
+                    x // 16
+                )
             local_x = x % 16
             for j in range(y_len):
                 y = y_min + j
@@ -859,9 +974,13 @@ class BlockRenderMixin:
                         block_light = 0.0
                     sky_levels[i][j] = sky_light / 15.0 * sky_light_weight
                     block_light_levels[i][j] = block_light / 15.0
-                    light_levels[i][j] = min(1.0, sky_levels[i][j] + block_light_levels[i][j])
+                    light_levels[i][j] = min(
+                        1.0, sky_levels[i][j] + block_light_levels[i][j]
+                    )
                 elif chunk_light is not None and 0 <= y < chunk_light.shape[1]:
-                    light_levels[i][j] = chunk_light[local_x, y] * sky_light_weight / 15.0
+                    light_levels[i][j] = (
+                        chunk_light[local_x, y] * sky_light_weight / 15.0
+                    )
                     sky_levels[i][j] = light_levels[i][j]
                     block_light_levels[i][j] = 0.0
 
@@ -901,25 +1020,63 @@ class BlockRenderMixin:
                 b1 = blocks1[i][j]
                 precomposed_texture = None
 
-                if b1 is not None and b1.block_id != 'air' and b0.has_transparent_pixels:
+                if (
+                    b1 is not None
+                    and b1.block_id != "air"
+                    and b0.has_transparent_pixels
+                ):
                     if b0.can_precompose_with(b1):
                         precomposed_texture = b0.get_precomposed_texture(block_size, b1)
                     if precomposed_texture is None:
                         self._draw_block_optimized(
-                            screen, block_size, cam_x, cam_y, width, height,
-                            x, y, 1, b1,
-                            light_levels, block_info, is_solid, get_light,
-                            get_sky, get_block_l, sky_color,
-                            x_min, y_min, ao_mul, debug, font,
+                            screen,
+                            block_size,
+                            cam_x,
+                            cam_y,
+                            width,
+                            height,
+                            x,
+                            y,
+                            1,
+                            b1,
+                            light_levels,
+                            block_info,
+                            is_solid,
+                            get_light,
+                            get_sky,
+                            get_block_l,
+                            sky_color,
+                            x_min,
+                            y_min,
+                            ao_mul,
+                            debug,
+                            font,
                         )
 
-                if b0 is not None and b0.block_id != 'air':
+                if b0 is not None and b0.block_id != "air":
                     self._draw_block_optimized(
-                        screen, block_size, cam_x, cam_y, width, height,
-                        x, y, 0, b0,
-                        light_levels, block_info, is_solid, get_light,
-                        get_sky, get_block_l, sky_color,
-                        x_min, y_min, ao_mul, debug, font,
+                        screen,
+                        block_size,
+                        cam_x,
+                        cam_y,
+                        width,
+                        height,
+                        x,
+                        y,
+                        0,
+                        b0,
+                        light_levels,
+                        block_info,
+                        is_solid,
+                        get_light,
+                        get_sky,
+                        get_block_l,
+                        sky_color,
+                        x_min,
+                        y_min,
+                        ao_mul,
+                        debug,
+                        font,
                         texture_override=precomposed_texture,
                     )
 
@@ -934,7 +1091,7 @@ class BlockRenderMixin:
         x: int,
         y: int,
         z: int,
-        block: 'Block',
+        block: "Block",
         light_levels: list[list[float]],
         block_info: list[list[int]],
         is_solid,
@@ -963,23 +1120,59 @@ class BlockRenderMixin:
         """
         # ---- 1. 四角总光照（四点平均平滑） ----
         center = get_light(x, y)
-        tl = (get_light(x - 1, y) + get_light(x - 1, y + 1) + get_light(x, y + 1) + center) * 0.25
-        tr = (get_light(x, y + 1) + get_light(x + 1, y + 1) + get_light(x + 1, y) + center) * 0.25
-        bl = (get_light(x - 1, y) + get_light(x - 1, y - 1) + get_light(x, y - 1) + center) * 0.25
-        br = (get_light(x, y - 1) + get_light(x + 1, y - 1) + get_light(x + 1, y) + center) * 0.25
+        tl = (
+            get_light(x - 1, y) + get_light(x - 1, y + 1) + get_light(x, y + 1) + center
+        ) * 0.25
+        tr = (
+            get_light(x, y + 1) + get_light(x + 1, y + 1) + get_light(x + 1, y) + center
+        ) * 0.25
+        bl = (
+            get_light(x - 1, y) + get_light(x - 1, y - 1) + get_light(x, y - 1) + center
+        ) * 0.25
+        br = (
+            get_light(x, y - 1) + get_light(x + 1, y - 1) + get_light(x + 1, y) + center
+        ) * 0.25
 
         # ---- 1b. 四角天空/方块光照分离 ----
         center_sky = get_sky(x, y)
-        tl_sky = (get_sky(x - 1, y) + get_sky(x - 1, y + 1) + get_sky(x, y + 1) + center_sky) * 0.25
-        tr_sky = (get_sky(x, y + 1) + get_sky(x + 1, y + 1) + get_sky(x + 1, y) + center_sky) * 0.25
-        bl_sky = (get_sky(x - 1, y) + get_sky(x - 1, y - 1) + get_sky(x, y - 1) + center_sky) * 0.25
-        br_sky = (get_sky(x, y - 1) + get_sky(x + 1, y - 1) + get_sky(x + 1, y) + center_sky) * 0.25
+        tl_sky = (
+            get_sky(x - 1, y) + get_sky(x - 1, y + 1) + get_sky(x, y + 1) + center_sky
+        ) * 0.25
+        tr_sky = (
+            get_sky(x, y + 1) + get_sky(x + 1, y + 1) + get_sky(x + 1, y) + center_sky
+        ) * 0.25
+        bl_sky = (
+            get_sky(x - 1, y) + get_sky(x - 1, y - 1) + get_sky(x, y - 1) + center_sky
+        ) * 0.25
+        br_sky = (
+            get_sky(x, y - 1) + get_sky(x + 1, y - 1) + get_sky(x + 1, y) + center_sky
+        ) * 0.25
 
         center_bl = get_block_l(x, y)
-        tl_bl = (get_block_l(x - 1, y) + get_block_l(x - 1, y + 1) + get_block_l(x, y + 1) + center_bl) * 0.25
-        tr_bl = (get_block_l(x, y + 1) + get_block_l(x + 1, y + 1) + get_block_l(x + 1, y) + center_bl) * 0.25
-        bl_bl = (get_block_l(x - 1, y) + get_block_l(x - 1, y - 1) + get_block_l(x, y - 1) + center_bl) * 0.25
-        br_bl = (get_block_l(x, y - 1) + get_block_l(x + 1, y - 1) + get_block_l(x + 1, y) + center_bl) * 0.25
+        tl_bl = (
+            get_block_l(x - 1, y)
+            + get_block_l(x - 1, y + 1)
+            + get_block_l(x, y + 1)
+            + center_bl
+        ) * 0.25
+        tr_bl = (
+            get_block_l(x, y + 1)
+            + get_block_l(x + 1, y + 1)
+            + get_block_l(x + 1, y)
+            + center_bl
+        ) * 0.25
+        bl_bl = (
+            get_block_l(x - 1, y)
+            + get_block_l(x - 1, y - 1)
+            + get_block_l(x, y - 1)
+            + center_bl
+        ) * 0.25
+        br_bl = (
+            get_block_l(x, y - 1)
+            + get_block_l(x + 1, y - 1)
+            + get_block_l(x + 1, y)
+            + center_bl
+        ) * 0.25
 
         # ---- 1c. 计算各角天空光照占比 ----
         def _sky_ratio(sky_v: float, block_v: float) -> float:
@@ -993,25 +1186,49 @@ class BlockRenderMixin:
         sr_br = _sky_ratio(br_sky, br_bl)
 
         # ---- 2. AO 环境光遮蔽 ----
-            # 仅 z=1 背景层受周围方块遮挡影响
+        # 仅 z=1 背景层受周围方块遮挡影响
         if z == 0:
             ao_tl = ao_tr = ao_bl = ao_br = 1.0
         else:
             # 统计各角 6 个邻域方块中的固体数量
-            s_tl = (is_solid(x - 1, y, 1) + is_solid(x, y + 1, 1) + is_solid(x - 1, y + 1, 1) +
-                    is_solid(x - 1, y, 0) + is_solid(x, y + 1, 0) + is_solid(x - 1, y + 1, 0))
+            s_tl = (
+                is_solid(x - 1, y, 1)
+                + is_solid(x, y + 1, 1)
+                + is_solid(x - 1, y + 1, 1)
+                + is_solid(x - 1, y, 0)
+                + is_solid(x, y + 1, 0)
+                + is_solid(x - 1, y + 1, 0)
+            )
             ao_tl = max(0.2, 1.0 - s_tl * ao_mul)
 
-            s_tr = (is_solid(x + 1, y, 1) + is_solid(x, y + 1, 1) + is_solid(x + 1, y + 1, 1) +
-                    is_solid(x + 1, y, 0) + is_solid(x, y + 1, 0) + is_solid(x + 1, y + 1, 0))
+            s_tr = (
+                is_solid(x + 1, y, 1)
+                + is_solid(x, y + 1, 1)
+                + is_solid(x + 1, y + 1, 1)
+                + is_solid(x + 1, y, 0)
+                + is_solid(x, y + 1, 0)
+                + is_solid(x + 1, y + 1, 0)
+            )
             ao_tr = max(0.2, 1.0 - s_tr * ao_mul)
 
-            s_bl = (is_solid(x - 1, y, 1) + is_solid(x, y - 1, 1) + is_solid(x - 1, y - 1, 1) +
-                    is_solid(x - 1, y, 0) + is_solid(x, y - 1, 0) + is_solid(x - 1, y - 1, 0))
+            s_bl = (
+                is_solid(x - 1, y, 1)
+                + is_solid(x, y - 1, 1)
+                + is_solid(x - 1, y - 1, 1)
+                + is_solid(x - 1, y, 0)
+                + is_solid(x, y - 1, 0)
+                + is_solid(x - 1, y - 1, 0)
+            )
             ao_bl = max(0.2, 1.0 - s_bl * ao_mul)
 
-            s_br = (is_solid(x + 1, y, 1) + is_solid(x, y - 1, 1) + is_solid(x + 1, y - 1, 1) +
-                    is_solid(x + 1, y, 0) + is_solid(x, y - 1, 0) + is_solid(x + 1, y - 1, 0))
+            s_br = (
+                is_solid(x + 1, y, 1)
+                + is_solid(x, y - 1, 1)
+                + is_solid(x + 1, y - 1, 1)
+                + is_solid(x + 1, y, 0)
+                + is_solid(x, y - 1, 0)
+                + is_solid(x + 1, y - 1, 0)
+            )
             ao_br = max(0.2, 1.0 - s_br * ao_mul)
 
         # ---- 3. 最终角亮度 = 光照 × AO ----
@@ -1047,7 +1264,13 @@ class BlockRenderMixin:
 
         # ---- 5. 全黑快速路径 ----
         # 完全无光且无透明像素的方块直接绘制黑色矩形
-        if ftl == 0.0 and ftr == 0.0 and fbl == 0.0 and fbr == 0.0 and not block.has_transparent_pixels:
+        if (
+            ftl == 0.0
+            and ftr == 0.0
+            and fbl == 0.0
+            and fbr == 0.0
+            and not block.has_transparent_pixels
+        ):
             pygame.draw.rect(screen, (0, 0, 0), (sx, sy, bs, bs))
             if debug:
                 light_val = int(get_light(x, y) * 15)
@@ -1057,7 +1280,9 @@ class BlockRenderMixin:
             return
 
         # ---- 6. 获取纹理 ----
-        tex = texture_override if texture_override is not None else block.get_texture(bs)
+        tex = (
+            texture_override if texture_override is not None else block.get_texture(bs)
+        )
         if tex is None:
             return
 
@@ -1072,9 +1297,16 @@ class BlockRenderMixin:
             sky_color[2] // BLOCK_TINT_COLOR_STEP,
         )
         key = (
-            block.block_id, tex,
-            q_ftl, q_ftr, q_fbl, q_fbr,
-            q_sr_tl, q_sr_tr, q_sr_bl, q_sr_br,
+            block.block_id,
+            tex,
+            q_ftl,
+            q_ftr,
+            q_fbl,
+            q_fbr,
+            q_sr_tl,
+            q_sr_tr,
+            q_sr_bl,
+            q_sr_br,
             sky_key,
         )
 

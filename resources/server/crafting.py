@@ -1,4 +1,4 @@
-"""Data-driven crafting recipes backed by data/minecraft/recipes."""
+# Commented and arranged by ChatGPT
 
 import json
 import logging
@@ -31,7 +31,8 @@ def _matches_ingredient(stack: ItemStack | None, ingredient: dict) -> bool:
     expected = ingredient.get("item")
     if expected:
         return item_id == str(expected).removeprefix("minecraft:") or (
-            str(expected).removeprefix("minecraft:") == "oak_planks" and item_id == "oak_plank"
+            str(expected).removeprefix("minecraft:") == "oak_planks"
+            and item_id == "oak_plank"
         )
     tag = str(ingredient.get("tag", "")).removeprefix("minecraft:")
     if tag == "planks":
@@ -39,7 +40,7 @@ def _matches_ingredient(stack: ItemStack | None, ingredient: dict) -> bool:
     if tag == "logs":
         return item_id.endswith("_log")
     if tag.endswith("_logs"):
-        return item_id == tag[:-1]  # oak_logs -> oak_log
+        return item_id == tag[:-1]
     if tag == "stone_tool_materials":
         return ItemTag.COBBLESTONE in getattr(stack.material, "Tags", ())
     if tag == "stone_crafting_materials":
@@ -49,8 +50,10 @@ def _matches_ingredient(stack: ItemStack | None, ingredient: dict) -> bool:
 
 def _trim(grid: list[list[ItemStack | None]]) -> list[list[ItemStack | None]]:
     rows = [row[:] for row in grid]
-    while rows and not any(rows[0]): rows.pop(0)
-    while rows and not any(rows[-1]): rows.pop()
+    while rows and not any(rows[0]):
+        rows.pop(0)
+    while rows and not any(rows[-1]):
+        rows.pop()
     if not rows:
         return []
     while rows and not any(row[0] for row in rows):
@@ -68,14 +71,18 @@ def load_recipes() -> tuple[dict, ...]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if data.get("type") in {"minecraft:crafting_shaped", "minecraft:crafting_shapeless"}:
+        if data.get("type") in {
+            "minecraft:crafting_shaped",
+            "minecraft:crafting_shapeless",
+        }:
             recipes.append(data)
     logging.info(f"Loaded {len(recipes)} recipes")
     return tuple(recipes)
 
 
-def find_recipe(stacks: list[ItemStack], width: int, height: int) -> tuple[ItemStack, list[int]] | None:
-    """Return output and input slots to consume for a matching crafting grid."""
+def find_recipe(
+    stacks: list[ItemStack], width: int, height: int
+) -> tuple[ItemStack, list[int]] | None:
     grid = [
         [
             None if stacks[row * width + col].is_empty() else stacks[row * width + col]
@@ -89,7 +96,11 @@ def find_recipe(stacks: list[ItemStack], width: int, height: int) -> tuple[ItemS
     for recipe in load_recipes():
         if recipe["type"] == "minecraft:crafting_shaped":
             pattern = recipe.get("pattern", [])
-            if len(pattern) != len(compact) or not pattern or len(pattern[0]) != len(compact[0]):
+            if (
+                len(pattern) != len(compact)
+                or not pattern
+                or len(pattern[0]) != len(compact[0])
+            ):
                 continue
             key = recipe.get("key", {})
             valid = True
@@ -113,10 +124,14 @@ def find_recipe(stacks: list[ItemStack], width: int, height: int) -> tuple[ItemS
                 continue
             remaining = present[:]
             for ingredient in ingredients:
-                index = next((
-                    i for i, stack in enumerate(remaining)
-                    if _matches_ingredient(stack, ingredient)
-                ), -1)
+                index = next(
+                    (
+                        i
+                        for i, stack in enumerate(remaining)
+                        if _matches_ingredient(stack, ingredient)
+                    ),
+                    -1,
+                )
                 if index < 0:
                     break
                 remaining.pop(index)
@@ -128,5 +143,7 @@ def find_recipe(stacks: list[ItemStack], width: int, height: int) -> tuple[ItemS
         material = get_material_by_id(result.get("item", "air"))
         if material.name_id == "air":
             continue
-        return ItemStack(material, int(result.get("count", 1))), [i for i, stack in enumerate(stacks) if not stack.is_empty()]
+        return ItemStack(material, int(result.get("count", 1))), [
+            i for i, stack in enumerate(stacks) if not stack.is_empty()
+        ]
     return None

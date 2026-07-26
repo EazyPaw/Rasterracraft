@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import pygame
 
 from resources.client.GUI.button import Button
@@ -11,7 +12,7 @@ class MainMenu(GUI):
     """Minecraft 风格主菜单，支持动态注册按钮。"""
 
     @client_method
-    def __init__(self, render, client = None):
+    def __init__(self, render, client=None):
         self.client = client
         # 调用父类初始化
         super().__init__(render)
@@ -54,7 +55,7 @@ class MainMenu(GUI):
         """启动单人游戏：关闭本菜单并打开存档选择菜单"""
         if self.starting_world:
             return
-        self.render.close_gui(self)                # 关闭主菜单
+        self.render.close_gui(self)  # 关闭主菜单
         self.render.client.saves_menu = SavesMenu(self.render, self)
         self.render.show_gui(self.render.client.saves_menu)  # 显示存档菜单
 
@@ -73,7 +74,11 @@ class MainMenu(GUI):
         优先让按钮响应鼠标事件，按下回车或小键盘回车时触发当前可见且启用的按钮。
         """
         for event in events[:]:
-            if event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
+            if event.type in (
+                pygame.MOUSEMOTION,
+                pygame.MOUSEBUTTONDOWN,
+                pygame.MOUSEBUTTONUP,
+            ):
                 handled = False
                 for button in self.buttons:
                     if button.handle_event(event):
@@ -81,7 +86,10 @@ class MainMenu(GUI):
                 # 如果事件被按钮处理，则从事件列表中移除，防止其他 GUI 重复处理
                 if handled and event in events:
                     events.remove(event)
-            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            elif event.type == pygame.KEYDOWN and event.key in (
+                pygame.K_RETURN,
+                pygame.K_KP_ENTER,
+            ):
                 # 回车键触发第一个可见且启用的按钮
                 for button in self.buttons:
                     if button.enabled and button.visible:
@@ -101,7 +109,7 @@ class MainMenu(GUI):
         # 按钮尺寸随窗口缩放，并限定合理范围
         button_w = max(180, min(400, int(screen_w * 0.35)))
         button_h = max(28, min(48, int(screen_h * 0.055)))
-        gap = max(4, int(button_h * 0.3))          # 按钮之间的间距
+        gap = max(4, int(button_h * 0.3))  # 按钮之间的间距
 
         visible_buttons = [b for b in self.buttons if b.visible]
         if not visible_buttons:
@@ -115,7 +123,9 @@ class MainMenu(GUI):
             for button in visible_buttons
         ]
         # 计算所有按钮加上间距的总高度
-        total_h = sum(size[1] for size in button_sizes) + gap * (len(visible_buttons) - 1)
+        total_h = sum(size[1] for size in button_sizes) + gap * (
+            len(visible_buttons) - 1
+        )
 
         # 按钮垂直区间：屏幕 38%~68% 高度
         button_zone_top = int(screen_h * 0.38)
@@ -174,16 +184,18 @@ class MainMenu(GUI):
         """
         screen_w = self.render.SCREEN_WIDTH
         screen_h = self.render.SCREEN_HEIGHT
-        logo = self.render.client.resources_manager.get_texture_img("gui.title.minecraft", True)
+        logo = self.render.client.resources_manager.get_texture_img(
+            "gui.title.minecraft", True
+        )
 
-        logo_zone_height = int(screen_h * 0.35)   # Logo 所在区域高度
+        logo_zone_height = int(screen_h * 0.35)  # Logo 所在区域高度
 
         # 计算缩放比例：宽度不超过屏幕 50%，高度不超过区域高度的 60%
         max_w = int(screen_w * 0.50)
         max_h = int(logo_zone_height * 0.60)
         scale_w = max_w / logo.get_width()
         scale_h = max_h / logo.get_height()
-        scale = min(scale_w, scale_h, 2.5)        # 最大放大 2.5 倍
+        scale = min(scale_w, scale_h, 2.5)  # 最大放大 2.5 倍
         logo_w = int(logo.get_width() * scale)
         logo_h = int(logo.get_height() * scale)
         logo_surface = self.render.scale_surface(logo, (logo_w, logo_h))
@@ -203,10 +215,14 @@ class MainMenu(GUI):
         y = self.render.SCREEN_HEIGHT - footer_font_size - 8
 
         # 左侧：版本号
-        self.render.render_text(f"PyCraft 2D {version}", (8, y), (255, 255, 255), footer_font_size, True)
+        self.render.render_text(
+            f"PyCraft 2D {version}", (8, y), (255, 255, 255), footer_font_size, True
+        )
 
         # 右侧：版权文字
         copyright_text = "Minecraft assets by Mojang Studios"
         font = self.render.get_font(footer_font_size)
         x = self.render.SCREEN_WIDTH - font.size(copyright_text)[0] - 8
-        self.render.render_text(copyright_text, (x, y), (255, 255, 255), footer_font_size, True)
+        self.render.render_text(
+            copyright_text, (x, y), (255, 255, 255), footer_font_size, True
+        )

@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 from collections import deque
 from typing import List, Tuple, cast
 
@@ -11,14 +12,9 @@ _ATTENUATION = np.frompyfunc(lambda block: int(block.light_attenuation), 1, 1)
 _LIGHT_SOURCE = np.frompyfunc(lambda block: int(block.light_source), 1, 1)
 
 
-def calculate_light_layers_2d(region_array: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Calculate sky and block light with the same fixed point as the BFS.
-
-    Attribute extraction still visits each Python block once, but propagation
-    runs as vectorized ndarray operations instead of tens of thousands of
-    Python deque/cast iterations.  Level-one light intentionally does not
-    propagate, matching ``flood_fill_light_2d`` exactly.
-    """
+def calculate_light_layers_2d(
+    region_array: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
     layer0 = region_array[:, :, 0]
     layer1 = region_array[:, :, 1]
     solid = _SOLID(layer0).astype(np.bool_)
@@ -26,8 +22,6 @@ def calculate_light_layers_2d(region_array: np.ndarray) -> tuple[np.ndarray, np.
     source0 = _LIGHT_SOURCE(layer0).astype(np.int16)
     source1 = _LIGHT_SOURCE(layer1).astype(np.int16)
 
-    # A cell is a direct sky source only when no solid block exists at or
-    # above it in the same column, matching the old top-down source scan.
     sky_exposed = ~np.logical_or.accumulate(solid[:, ::-1], axis=1)[:, ::-1]
 
     light = np.zeros((2, *solid.shape), dtype=np.int16)

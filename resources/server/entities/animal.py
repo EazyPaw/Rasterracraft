@@ -1,4 +1,4 @@
-"""Shared passive-animal lifecycle, interaction and 2D model primitives."""
+# Commented and arranged by ChatGPT
 
 from __future__ import annotations
 
@@ -16,8 +16,6 @@ from resources.server.utils import client_method
 
 
 class Animal(Entity):
-    """Breedable passive mob with server-owned age and interaction state."""
-
     tempt_items: frozenset[str] = frozenset()
     panic_speed_modifier = 1.25
     tempt_speed_modifier = 1.1
@@ -95,18 +93,23 @@ class Animal(Entity):
     def spawn_heart_particles(self, count: int = 7) -> None:
         spawner = getattr(self.world, "spawn_particle", None)
         if callable(spawner):
-            spawner(HEART(
-                self.x + self.width * 0.5,
-                self.y + self.height * 0.7,
-                self.z,
-                count=max(1, int(count)),
-                motion=(0.0, 0.025),
-                data={"position_spread": [self.width * 0.8, self.height * 0.35]},
-            ))
+            spawner(
+                HEART(
+                    self.x + self.width * 0.5,
+                    self.y + self.height * 0.7,
+                    self.z,
+                    count=max(1, int(count)),
+                    motion=(0.0, 0.025),
+                    data={"position_spread": [self.width * 0.8, self.height * 0.35]},
+                )
+            )
 
     @staticmethod
     def _player_is_creative(player) -> bool:
-        return getattr(getattr(player, "gamemode", None), "name_id", "survival") == "creative"
+        return (
+            getattr(getattr(player, "gamemode", None), "name_id", "survival")
+            == "creative"
+        )
 
     def _consume_held_item(self, player, held_stack) -> bool:
         if self._player_is_creative(player):
@@ -157,7 +160,8 @@ class Animal(Entity):
         with self.world._entities_lock:
             entities = tuple(self.world.entities.values())
         candidates = [
-            candidate for candidate in entities
+            candidate
+            for candidate in entities
             if type(candidate) is type(self)
             and not candidate.is_baby
             and not candidate.removed
@@ -171,7 +175,7 @@ class Animal(Entity):
             return False
         if self.is_baby or mate.is_baby or self.love_ticks <= 0 or mate.love_ticks <= 0:
             return False
-        # Both AIs can reach this method in the same tick.
+
         if str(self.uuid) > str(mate.uuid):
             return False
         child = self.create_child((self.x + mate.x) * 0.5, min(self.y, mate.y), self.z)
@@ -201,8 +205,7 @@ class Animal(Entity):
     def was_burning_when_killed(self) -> bool:
         damage_type = self.last_damage_type
         return bool(
-            self.fire_ticks > 0
-            or getattr(damage_type, "effects", None) == "burning"
+            self.fire_ticks > 0 or getattr(damage_type, "effects", None) == "burning"
         )
 
     def get_drops(self):
@@ -219,7 +222,6 @@ def crop_x_side(
     *,
     positive: bool = False,
 ) -> pygame.Surface:
-    """Crop the exact X-/X+ face described by entity-model-uv-reference.md."""
     u, v = uv
     dx, dy, dz = size
     x = u + dz + dx if positive else u
@@ -231,13 +233,10 @@ def crop_rotated_body(
     uv: tuple[int, int],
     size: tuple[int, int, int],
 ) -> pygame.Surface:
-    """Crop an X face and apply the model's +90-degree body rotation."""
     return pygame.transform.rotate(crop_x_side(texture, uv, size), -90)
 
 
 class AnimalSkeleton(EntitySkeleton):
-    """Animation clock and age scaling shared by passive-mob renderers."""
-
     @client_method
     def __init__(self, entity, texture_key: str, *, client=None):
         super().__init__(client, texture_key, entity)
@@ -248,12 +247,12 @@ class AnimalSkeleton(EntitySkeleton):
         self.facing = int(getattr(entity, "facing", self.RIGHT))
         self.model_width = float(getattr(entity, "width", 1.0))
 
-    def pose_anchor(self, name: str, anchor: tuple[float, float], flip: bool) -> tuple[float, float]:
+    def pose_anchor(
+        self, name: str, anchor: tuple[float, float], flip: bool
+    ) -> tuple[float, float]:
         if not flip:
             return anchor
-        # Anchor is the joint itself, not necessarily a top-left corner.
-        # BodyPart mirrors its own pivot, so only the world-space joint needs
-        # reflecting around the authored model width.
+
         return (self.model_width - anchor[0], anchor[1])
 
     def _update_clock(self) -> float:
@@ -262,7 +261,9 @@ class AnimalSkeleton(EntitySkeleton):
         self._last_update_time = now
         dx = self.entity.x - self._last_x
         self._last_x = self.entity.x
-        speed = max(abs(getattr(self.entity.motion, "x", 0.0)), abs(dx) / max(dt, 0.001))
+        speed = max(
+            abs(getattr(self.entity.motion, "x", 0.0)), abs(dx) / max(dt, 0.001)
+        )
         self.walk_time += dt * (9.0 if speed > 0.015 else 2.0)
         return speed
 
@@ -283,8 +284,6 @@ class AnimalSkeleton(EntitySkeleton):
 
 
 class QuadrupedSkeleton(AnimalSkeleton):
-    """Reusable side-view four-legged skeleton based on Minecraft cube UVs."""
-
     def configure_quadruped(
         self,
         *,
@@ -302,8 +301,7 @@ class QuadrupedSkeleton(AnimalSkeleton):
         body = crop_rotated_body(self.texture, body_uv, body_size)
         head = crop_x_side(self.texture, head_uv, head_size)
         leg = crop_x_side(self.texture, leg_uv, leg_size)
-        # Near-side legs are offset slightly downward and outward so all four
-        # legs are visible instead of overlapping into two.
+
         near_rear = (rear_leg_anchor[0] + 0.03, rear_leg_anchor[1] - 0.04)
         near_front = (front_leg_anchor[0] - 0.03, front_leg_anchor[1] - 0.04)
         self._base_anchors = {
@@ -317,13 +315,19 @@ class QuadrupedSkeleton(AnimalSkeleton):
         leg_pivot = (leg.get_width() / 2, 0)
         head_pivot = (head.get_width() / 2, head.get_height() / 2)
         self.body = {
-            # Far-side legs – behind the body
-            "far_back_leg": BodyPart("far_back_leg", leg, rear_leg_anchor, leg_pivot, layer=0),
-            "far_front_leg": BodyPart("far_front_leg", leg, front_leg_anchor, leg_pivot, layer=0),
+            "far_back_leg": BodyPart(
+                "far_back_leg", leg, rear_leg_anchor, leg_pivot, layer=0
+            ),
+            "far_front_leg": BodyPart(
+                "far_front_leg", leg, front_leg_anchor, leg_pivot, layer=0
+            ),
             "body": BodyPart("body", body, body_anchor, (0, 0), layer=1),
-            # Near-side legs – in front of the body
-            "near_back_leg": BodyPart("near_back_leg", leg, near_rear, leg_pivot, layer=2),
-            "near_front_leg": BodyPart("near_front_leg", leg, near_front, leg_pivot, layer=2),
+            "near_back_leg": BodyPart(
+                "near_back_leg", leg, near_rear, leg_pivot, layer=2
+            ),
+            "near_front_leg": BodyPart(
+                "near_front_leg", leg, near_front, leg_pivot, layer=2
+            ),
             "head": BodyPart("head", head, head_anchor, head_pivot, layer=3),
         }
 
@@ -332,33 +336,72 @@ class QuadrupedSkeleton(AnimalSkeleton):
         amplitude = min(28.0, 12.0 + speed * 32.0) if moving else 0.0
         swing = math.sin(self.walk_time) * amplitude
         flip = self.facing == self.LEFT
-        self.body["body"].set_pose(Pose(
-            self.pose_anchor("body", self._base_anchors["body"], flip), (0, 0), 0, True, flip
-        ))
-        # Far-side legs (behind body, layer 0)
-        self.body["far_back_leg"].set_pose(Pose(
-            self.pose_anchor("far_back_leg", self._base_anchors["far_back_leg"], flip),
-            self.body["far_back_leg"].target_pivot, swing, True, flip
-        ))
-        self.body["far_front_leg"].set_pose(Pose(
-            self.pose_anchor("far_front_leg", self._base_anchors["far_front_leg"], flip),
-            self.body["far_front_leg"].target_pivot, -swing, True, flip
-        ))
-        # Near-side legs (in front of body, layer 2) – swing opposite to far-side
-        self.body["near_back_leg"].set_pose(Pose(
-            self.pose_anchor("near_back_leg", self._base_anchors["near_back_leg"], flip),
-            self.body["near_back_leg"].target_pivot, -swing, True, flip
-        ))
-        self.body["near_front_leg"].set_pose(Pose(
-            self.pose_anchor("near_front_leg", self._base_anchors["near_front_leg"], flip),
-            self.body["near_front_leg"].target_pivot, swing, True, flip
-        ))
+        self.body["body"].set_pose(
+            Pose(
+                self.pose_anchor("body", self._base_anchors["body"], flip),
+                (0, 0),
+                0,
+                True,
+                flip,
+            )
+        )
+
+        self.body["far_back_leg"].set_pose(
+            Pose(
+                self.pose_anchor(
+                    "far_back_leg", self._base_anchors["far_back_leg"], flip
+                ),
+                self.body["far_back_leg"].target_pivot,
+                swing,
+                True,
+                flip,
+            )
+        )
+        self.body["far_front_leg"].set_pose(
+            Pose(
+                self.pose_anchor(
+                    "far_front_leg", self._base_anchors["far_front_leg"], flip
+                ),
+                self.body["far_front_leg"].target_pivot,
+                -swing,
+                True,
+                flip,
+            )
+        )
+
+        self.body["near_back_leg"].set_pose(
+            Pose(
+                self.pose_anchor(
+                    "near_back_leg", self._base_anchors["near_back_leg"], flip
+                ),
+                self.body["near_back_leg"].target_pivot,
+                -swing,
+                True,
+                flip,
+            )
+        )
+        self.body["near_front_leg"].set_pose(
+            Pose(
+                self.pose_anchor(
+                    "near_front_leg", self._base_anchors["near_front_leg"], flip
+                ),
+                self.body["near_front_leg"].target_pivot,
+                swing,
+                True,
+                flip,
+            )
+        )
         head_angle = float(getattr(self.entity, "look_angle", 0.0)) * 0.35
         head_anchor = self.get_head_anchor()
-        self.body["head"].set_pose(Pose(
-            self.pose_anchor("head", head_anchor, flip),
-            self.body["head"].target_pivot, head_angle, True, flip
-        ))
+        self.body["head"].set_pose(
+            Pose(
+                self.pose_anchor("head", head_anchor, flip),
+                self.body["head"].target_pivot,
+                head_angle,
+                True,
+                flip,
+            )
+        )
         self.apply_extra_pose(flip, swing)
 
     def get_head_anchor(self) -> tuple[float, float]:

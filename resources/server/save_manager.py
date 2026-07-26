@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import os
 import re
 import shutil
@@ -30,7 +31,11 @@ def ensure_saves_root() -> Path:
 
 def _migrate_legacy_saves() -> None:
     global _LEGACY_MIGRATED
-    if _LEGACY_MIGRATED or LEGACY_SAVES_ROOT == SAVES_ROOT or not LEGACY_SAVES_ROOT.exists():
+    if (
+        _LEGACY_MIGRATED
+        or LEGACY_SAVES_ROOT == SAVES_ROOT
+        or not LEGACY_SAVES_ROOT.exists()
+    ):
         _LEGACY_MIGRATED = True
         return
     for child in LEGACY_SAVES_ROOT.iterdir():
@@ -70,15 +75,16 @@ def _region_index(rx: int) -> int:
 
 
 def region_path(save_id: str, world_id: str, region_index: int) -> Path:
-    return save_path(save_id) / "worlds" / world_id / "regions" / f"r.{region_index}.region"
+    return (
+        save_path(save_id)
+        / "worlds"
+        / world_id
+        / "regions"
+        / f"r.{region_index}.region"
+    )
 
 
 def entity_region_path(save_id: str, world_id: str, region_index: int) -> Path:
-    """Path for one 256-chunk-wide entity region.
-
-    ``entitys`` intentionally follows the save-layout name requested by the
-    project, while keeping entity data separate from block region files.
-    """
     return (
         save_path(save_id)
         / "worlds"
@@ -89,7 +95,6 @@ def entity_region_path(save_id: str, world_id: str, region_index: int) -> Path:
 
 
 def chunk_path(save_id: str, world_id: str, rx: int) -> Path:
-    """Legacy one-file-per-chunk path kept only for reading old test saves."""
     return save_path(save_id) / "worlds" / world_id / "chunks" / f"{rx}.chunk"
 
 
@@ -130,7 +135,9 @@ def save_level(save_id: str, data: dict[str, Any]) -> None:
     _write_msgpack(level_path(save_id), data, compress=False)
 
 
-def create_save(display_name: str = "New World", *, version: str = "", game_mode: str = "survival") -> dict[str, Any]:
+def create_save(
+    display_name: str = "New World", *, version: str = "", game_mode: str = "survival"
+) -> dict[str, Any]:
     ensure_saves_root()
     base_id = _safe_save_id(display_name)
     save_id = f"{base_id}_{int(_now())}_{uuid.uuid4().hex[:6]}"
@@ -234,7 +241,9 @@ def _read_region(save_id: str, world_id: str, region_index: int) -> dict[str, An
     return data
 
 
-def _write_region(save_id: str, world_id: str, region_index: int, data: dict[str, Any]) -> None:
+def _write_region(
+    save_id: str, world_id: str, region_index: int, data: dict[str, Any]
+) -> None:
     data["format_version"] = FORMAT_VERSION
     data["region_size"] = REGION_SIZE
     data["region_index"] = region_index
@@ -271,7 +280,6 @@ def _write_entity_region(
 
 
 def load_entity_chunk(save_id: str | None, world_id: str, rx: int) -> list[dict]:
-    """Load entity records belonging to exactly one block chunk."""
     if not save_id:
         return []
     region = _read_entity_region(str(save_id), world_id, _region_index(rx))
@@ -284,11 +292,6 @@ def load_entity_chunk(save_id: str | None, world_id: str, rx: int) -> list[dict]
 def save_entity_chunks(
     save_id: str, world_id: str, records_by_chunk: dict[int, list[dict]]
 ) -> None:
-    """Replace entity snapshots for the supplied chunks.
-
-    Explicitly writing an empty list clears entities removed since the previous
-    save, which is essential when an item is picked up or moves to a new chunk.
-    """
     grouped: dict[int, dict[int, list[dict]]] = {}
     for raw_rx, raw_records in records_by_chunk.items():
         rx = int(raw_rx)
@@ -318,7 +321,10 @@ def chunk_exists(save_id: str | None, world_id: str, rx: int) -> bool:
     if not save_id:
         return False
     region = _read_region(str(save_id), world_id, _region_index(rx))
-    return str(int(rx)) in region.get("chunks", {}) or chunk_path(str(save_id), world_id, rx).exists()
+    return (
+        str(int(rx)) in region.get("chunks", {})
+        or chunk_path(str(save_id), world_id, rx).exists()
+    )
 
 
 def _block_payload(block) -> str | dict[str, Any]:
@@ -440,7 +446,9 @@ def load_chunk(save_id: str, world_id: str, rx: int, world):
         world_x = rx * 16 + x
         for y in range(height):
             for z in range(depth):
-                region[x, y, z] = _make_block(block_palette[block_indices[i]], world, world_x, y, z)
+                region[x, y, z] = _make_block(
+                    block_palette[block_indices[i]], world, world_x, y, z
+                )
                 i += 1
 
     biome_palette = data.get("biome_palette", ["void"])

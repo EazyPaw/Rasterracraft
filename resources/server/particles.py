@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import logging
 import math
 import os
@@ -9,7 +10,7 @@ from resources.server.block_class import Block
 from resources.server.location import Location, decide_x_or_loc
 from resources.server.utils import client_method
 
-if os.environ.get('PYCRAFT_CLIENT') == '1':
+if os.environ.get("PYCRAFT_CLIENT") == "1":
     import pygame
 
 if TYPE_CHECKING:
@@ -101,14 +102,14 @@ class Particle:
         count: int = 1,
         motion: tuple[float, float] = (0.0, 0.0),
         data: dict | None = None,
-    ) -> 'Particle':
+    ) -> "Particle":
         """绕过子类自定义构造器，从网络包里的通用字段创建粒子。"""
         particle = cls.__new__(cls)
         Particle.__init__(particle, x, y, z, count=count, motion=motion, data=data)
         return particle
 
     @classmethod
-    def from_packet(cls, packet: dict) -> 'Particle':
+    def from_packet(cls, packet: dict) -> "Particle":
         """从服务器粒子包恢复为对应的粒子子类实例。"""
         motion = packet.get("motion") or [0.0, 0.0]
         return cls.from_values(
@@ -159,7 +160,7 @@ class Particle:
     @client_method
     def setup_client_state(
         self,
-        manager: 'ParticleManager',
+        manager: "ParticleManager",
         *,
         texture=None,
         size_: float | None = None,
@@ -171,8 +172,7 @@ class Particle:
         texture_paths = type(self).get_texture_paths()
         if texture is None and self.animation_frame_ticks > 0 and texture_paths:
             self.texture_frames = tuple(
-                client.resources_manager.get_texture_img(path)
-                for path in texture_paths
+                client.resources_manager.get_texture_img(path) for path in texture_paths
             )
             texture = self.texture_frames[0]
         elif texture is None:
@@ -183,7 +183,9 @@ class Particle:
         self.texture = texture
         self.motion_x, self.motion_y = self.motion
         self.actual_size = size_ if size_ is not None else random.uniform(*self.size)
-        self.lifetime = lifetime if lifetime is not None else random.randint(*self.lifetime_ticks)
+        self.lifetime = (
+            lifetime if lifetime is not None else random.randint(*self.lifetime_ticks)
+        )
         self.rotation = random.uniform(0.0, 360.0)
         self.rotation_speed = (
             rotation_speed
@@ -194,7 +196,7 @@ class Particle:
         return True
 
     @client_method
-    def spawn_from_packet(self, manager: 'ParticleManager', client=None) -> None:
+    def spawn_from_packet(self, manager: "ParticleManager", client=None) -> None:
         """按网络包中的 count 在客户端生成粒子实体。"""
         position_spread = self.data.get("position_spread", (0.0, 0.0))
         motion_spread = self.data.get("motion_spread", (0.0, 0.0))
@@ -218,7 +220,7 @@ class Particle:
                 manager.add_particle(particle)
 
     @client_method
-    def update(self, manager: 'ParticleManager', client=None) -> None:
+    def update(self, manager: "ParticleManager", client=None) -> None:
         """更新粒子的速度、位置、碰撞和生命周期。"""
         self.age += 1
         if not self.alive:
@@ -249,7 +251,7 @@ class Particle:
         self.rotation = (self.rotation + self.rotation_speed) % 360.0
 
     @client_method
-    def draw(self, manager: 'ParticleManager', render: 'Render', client=None) -> None:
+    def draw(self, manager: "ParticleManager", render: "Render", client=None) -> None:
         """按世界坐标和光照绘制粒子。"""
         if self.texture is None:
             return
@@ -324,7 +326,7 @@ class EXPLOSION_EMITTER(Particle):
     _texture_path = None
 
     @client_method
-    def spawn_from_packet(self, manager: 'ParticleManager', client=None) -> None:
+    def spawn_from_packet(self, manager: "ParticleManager", client=None) -> None:
         power = max(0.1, float(self.data.get("power", 4.0)))
         particle_count = max(8, min(32, round(power * 5)))
         for _ in range(particle_count):
@@ -353,14 +355,13 @@ class SPLASH(TextureParticle):
     # 水花画布底部只有 1--3 个不透明像素，保留完整贴图倍率才能
     # 让实际可见部分不至于缩成一个点。
     size = (0.6, 0.7)
-    # A light gravity and drag turn the rain impact motion into a short arc.
-    # Weather spawning gives it enough upward speed to remain above the
-    # surface for the whole animation.
+
     gravity = 0.01
     linear_drag = 0.025
     collision = CollisionSettings(enabled=False)
     animation_frame_ticks = 2
     animation_loop = False
+
 
 class HEART(TextureParticle):
     particle_id = "minecraft:heart"
@@ -381,19 +382,22 @@ class FragmentParticle(Particle):
     size = (0.2, 0.2)
     gravity = 0.035
     linear_drag = 0.035
-    collision = CollisionSettings(enabled=True, radius=0.035, drag=0.55, restitution=0.16)
+    collision = CollisionSettings(
+        enabled=True, radius=0.035, drag=0.55, restitution=0.16
+    )
     default_position_spread = (0.0, 0.0)
     default_motion_spread = (0.0, 0.0)
 
     @client_method
-    def _resolve_fragments(self, manager: 'ParticleManager', client=None):
+    def _resolve_fragments(self, manager: "ParticleManager", client=None):
         location = Location(
             client.client_world, math.floor(self.x), math.floor(self.y), self.z
         )
-        block_id = self.data.get('block_id')
-        item_id = self.data.get('item_id')
+        block_id = self.data.get("block_id")
+        item_id = self.data.get("item_id")
         if isinstance(block_id, str):
             from resources.server.blocks import get_block_by_id
+
             try:
                 source = get_block_by_id(block_id)
             except ValueError:
@@ -402,21 +406,22 @@ class FragmentParticle(Particle):
             return manager.get_source_fragments(source, location=location)
         if isinstance(item_id, str):
             from resources.server.materials import get_material_by_id
+
             try:
                 source = get_material_by_id(item_id)
             except ValueError:
                 return ()
             return manager.get_source_fragments(source, location=location)
-        logging.warning('Fragment particle is missing block_id/item_id')
+        logging.warning("Fragment particle is missing block_id/item_id")
         return ()
 
     @client_method
-    def spawn_from_packet(self, manager: 'ParticleManager', client=None) -> None:
+    def spawn_from_packet(self, manager: "ParticleManager", client=None) -> None:
         fragments = self._resolve_fragments(manager, client=client)
         if not fragments:
             return
-        position_spread = self.data.get('position_spread', self.default_position_spread)
-        motion_spread = self.data.get('motion_spread', self.default_motion_spread)
+        position_spread = self.data.get("position_spread", self.default_position_spread)
+        motion_spread = self.data.get("motion_spread", self.default_motion_spread)
         try:
             spread_x, spread_y = float(position_spread[0]), float(position_spread[1])
             motion_x, motion_y = float(motion_spread[0]), float(motion_spread[1])
@@ -437,7 +442,6 @@ class FragmentParticle(Particle):
                 manager.add_particle(particle)
 
 
-
 class SPRINT_STEP(FragmentParticle):
     """疾跑脚步扬起的灰尘粒子。
 
@@ -445,13 +449,16 @@ class SPRINT_STEP(FragmentParticle):
     模拟玩家疾跑时脚底扬起的尘土效果。实际坐标和纹理切片由
     FragmentParticle 的方块/物品通用实现处理。
     """
+
     particle_id = "minecraft:sprint_step"
     name = "sprint_step"
     _texture_paths = None
     lifetime_ticks = (6, 14)
     size = (0.2, 0.3)
     gravity = 0.02
-    collision = CollisionSettings(enabled=True, radius=0.025, drag=0.45, restitution=0.05)
+    collision = CollisionSettings(
+        enabled=True, radius=0.025, drag=0.45, restitution=0.05
+    )
     linear_drag = 0.025
     default_position_spread = (0.05, 0.04)
 
@@ -459,7 +466,7 @@ class SPRINT_STEP(FragmentParticle):
         self,
         x: float,
         y: float,
-        z: float ,
+        z: float,
         *,
         count: int = 18,
         motion: tuple[float, float] = (0.0, 0.0),
@@ -474,16 +481,17 @@ class SPRINT_STEP(FragmentParticle):
             data=data,
         )
 
-class ITEM(FragmentParticle):
-    """Small crumbs cut from an inventory item's own texture."""
 
-    particle_id = 'minecraft:item'
-    name = 'item'
+class ITEM(FragmentParticle):
+    particle_id = "minecraft:item"
+    name = "item"
     lifetime_ticks = (8, 14)
     size = (0.16, 0.22)
     gravity = 0.028
     linear_drag = 0.03
-    collision = CollisionSettings(enabled=True, radius=0.02, drag=0.45, restitution=0.08)
+    collision = CollisionSettings(
+        enabled=True, radius=0.02, drag=0.45, restitution=0.08
+    )
     default_position_spread = (0.04, 0.025)
     default_motion_spread = (0.025, 0.018)
 
@@ -523,24 +531,24 @@ class BLOCK(FragmentParticle):
         )
 
     @client_method
-    def spawn_from_packet(self, manager: 'ParticleManager', client=None) -> None:
+    def spawn_from_packet(self, manager: "ParticleManager", client=None) -> None:
         from resources.server.blocks import get_block_by_id
-        block_id = self.data.get('block_id')
+
+        block_id = self.data.get("block_id")
         if not isinstance(block_id, str):
             return
         try:
             block = get_block_by_id(block_id)
         except ValueError:
             return
-        location = Location(client.client_world, math.floor(self.x), math.floor(self.y), self.z)
+        location = Location(
+            client.client_world, math.floor(self.x), math.floor(self.y), self.z
+        )
         block.location = location
         manager.spawn_block_break(block, location, count=self.count)
 
 
-# Compatibility name for extensions which imported the old block-only base.
 BlockParticle = FragmentParticle
-
-
 
 
 _PARTICLE_REGISTRY: dict[str, type[Particle]] | None = None

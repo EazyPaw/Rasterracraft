@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 from collections.abc import Callable
 
 import pygame
@@ -6,8 +7,6 @@ from resources.server.utils import client_method
 
 
 class Button:
-    """Reusable Minecraft-style GUI button."""
-
     DEFAULT_SIZE = (400, 40)
     NORMAL_TEXTURE = "gui.sprites.widget.button"
     HOVER_TEXTURE = "gui.sprites.widget.button_highlighted"
@@ -38,7 +37,7 @@ class Button:
         return self.visible and self.rect.collidepoint(pos)
 
     @client_method
-    def click(self, client = None):
+    def click(self, client=None):
         if self.enabled and self.callback is not None:
             # 回调可能会调用 pygame.quit()（例如主菜单的“退出”），
             # 因此先播放按键音效，避免在 pygame 关闭后访问混音器。
@@ -95,7 +94,9 @@ class Button:
             self.rect.centerx - text_w / 2,
             self.rect.centery - text_h / 2,
         )
-        render.render_text(self.text, text_pos, color, font_size, shadow=True, shadow_strength=0.1)
+        render.render_text(
+            self.text, text_pos, color, font_size, shadow=True, shadow_strength=0.1
+        )
 
     def _draw_fallback(self, render):
         base = (96, 96, 96) if self.enabled else (56, 56, 56)

@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import pygame
 
 from resources.client.resources_manager import transkey
@@ -5,9 +6,9 @@ from resources.server.text import Text, TextColor
 
 
 class ItemTooltip:
-    """Render the classic Minecraft item tooltip for an ``ItemStack``."""
-
-    _panel_cache: dict[tuple[int, int, int], tuple[pygame.Surface, tuple[int, int]]] = {}
+    _panel_cache: dict[
+        tuple[int, int, int], tuple[pygame.Surface, tuple[int, int]]
+    ] = {}
     BACKGROUND_TOP = (16, 0, 20, 240)
     BACKGROUND_BOTTOM = (16, 0, 16, 240)
     BORDER_TOP = (80, 0, 255, 80)
@@ -18,7 +19,6 @@ class ItemTooltip:
 
     @staticmethod
     def _split_line(value: str | Text) -> list[str | Text]:
-        """Split embedded newlines without losing ``Text`` formatting."""
         if not isinstance(value, Text):
             return str(value).replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
@@ -27,7 +27,12 @@ class ItemTooltip:
         for segment in value.text:
             color = segment.get("color", TextColor.WHITE)
             bold = bool(segment.get("bold", False))
-            pieces = str(segment.get("text", "")).replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            pieces = (
+                str(segment.get("text", ""))
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .split("\n")
+            )
             for index, piece in enumerate(pieces):
                 if piece:
                     current.append({"text": piece, "color": color, "bold": bold})
@@ -40,10 +45,7 @@ class ItemTooltip:
     def _translated_name(self, stack) -> str:
         raw_name = str(stack.get_name())
         resources = self.render.client.resources_manager
-        # ItemStack names in this project may be either translation keys or
-        # already translated/custom names.  Run actual keys through transkey,
-        # while leaving literal names untouched (and avoiding a warning every
-        # frame for a localized value).
+
         if raw_name in resources._lang_map or raw_name in resources._fallback_lang_map:
             return transkey(raw_name, client=self.render.client)
         return raw_name
@@ -96,8 +98,9 @@ class ItemTooltip:
             surface.fill(color, (rect.x, rect.y + offset, rect.width, 1))
 
     @classmethod
-    def create_panel(cls, content_size: tuple[int, int], pixel: int) -> tuple[pygame.Surface, tuple[int, int]]:
-        """Create the rounded, double-layer tooltip panel and content offset."""
+    def create_panel(
+        cls, content_size: tuple[int, int], pixel: int
+    ) -> tuple[pygame.Surface, tuple[int, int]]:
         pixel = max(1, int(pixel))
         content_width, content_height = content_size
         cache_key = (content_width, content_height, pixel)
@@ -108,8 +111,6 @@ class ItemTooltip:
         height = max(pixel * 8 + 1, content_height + pixel * 8)
         panel = pygame.Surface((width, height), pygame.SRCALPHA)
 
-        # One logical pixel is cut from every corner.  The remaining outer
-        # ring uses the same translucent near-black as the classic tooltip.
         cls._vertical_gradient(
             panel,
             pygame.Rect(pixel, 0, width - pixel * 2, height),
@@ -123,9 +124,6 @@ class ItemTooltip:
             cls.BACKGROUND_BOTTOM,
         )
 
-        # The translucent purple border is composited over the dark panel,
-        # producing the two-tone, vertically fading outline visible in the
-        # original UI instead of a flat opaque rectangle.
         border = pygame.Surface((width, height), pygame.SRCALPHA)
         border.fill(cls.BORDER_TOP, (pixel, pixel, width - pixel * 2, pixel))
         border.fill(
@@ -163,7 +161,9 @@ class ItemTooltip:
         content_width = max(self._line_width(line, font_size) for line in lines)
         content_height = len(lines) * line_height + max(0, len(lines) - 1) * line_gap
         pixel = max(1, round(self.render.gui_scale))
-        panel, content_offset = self.create_panel((content_width, content_height), pixel)
+        panel, content_offset = self.create_panel(
+            (content_width, content_height), pixel
+        )
 
         mouse_x, mouse_y = mouse_pos
         cursor_gap = pixel * 3

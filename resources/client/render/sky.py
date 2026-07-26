@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """
 天空渲染 Mixin
 ==============
@@ -12,7 +13,12 @@ from typing import Any
 import numpy as np
 import pygame
 
-from .constants import DAY_TICKS, DAY_LENGTH_SECONDS, MIN_SKY_LIGHT_WEIGHT, SKY_CACHE_TICK_STEP
+from .constants import (
+    DAY_TICKS,
+    DAY_LENGTH_SECONDS,
+    MIN_SKY_LIGHT_WEIGHT,
+    SKY_CACHE_TICK_STEP,
+)
 from .render_utils import clamp, cyclic_lerp_color, lerp, lerp_color, smoothstep
 
 
@@ -31,15 +37,15 @@ class SkyMixin:
     # ===================== 天空颜色关键帧 =====================
     # 天空上层颜色：从深夜→日出→白昼→日落→深夜的循环
     SKY_UPPER_KEYFRAMES: list[tuple[float, tuple[int, int, int]]] = [
-        (0, (124, 151, 214)),       # 午夜
-        (1000, (120, 167, 255)),    # 日出前
-        (6000, (120, 167, 255)),    # 正午
-        (11000, (112, 151, 224)),   # 午后
-        (12000, (73, 88, 136)),     # 日落
-        (13000, (44, 42, 66)),      # 黄昏
-        (18000, (23, 25, 48)),      # 深夜
-        (22000, (45, 45, 78)),      # 黎明前
-        (23000, (92, 116, 183)),    # 黎明
+        (0, (124, 151, 214)),  # 午夜
+        (1000, (120, 167, 255)),  # 日出前
+        (6000, (120, 167, 255)),  # 正午
+        (11000, (112, 151, 224)),  # 午后
+        (12000, (73, 88, 136)),  # 日落
+        (13000, (44, 42, 66)),  # 黄昏
+        (18000, (23, 25, 48)),  # 深夜
+        (22000, (45, 45, 78)),  # 黎明前
+        (23000, (92, 116, 183)),  # 黎明
     ]
 
     # 天空下层颜色（地平线附近）：通常比上层更亮
@@ -88,8 +94,6 @@ class SkyMixin:
             self.SCREEN_WIDTH,
             self.SCREEN_HEIGHT,
             int(self.day_time // SKY_CACHE_TICK_STEP),
-            # Coarse weather buckets avoid rebuilding the Python gradient on
-            # every small fade step (the particle/audio fade remains smooth).
             int(self.weather_intensity * 4),
         )
         if cache_key != self.sky_cache_key or self.sky_layer is None:
@@ -126,7 +130,9 @@ class SkyMixin:
         # 与服务器时间同步
         server_time: float | None = getattr(self.client_world, "world_time", None)
         if server_time is not None:
-            diff = ((server_time - self.day_time + DAY_TICKS / 2) % DAY_TICKS) - DAY_TICKS / 2
+            diff = (
+                (server_time - self.day_time + DAY_TICKS / 2) % DAY_TICKS
+            ) - DAY_TICKS / 2
             if abs(diff) > 200:
                 # 偏差过大：直接跳转
                 self.day_time = float(server_time)
@@ -139,10 +145,10 @@ class SkyMixin:
     def get_sky_state(self) -> dict[str, Any]:
         """根据当前时间计算完整天空状态。
 
-        包括：天空上下层颜色、黄昏霞光、日光/月光强度、天空光照权重。
+                包括：天空上下层颜色、黄昏霞光、日光/月光强度、天空光照权重。
 
-        返回:
-            包含 upper, lower, twilight, twilight_color, daylight, night, sky_light_weight 的字典
+        :return: 包含 upper, lower, twilight, twilight_color, daylight, night, sky_light_weight 的字典
+
         """
         time_value = self.day_time % DAY_TICKS
 
@@ -150,9 +156,6 @@ class SkyMixin:
         upper = cyclic_lerp_color(self.SKY_UPPER_KEYFRAMES, time_value)
         lower = cyclic_lerp_color(self.SKY_LOWER_KEYFRAMES, time_value)
 
-        # Rain affects the whole sky, including arid biomes where it appears
-        # only as overcast weather. Preserve the day/night luminance while
-        # shifting the palette toward Minecraft's cool grey.
         weather = self.weather_intensity
         base_light = 0.25 + 0.75 * self.get_sky_light_weight(clear_only=True)
         rainy_upper = tuple(int(channel * base_light) for channel in (96, 101, 110))
@@ -169,7 +172,9 @@ class SkyMixin:
         sunrise = max(dawn_before_midnight, dawn_after_midnight)
 
         # 日落霞光（两段 smoothstep 形成峰形）
-        sunset = smoothstep(10500, 12200, time_value) * (1.0 - smoothstep(13800, 15500, time_value))
+        sunset = smoothstep(10500, 12200, time_value) * (
+            1.0 - smoothstep(13800, 15500, time_value)
+        )
 
         # 霞光总强度
         twilight = clamp(max(sunrise, sunset)) * (1.0 - weather)
@@ -187,20 +192,23 @@ class SkyMixin:
             dawn_progress = 1.0
         dawn_progress = 1.0 - (1.0 - clamp(dawn_progress)) ** self.DAWN_YELLOW_CURVE
 
-        sunrise_color = lerp_color(self.SUNSET_COLOR, self.SUNRISE_COLOR, smoothstep(0.0, 1.0, dawn_progress))
+        sunrise_color = lerp_color(
+            self.SUNSET_COLOR, self.SUNRISE_COLOR, smoothstep(0.0, 1.0, dawn_progress)
+        )
         sunset_color = lerp_color(
             self.SUNRISE_COLOR,
             self.SUNSET_COLOR,
             smoothstep(self.SUNSET_COLOR_START, self.SUNSET_COLOR_RED, time_value),
         )
-        twilight_color = lerp_color(sunrise_color, sunset_color, smoothstep(0.0, 1.0, sunset))
+        twilight_color = lerp_color(
+            sunrise_color, sunset_color, smoothstep(0.0, 1.0, sunset)
+        )
 
         # 日光/月光强度
         daylight = smoothstep(0.0, 0.55, sun_lift)
-        night = (
-            smoothstep(0.02, 0.42, self.get_body_lift(time_value, self.MOON_RISE_TICK))
-            * (1.0 - weather)
-        )
+        night = smoothstep(
+            0.02, 0.42, self.get_body_lift(time_value, self.MOON_RISE_TICK)
+        ) * (1.0 - weather)
 
         return {
             "upper": upper,
@@ -222,22 +230,23 @@ class SkyMixin:
     ) -> pygame.Surface:
         """生成天空背景图层。
 
-        依次绘制：
-        1. 垂直渐变背景（上层→下层）
-        2. 黄昏霞光叠加层
-        3. 星星
+                依次绘制：
+                1. 垂直渐变背景（上层→下层）
+                2. 黄昏霞光叠加层
+                3. 星星
 
-        参数:
-            upper_color: 天空顶部颜色
-            lower_color: 天空底部（地平线）颜色
-            twilight: 霞光强度 [0, 1]
-            twilight_color: 霞光颜色
-            night: 夜间强度 [0, 1]
+        :param upper_color: 天空顶部颜色
+        :param lower_color: 天空底部（地平线）颜色
+        :param twilight: 霞光强度 [0, 1]
+        :param twilight_color: 霞光颜色
+        :param night: 夜间强度 [0, 1]
 
-        返回:
-            生成的天空背景 Surface
+        :return: 生成的天空背景 Surface
+
         """
-        sky_layer = pygame.Surface((self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA)
+        sky_layer = pygame.Surface(
+            (self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA
+        )
         height = self.SCREEN_HEIGHT
         width = self.SCREEN_WIDTH
 
@@ -253,7 +262,9 @@ class SkyMixin:
             for y in range(height):
                 progress = y / max(height - 1, 1)
                 alpha = int(190 * twilight * smoothstep(0.36, 0.62, progress))
-                pygame.draw.line(twilight_layer, (*twilight_color, alpha), (0, y), (width - 1, y))
+                pygame.draw.line(
+                    twilight_layer, (*twilight_color, alpha), (0, y), (width - 1, y)
+                )
             sky_layer.blit(twilight_layer, (0, 0))
 
         # 星星（仅在夜间足够暗时可见）
@@ -267,14 +278,18 @@ class SkyMixin:
     def draw_celestial_bodies(self, sky_state: dict[str, Any]) -> None:
         """绘制太阳和月亮天体。
 
-        计算太阳和月亮的位置、可见度、前后遮挡关系，
-        按正确顺序绘制（被遮挡的天体先画）。
+                计算太阳和月亮的位置、可见度、前后遮挡关系，
+                按正确顺序绘制（被遮挡的天体先画）。
 
-        参数:
-            sky_state: 天空状态字典
+        :param sky_state: 天空状态字典
+
         """
-        sun_pos, sun_lift = self.get_celestial_position(self.day_time, self.SUN_RISE_TICK)
-        moon_pos, moon_lift = self.get_celestial_position(self.day_time, self.MOON_RISE_TICK)
+        sun_pos, sun_lift = self.get_celestial_position(
+            self.day_time, self.SUN_RISE_TICK
+        )
+        moon_pos, moon_lift = self.get_celestial_position(
+            self.day_time, self.MOON_RISE_TICK
+        )
         body_size = max(72, int(min(self.SCREEN_WIDTH, self.SCREEN_HEIGHT) * 0.32))
 
         # 构建太阳绘制参数
@@ -283,7 +298,8 @@ class SkyMixin:
             "pos": sun_pos,
             "lift": sun_lift,
             "rising": self.is_body_rising(self.day_time, self.SUN_RISE_TICK),
-            "visibility": self.get_body_visibility(sun_lift) * (1.0 - self.weather_intensity),
+            "visibility": self.get_body_visibility(sun_lift)
+            * (1.0 - self.weather_intensity),
             "texture": self.sun_texture,
             "tint": self.get_sun_color(sun_lift),
         }
@@ -293,7 +309,9 @@ class SkyMixin:
             "pos": moon_pos,
             "lift": moon_lift,
             "rising": self.is_body_rising(self.day_time, self.MOON_RISE_TICK),
-            "visibility": self.get_body_visibility(moon_lift) * 0.78 * (1.0 - self.weather_intensity),
+            "visibility": self.get_body_visibility(moon_lift)
+            * 0.78
+            * (1.0 - self.weather_intensity),
             "texture": self.moon_phase_textures[self.get_moon_phase()],
             "tint": None,
         }
@@ -310,30 +328,37 @@ class SkyMixin:
     def draw_celestial_body(self, body: dict[str, Any], body_size: int) -> None:
         """绘制单个天体（太阳或月亮）。
 
-        参数:
-            body: 天体参数字典（kind, pos, visibility, texture, tint）
-            body_size: 天体渲染尺寸（像素）
+        :param body: 天体参数字典（kind, pos, visibility, texture, tint）
+        :param body_size: 天体渲染尺寸（像素）
+
         """
         if body["visibility"] <= 0.01:
             return
         texture = self.get_celestial_surface(body, body_size)
-        self.screen.blit(texture, texture.get_rect(center=body["pos"]), special_flags=pygame.BLEND_RGB_ADD)
+        self.screen.blit(
+            texture,
+            texture.get_rect(center=body["pos"]),
+            special_flags=pygame.BLEND_RGB_ADD,
+        )
 
-    def get_celestial_surface(self, body: dict[str, Any], body_size: int) -> pygame.Surface:
+    def get_celestial_surface(
+        self, body: dict[str, Any], body_size: int
+    ) -> pygame.Surface:
         """获取或生成带缓存的单个天体 Surface。
 
-        缓存策略：基于天体类型、纹理 ID、尺寸、色调、可见度构建缓存键。
+                缓存策略：基于天体类型、纹理 ID、尺寸、色调、可见度构建缓存键。
 
-        参数:
-            body: 天体参数字典
-            body_size: 渲染尺寸
+        :param body: 天体参数字典
+        :param body_size: 渲染尺寸
 
-        返回:
-            缩放并着色后的天体 Surface
+        :return: 缩放并着色后的天体 Surface
+
         """
         visibility = round(clamp(body["visibility"]) * 32) / 32
         tint = body["tint"]
-        tint_key = None if tint is None else tuple((channel // 8) * 8 for channel in tint)
+        tint_key = (
+            None if tint is None else tuple((channel // 8) * 8 for channel in tint)
+        )
         key = (body["kind"], id(body["texture"]), body_size, tint_key, visibility)
 
         cache = self.celestial_cache
@@ -361,27 +386,32 @@ class SkyMixin:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """确定日月的前后绘制顺序。
 
-        规则：正在升起的天体在前；若都在升起或都在下落，则更亮者在前。
+                规则：正在升起的天体在前；若都在升起或都在下落，则更亮者在前。
 
-        返回:
-            (前景天体, 背景天体)
+        :return: (前景天体, 背景天体)
+
         """
         if sun_body["rising"] != moon_body["rising"]:
             front = sun_body if sun_body["rising"] else moon_body
         else:
-            front = sun_body if sun_body["visibility"] >= moon_body["visibility"] else moon_body
+            front = (
+                sun_body
+                if sun_body["visibility"] >= moon_body["visibility"]
+                else moon_body
+            )
         back = moon_body if front is sun_body else sun_body
         return front, back
 
-    def get_body_overlap(self, a: tuple[int, int], b: tuple[int, int], body_size: int) -> float:
+    def get_body_overlap(
+        self, a: tuple[int, int], b: tuple[int, int], body_size: int
+    ) -> float:
         """计算两天体之间的重叠程度。
 
-        参数:
-            a, b: 两天体的屏幕坐标
-            body_size: 天体渲染尺寸
+                    a, b: 两天体的屏幕坐标
+        :param body_size: 天体渲染尺寸
 
-        返回:
-            重叠系数 [0, 1]（1 = 完全重叠，0 = 不重叠）
+        :return: 重叠系数 [0, 1]（1 = 完全重叠，0 = 不重叠）
+
         """
         distance = _math.dist(a, b)
         return 1.0 - smoothstep(body_size * 0.18, body_size * 0.78, distance)
@@ -389,12 +419,11 @@ class SkyMixin:
     def is_body_rising(self, time_value: float, rise_tick: int) -> bool:
         """判断天体当前是否处于上升阶段。
 
-        参数:
-            time_value: 当前游戏时间（刻）
-            rise_tick: 天体升起时间（刻）
+        :param time_value: 当前游戏时间（刻）
+        :param rise_tick: 天体升起时间（刻）
 
-        返回:
-            True 表示天体正在上升
+        :return: True 表示天体正在上升
+
         """
         local_time = (time_value - rise_tick) % DAY_TICKS
         return local_time < DAY_TICKS / 4 or local_time > DAY_TICKS * 3 / 4
@@ -402,17 +431,16 @@ class SkyMixin:
     def get_body_lift(self, time_value: float, rise_tick: int) -> float:
         """计算天体的相对高度 [-1, 1]。
 
-        使用正弦曲线模拟天体的升起-落下运动：
-        - 1.0 = 最高点（天顶）
-        - 0.0 = 地平线
-        - -1.0 = 最低点（地平线下方最远处）
+                使用正弦曲线模拟天体的升起-落下运动：
+                - 1.0 = 最高点（天顶）
+                - 0.0 = 地平线
+                - -1.0 = 最低点（地平线下方最远处）
 
-        参数:
-            time_value: 当前游戏时间（刻）
-            rise_tick: 天体升起时间（刻）
+        :param time_value: 当前游戏时间（刻）
+        :param rise_tick: 天体升起时间（刻）
 
-        返回:
-            天体高度 [-1, 1]
+        :return: 天体高度 [-1, 1]
+
         """
         local_time = (time_value - rise_tick) % DAY_TICKS
         if local_time > DAY_TICKS / 2:
@@ -421,20 +449,21 @@ class SkyMixin:
         # 上升阶段（上半周期）
         return _math.sin(_math.pi * local_time / (DAY_TICKS / 2))
 
-    def get_celestial_position(self, time_value: float, rise_tick: int) -> tuple[tuple[int, int], float]:
+    def get_celestial_position(
+        self, time_value: float, rise_tick: int
+    ) -> tuple[tuple[int, int], float]:
         """计算天体在屏幕上的渲染位置。
 
-        参数:
-            time_value: 当前游戏时间（刻）
-            rise_tick: 天体升起时间（刻）
+        :param time_value: 当前游戏时间（刻）
+        :param rise_tick: 天体升起时间（刻）
 
-        返回:
-            ((screen_x, screen_y), lift) — 屏幕坐标和高度值
+        :return: ((screen_x, screen_y), lift) — 屏幕坐标和高度值
+
         """
         lift = self.get_body_lift(time_value, rise_tick)
         center_x = self.SCREEN_WIDTH * 0.5
-        horizon_y = self.SCREEN_HEIGHT * 0.72     # 地平线 Y
-        top_y = self.SCREEN_HEIGHT * 0.14          # 天顶 Y
+        horizon_y = self.SCREEN_HEIGHT * 0.72  # 地平线 Y
+        top_y = self.SCREEN_HEIGHT * 0.14  # 天顶 Y
         below_y = horizon_y + self.SCREEN_HEIGHT * 0.13  # 地平线以下 Y
 
         if lift >= 0:
@@ -447,32 +476,30 @@ class SkyMixin:
     def get_body_visibility(self, lift: float) -> float:
         """根据天体高度计算可见度。
 
-        参数:
-            lift: 天体高度 [-1, 1]
+        :param lift: 天体高度 [-1, 1]
 
-        返回:
-            可见度 [0, 1]
+        :return: 可见度 [0, 1]
+
         """
         return clamp((lift + 0.08) / 0.22)
 
     def get_sun_color(self, lift: float) -> tuple[int, int, int]:
         """根据太阳高度计算太阳颜色（低角度偏暖红色，高角度偏白）。
 
-        参数:
-            lift: 太阳高度 [-1, 1]
+        :param lift: 太阳高度 [-1, 1]
 
-        返回:
-            太阳 RGB 颜色
+        :return: 太阳 RGB 颜色
+
         """
-        noon = (255, 255, 245)   # 正午偏白
-        warm = (255, 151, 84)    # 低角度暖橙
+        noon = (255, 255, 245)  # 正午偏白
+        warm = (255, 151, 84)  # 低角度暖橙
         return lerp_color(warm, noon, smoothstep(0.08, 0.85, lift))
 
     def get_moon_phase(self) -> int:
         """计算当前月相（0-7）。
 
-        返回:
-            月相索引（0 = 满月，按材质表索引对应 8 种月相）
+        :return: 月相索引（0 = 满月，按材质表索引对应 8 种月相）
+
         """
         return int((self.total_day_ticks // DAY_TICKS) % 8)
 
@@ -482,16 +509,15 @@ class SkyMixin:
     def load_environment_texture(path: str) -> pygame.Surface:
         """加载环境纹理并提取亮度通道为 Alpha。
 
-        处理逻辑：
-        - 计算每个像素的亮度值 max(R, G, B)
-        - 亮度 ≤ 2 的像素视为完全透明
-        - 其他像素：亮度映射为 Alpha，保留原始 RGB
+                处理逻辑：
+                - 计算每个像素的亮度值 max(R, G, B)
+                - 亮度 ≤ 2 的像素视为完全透明
+                - 其他像素：亮度映射为 Alpha，保留原始 RGB
 
-        参数:
-            path: 纹理文件路径
+        :param path: 纹理文件路径
 
-        返回:
-            处理后的带 Alpha 通道的 Surface
+        :return: 处理后的带 Alpha 通道的 Surface
+
         """
         texture = pygame.image.load(path).convert_alpha()
         result = pygame.Surface(texture.get_size(), pygame.SRCALPHA)
@@ -509,12 +535,14 @@ class SkyMixin:
     def load_moon_phase_textures(self) -> list[pygame.Surface]:
         """从月相纹理表中加载 8 种月相纹理。
 
-        纹理表为 4×2 布局，包含满月→新月的 8 个阶段。
+                纹理表为 4×2 布局，包含满月→新月的 8 个阶段。
 
-        返回:
-            月相纹理列表（8 个 Surface）
+        :return: 月相纹理列表（8 个 Surface）
+
         """
-        sheet = self.load_environment_texture("assets\\minecraft\\textures\\environment\\moon_phases.png")
+        sheet = self.load_environment_texture(
+            "assets\\minecraft\\textures\\environment\\moon_phases.png"
+        )
         phase_w = sheet.get_width() // 4
         phase_h = sheet.get_height() // 2
         phases = []
@@ -526,50 +554,54 @@ class SkyMixin:
 
     # ---------- Surface 辅助处理 ----------
 
-    def tint_surface(self, surface: pygame.Surface, color: tuple[int, int, int]) -> pygame.Surface:
+    def tint_surface(
+        self, surface: pygame.Surface, color: tuple[int, int, int]
+    ) -> pygame.Surface:
         """对 Surface 进行颜色乘法混合（保留原始 Alpha）。
 
-        参数:
-            surface: 原始 Surface
-            color: 乘法混合颜色
+        :param surface: 原始 Surface
+        :param color: 乘法混合颜色
 
-        返回:
-            染色后的新 Surface
+        :return: 染色后的新 Surface
+
         """
         tinted = surface.copy()
         tinted.fill((*color, 255), special_flags=pygame.BLEND_RGBA_MULT)
         return tinted
 
-    def to_linear_dodge_surface(self, surface: pygame.Surface, visibility: float) -> pygame.Surface:
+    def to_linear_dodge_surface(
+        self, surface: pygame.Surface, visibility: float
+    ) -> pygame.Surface:
         """对 Surface 应用线性减淡（发光）效果。
 
-        使用 numpy 向量化运算提升性能：
-        - 提取 RGB 和 Alpha 通道
-        - 基于 Alpha 和可见度计算减淡强度
-        - 对 RGB 进行亮度提升
+                使用 numpy 向量化运算提升性能：
+                - 提取 RGB 和 Alpha 通道
+                - 基于 Alpha 和可见度计算减淡强度
+                - 对 RGB 进行亮度提升
 
-        参数:
-            surface: 原始 Surface
-            visibility: 可见度/发光强度
+        :param surface: 原始 Surface
+        :param visibility: 可见度/发光强度
 
-        返回:
-            减淡处理后的 Surface
+        :return: 减淡处理后的 Surface
+
         """
         rgb = pygame.surfarray.array3d(surface).astype(np.float32)
         alpha = pygame.surfarray.array_alpha(surface).astype(np.float32) / 255.0
         dodge_strength = np.power(alpha, 0.42) * clamp(visibility)
         rgb *= (dodge_strength * 1.45)[..., None]
-        return pygame.surfarray.make_surface(np.clip(rgb, 0, 255).astype(np.uint8)).convert()
+        return pygame.surfarray.make_surface(
+            np.clip(rgb, 0, 255).astype(np.uint8)
+        ).convert()
 
     # ---------- 光照权重 ----------
 
     def get_sky_light_weight(self, clear_only: bool = False) -> float:
         """计算当前天空光照权重（用于方块渲染时的环境光计算）。
 
-        白天权重接近 1.0，夜晚降至 MIN_SKY_LIGHT_WEIGHT 以上。
+                白天权重接近 1.0，夜晚降至 MIN_SKY_LIGHT_WEIGHT 以上。
 
-        返回:
-            天空光照权重 [MIN_SKY_LIGHT_WEIGHT, 1.0]
+        :return: 天空光照权重 [MIN_SKY_LIGHT_WEIGHT, 1.0]
+
         """
         sun_lift = self.get_body_lift(self.day_time, self.SUN_RISE_TICK)
         daylight = smoothstep(0.0, 0.7, sun_lift)
@@ -577,7 +609,7 @@ class SkyMixin:
         clear_weight = lerp(MIN_SKY_LIGHT_WEIGHT, 1.0, max(daylight, horizon_floor))
         if clear_only:
             return clear_weight
-        # Internal sky light cannot exceed level 12 while raining.
+
         rain_cap = lerp(1.0, 12.0 / 15.0, self.weather_intensity)
         return min(clear_weight, rain_cap)
 
@@ -586,13 +618,13 @@ class SkyMixin:
     def generate_stars(self) -> list[tuple[int, int, int]]:
         """随机生成星星位置和大小。
 
-        星星分布在上半部分屏幕（天空区域），采用多级大小分布：
-        - 3% 为 3px 亮星
-        - 12% 为 2px 中星
-        - 85% 为 1px 小星
+                星星分布在上半部分屏幕（天空区域），采用多级大小分布：
+                - 3% 为 3px 亮星
+                - 12% 为 2px 中星
+                - 85% 为 1px 小星
 
-        返回:
-            星星列表 [(x, y, size), ...]
+        :return: 星星列表 [(x, y, size), ...]
+
         """
         stars = []
         width = max(self.SCREEN_WIDTH, 1)
@@ -613,11 +645,13 @@ class SkyMixin:
     def draw_stars_on_layer(self, layer: pygame.Surface, alpha: int) -> None:
         """在指定图层上绘制星星。
 
-        参数:
-            layer: 目标 Surface
-            alpha: 星星透明度 [0, 255]
+        :param layer: 目标 Surface
+        :param alpha: 星星透明度 [0, 255]
+
         """
-        star_layer = pygame.Surface((self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA)
+        star_layer = pygame.Surface(
+            (self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA
+        )
         for x, y, size in self.stars:
             pygame.draw.rect(star_layer, (210, 215, 235, alpha), (x, y, size, size))
         layer.blit(star_layer, (0, 0))

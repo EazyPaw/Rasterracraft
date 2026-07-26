@@ -1,4 +1,4 @@
-"""Namespaced entity registry used by commands, spawning and save restore."""
+# Commented and arranged by ChatGPT
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ from typing import Any, Callable
 
 @dataclass(frozen=True, slots=True)
 class NamespacedKey:
-    """A normalized ``namespace:key`` identifier."""
-
     namespace: str
     key: str
 
@@ -58,11 +56,6 @@ def register_entity(
     summonable: bool = True,
     persistent: bool = True,
 ):
-    """Register an entity class using the same decorator style as materials.
-
-    The class may declare ``entity_id`` itself or the decorator may receive an
-    explicit ``key``. Short identifiers use the ``minecraft`` namespace.
-    """
 
     if cls is None:
         return lambda entity_cls: register_entity(
@@ -95,7 +88,9 @@ def register_entity(
     cls.persistent = bool(persistent)
     _entity_registry[namespaced_key] = cls
     for alias in aliases:
-        alias_key = NamespacedKey.parse(alias, default_namespace=namespaced_key.namespace)
+        alias_key = NamespacedKey.parse(
+            alias, default_namespace=namespaced_key.namespace
+        )
         alias_owner = _entity_registry.get(alias_key)
         if alias_owner is not None and alias_owner is not cls:
             raise ValueError(f"Entity alias conflicts with primary key: {alias_key}")
@@ -110,7 +105,7 @@ def _load_builtin_entities() -> None:
     global _builtins_loaded
     if _builtins_loaded:
         return
-    # Delayed imports keep the base entity module independent of concrete mobs.
+
     from resources.server.entities import (  # noqa: F401
         chicken,
         cow,
@@ -141,7 +136,6 @@ def get_entity_type(
 
 
 def get_entity_types(*, summonable_only: bool = True) -> dict[str, type]:
-    """Return registered primary IDs, retaining legacy short Minecraft keys."""
 
     _load_builtin_entities()
     result: dict[str, type] = {}
@@ -158,7 +152,9 @@ def get_entity_types(*, summonable_only: bool = True) -> dict[str, type]:
 
 
 def get_registered_entity_key(entity_or_type) -> NamespacedKey | None:
-    entity_type = entity_or_type if isinstance(entity_or_type, type) else type(entity_or_type)
+    entity_type = (
+        entity_or_type if isinstance(entity_or_type, type) else type(entity_or_type)
+    )
     key = getattr(entity_type, "registry_key", None)
     return key if isinstance(key, NamespacedKey) else None
 
@@ -167,7 +163,9 @@ def is_entity_persistent(entity_or_type) -> bool:
     return bool(
         get_registered_entity_key(entity_or_type) is not None
         and getattr(
-            entity_or_type if isinstance(entity_or_type, type) else type(entity_or_type),
+            entity_or_type
+            if isinstance(entity_or_type, type)
+            else type(entity_or_type),
             "persistent",
             False,
         )
@@ -184,7 +182,6 @@ def create_entity(
 
 
 def create_entity_from_save(data: dict[str, Any], world):
-    """Create one entity from trusted save data, returning ``None`` if unknown."""
 
     raw_id = data.get("id", data.get("entity_id", ""))
     try:

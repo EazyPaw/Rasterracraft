@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import time
 
 
@@ -22,7 +23,6 @@ class Camera:
         self._duration = duration
 
     def snap_to(self, target_x: float, target_y: float) -> None:
-        """Set the camera immediately, without showing a teleport animation."""
         self.x = target_x
         self.y = target_y
         self._target_x = None

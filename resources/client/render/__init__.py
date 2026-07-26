@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """
 PyCraft2D 渲染包
 ================
@@ -61,7 +62,6 @@ from .weather import WeatherMixin
 __all__ = [
     # 主类
     "Render",
-    # Mixin
     "SkyMixin",
     "BlockRenderMixin",
     "WeatherMixin",

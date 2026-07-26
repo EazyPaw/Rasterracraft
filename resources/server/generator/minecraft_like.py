@@ -1,9 +1,11 @@
+# Commented and arranged by ChatGPT
 """
 仿 Minecraft 主世界生成器模块
 
 使用多层 Perlin 噪声实现确定性的地形、生物群系、
 洞穴、矿石和地表装饰物生成。
 """
+
 import random
 
 from resources.server.blocks import *
@@ -15,24 +17,23 @@ from resources.server.generator.decorations import DecorationMixin
 class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
     """仿 Minecraft 主世界生成器。
 
-    使用多层 Perlin 噪声实现确定性的地形、生物群系、
-    洞穴、矿石和地表装饰物生成。核心流程：
+        使用多层 Perlin 噪声实现确定性的地形、生物群系、
+        洞穴、矿石和地表装饰物生成。核心流程：
 
-    1. 通过五维噪声参数判定生物群系
-    2. 依生物群系配置计算地表高度
-    3. 按深度放置地表 / 亚层 / 填充层方块
-    4. 在岩石层中分布矿石
-    5. 在地表上方生成树木、花草等装饰物
+        1. 通过五维噪声参数判定生物群系
+        2. 依生物群系配置计算地表高度
+        3. 按深度放置地表 / 亚层 / 填充层方块
+        4. 在岩石层中分布矿石
+        5. 在地表上方生成树木、花草等装饰物
 
-    Parameters
-    ----------
-    seed : int
+    :param seed: int
         世界种子。
+
     """
 
     # ---- 世界常量 ----
-    sea_level = 68       # 海平面高度（Y 坐标）
-    stone_level = 52     # 石材起始深度（当前未直接使用，保留）
+    sea_level = 68  # 海平面高度（Y 坐标）
+    stone_level = 52  # 石材起始深度（当前未直接使用，保留）
     max_tree_lookup = 14  # 树木查找范围（横向 ±14 格，原 9）
     background_surface_offset = 1
 
@@ -58,45 +59,41 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
     def get_original_biome(self, x, y):
         """获取指定坐标的原始生物群系 ID。
 
-        Parameters
-        ----------
-        x : int
+        :param x: int
             全局 X 坐标。
-        y : int
+        :param y: int
             高度坐标。
 
-        Returns
-        -------
-        str
+        :return:
+        :rtype: str
             该列对应的生物群系 ID。
+
         """
         return self.get_profile(self.get_column_biome(x)).biome_id
 
     def get_original_block(self, x, y, z):
         """获取指定坐标的原始方块（世界生成的主入口）。
 
-        生成逻辑依次为：
+                生成逻辑依次为：
 
-        1. y = 0 → 基岩；Y=1..4 按递减概率生成基岩
-        2. y ≥ 250 → 空气
-        3. 结构方块判定（树木、装饰物、积雪层）
-        4. y > 地表高度 → 水（低于海平面且 z==0）或空气
-        5. 洞穴空气判定 → 空气（z==0）或地下方块（z==1）
-        6. 否则 → 地下方块（依深度放置表层 / 亚层 / 填充层 / 矿石）
+                1. y = 0 → 基岩；Y=1..4 按递减概率生成基岩
+                2. y ≥ 250 → 空气
+                3. 结构方块判定（树木、装饰物、积雪层）
+                4. y > 地表高度 → 水（低于海平面且 z==0）或空气
+                5. 洞穴空气判定 → 空气（z==0）或地下方块（z==1）
+                6. 否则 → 地下方块（依深度放置表层 / 亚层 / 填充层 / 矿石）
 
-        Parameters
-        ----------
-        x : int
+        :param x: int
             全局 X 坐标。
-        y : int
+        :param y: int
             高度（Y 坐标）。
-        z : int
+        :param z: int
             层索引（0 = 前景墙，1 = 背景墙）。
 
-        Returns
-        -------
-        Block
+        :return:
+        :rtype: Block
             该坐标对应的方块实例。
+
         """
         # 边界条件：基岩层以下 & 建筑高度以上
         if y <= 0:
@@ -130,12 +127,15 @@ class MinecraftLike2D(TerrainMixin, DecorationMixin, Generator):
 
         # 洞穴空气：前景层挖空，背景层保留岩壁
         if self.is_cave_air(x, y, z, surface_y):
-            return AIR() if z == 0 else self.get_underground_block(x, y, surface_y, profile, z)
+            return (
+                AIR()
+                if z == 0
+                else self.get_underground_block(x, y, surface_y, profile, z)
+            )
 
         # 地表以下：按深度放置方块
         return self.get_underground_block(x, y, surface_y, profile, z)
 
     def _bedrock_at(self, x: int, y: int, z: int = 0) -> bool:
-        """Taper bedrock upward instead of creating a flat layer."""
         chance = max(0.0, 1.0 - (y / 5.0))
         return self._rand01(x, y, 901 + z * 37) < chance

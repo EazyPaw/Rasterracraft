@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import logging
 import math
 import random
@@ -20,12 +21,20 @@ from resources.server.damange_type import EXPLOSION, PLAYER_EXPLOSION
 from resources.server.entity import Entity
 from resources.server.generator import Generator
 from resources.server.location import Location, Vector, decide_x_or_loc
-from resources.server.particles import BlockBreakParticleEffect, Particle, get_particle_by_id
+from resources.server.particles import (
+    BlockBreakParticleEffect,
+    Particle,
+    get_particle_by_id,
+)
 
 
 class Chunk:
-    def __init__(self, x, region_array: np.ndarray[Any, np.dtype[Block]]
-                 , biome_array: np.ndarray[Any, np.dtype[str]]) -> None:
+    def __init__(
+        self,
+        x,
+        region_array: np.ndarray[Any, np.dtype[Block]],
+        biome_array: np.ndarray[Any, np.dtype[str]],
+    ) -> None:
         self.x = x
         self.region_array = region_array
         self.biome_array = biome_array
@@ -33,16 +42,9 @@ class Chunk:
         self.sky_light_array = np.zeros((size[0], size[1]), dtype=np.uint8)
         self.block_light_array = np.zeros((size[0], size[1]), dtype=np.uint8)
         self._packet_cache: dict | None = None
-        self._recalculate_internal()   # 初始化时先进行区块内部光照计算
+        self._recalculate_internal()  # 初始化时先进行区块内部光照计算
 
     def to_dict(self) -> dict:
-        """Serialize a chunk as a compressed palette packet.
-
-        The old wire format repeated a coordinate string and a nested dict for
-        every cell.  Palette indices preserve the exact block/NBT data while
-        reducing both transfer size and client-side parsing work by an order of
-        magnitude.  The client keeps a legacy decoder for older servers/tests.
-        """
         if self._packet_cache is not None:
             return self._packet_cache
 
@@ -106,7 +108,9 @@ class Chunk:
             "__class__": "Chunk",
             "format": 2,
             "x": int(self.x),
-            "payload": zlib.compress(msgpack.packb(payload, use_bin_type=True), level=1),
+            "payload": zlib.compress(
+                msgpack.packb(payload, use_bin_type=True), level=1
+            ),
         }
         self._packet_cache = packet
         return packet
@@ -115,7 +119,6 @@ class Chunk:
         self._packet_cache = None
 
     def get_light_update_packet(self) -> dict:
-        """Return the full light state in the compact ndarray wire layout."""
         return {
             "rx": int(self.x),
             "format": 2,
@@ -156,8 +159,9 @@ class Chunk:
                 biome_dict[f"{x},{y}"] = str(self.biome_array[x, y])
         return biome_dict
 
-    def get_light_update_dict(self, start_x: int, end_x: int,
-                              start_y: int, end_y: int) -> dict:
+    def get_light_update_dict(
+        self, start_x: int, end_x: int, start_y: int, end_y: int
+    ) -> dict:
         """获取局部区域的光照字典（保留，用于可能的高效局部更新，但已不使用）"""
         # 当前实现直接重算整个区块，故本方法暂时保留但不再被调用
         light_dict = {}
@@ -197,9 +201,10 @@ class Chunk:
 
 
 class WorldAttribute:
-    def __init__(self, environment = 0, max_build_height = 256):
+    def __init__(self, environment=0, max_build_height=256):
         self.ENVIRONMENT = environment
         self.MAX_BUILD_HEIGHT = max_build_height
+
 
 class Weather(Enum):
     CLEAR = "clear"
@@ -207,8 +212,7 @@ class Weather(Enum):
 
 
 class World:
-
-    def __init__(self,server, id_name, generator, attribute: WorldAttribute, seed):
+    def __init__(self, server, id_name, generator, attribute: WorldAttribute, seed):
         self.server = server
         self.id_name = id_name
         self.generator: Generator = generator(seed)
@@ -239,8 +243,7 @@ class World:
 
     @staticmethod
     def _random_weather_duration(weather: Weather) -> int:
-        # Vanilla-like ranges: precipitation lasts 10-20 minutes, while clear
-        # intervals can last from 10 minutes to roughly 2.5 hours.
+
         if weather is Weather.RAIN:
             return random.randint(12000, 24000)
         return random.randint(12000, 180000)
@@ -252,7 +255,9 @@ class World:
             "remaining_ticks": int(self.weather_tick),
         }
 
-    def set_weather(self, weather: Weather | str, duration_ticks: int | None = None) -> None:
+    def set_weather(
+        self, weather: Weather | str, duration_ticks: int | None = None
+    ) -> None:
         if isinstance(weather, str):
             weather = Weather(weather.lower())
         self.weather = weather
@@ -269,17 +274,12 @@ class World:
     def tick_weather(self) -> None:
         self.weather_tick -= 1
         if self.weather_tick <= 0:
-            next_weather = Weather.RAIN if self.weather is Weather.CLEAR else Weather.CLEAR
+            next_weather = (
+                Weather.RAIN if self.weather is Weather.CLEAR else Weather.CLEAR
+            )
             self.set_weather(next_weather)
 
     def tick_random_blocks(self) -> None:
-        """Run three random block selections per loaded 16³ subchunk.
-
-        The selection is deliberately made even for ordinary blocks: a block
-        can opt into random ticks simply by overriding ``on_random_tick``.
-        Weather effects are checked for the selected top blocks as well, so
-        snow accumulation follows the same stochastic cadence as Minecraft.
-        """
         section_count = (self.attribute.MAX_BUILD_HEIGHT + 15) // 16
         for rx, chunk in list(self.regions.items()):
             for section in range(section_count):
@@ -290,8 +290,7 @@ class World:
                 for _ in range(self.random_tick_speed):
                     x = rx * 16 + random.randrange(16)
                     y = random.randrange(y_start, y_end)
-                    # Preserve Java's 16x16x16 selection probability even
-                    # though PyCraft2D only materializes two Z layers.
+
                     z = random.randrange(16)
                     if z >= chunk.region_array.shape[2]:
                         continue
@@ -309,7 +308,6 @@ class World:
             self._ticking_blocks.discard(block)
 
     def tick_block_entities(self) -> None:
-        """Tick loaded blocks which explicitly registered a server clock."""
         with self._ticking_blocks_lock:
             ticking = tuple(self._ticking_blocks)
         for block in ticking:
@@ -326,15 +324,12 @@ class World:
                 tick()
 
     def _try_accumulate_snow(self, x: int, y: int, z: int) -> bool:
-        """Attempt one random-tick snow layer on an exposed solid block."""
         if y + 1 >= self.attribute.MAX_BUILD_HEIGHT:
             return False
         above = self.get_block(x, y + 1, z)
         if not isinstance(above, AIR):
             return False
-        # Precipitation only reaches surfaces with an uninterrupted path to
-        # the sky.  Checking just ``above`` incorrectly lets snow collect
-        # beneath roofs and other solid cover.
+
         if any(
             self.get_block(x, cover_y, z).solid
             for cover_y in range(y + 2, self.attribute.MAX_BUILD_HEIGHT)
@@ -343,11 +338,9 @@ class World:
         biome_id = self.get_biome(x, y + 1)
         if biome.get_precipitation_type(biome_id, y + 1) != "snow":
             return False
-        # Snowfall may create one thin layer, but random ticks never stack it
-        # into deeper snow.  Existing snow therefore makes this tick a no-op.
+
         self.set_block(SNOW(layer=1), x, y + 1, z)
         return True
-
 
     def mark_chunk_dirty(self, rx: int):
         if getattr(self.server, "save_id", None):
@@ -364,19 +357,20 @@ class World:
             self.dirty_chunks.clear()
         return dirty_chunks
 
-    def recalculate_light_for_chunks(self, chunk_rxs: set[int], padding: int = 1) -> set[int]:
+    def recalculate_light_for_chunks(
+        self, chunk_rxs: set[int], padding: int = 1
+    ) -> set[int]:
         if not chunk_rxs:
             return set()
 
-        # Only include each dirty chunk's actual light-propagation neighborhood.
-        # The previous min..max range also pulled every chunk between two
-        # distant edits into one large and unnecessary recalculation.
-        loaded_rxs = sorted({
-            candidate
-            for rx in chunk_rxs
-            for candidate in range(int(rx) - padding, int(rx) + padding + 1)
-            if candidate in self.regions
-        })
+        loaded_rxs = sorted(
+            {
+                candidate
+                for rx in chunk_rxs
+                for candidate in range(int(rx) - padding, int(rx) + padding + 1)
+                if candidate in self.regions
+            }
+        )
         if not loaded_rxs:
             return set()
 
@@ -424,19 +418,18 @@ class World:
 
         for index, chunk in enumerate(chunks):
             start_x = index * chunk_width
-            ext_region[start_x:start_x + chunk_width, :, :] = chunk.region_array
+            ext_region[start_x : start_x + chunk_width, :, :] = chunk.region_array
 
         ext_sky, ext_block = calculate_light_layers_2d(ext_region)
 
         changed_chunks: set[int] = set()
         for index, chunk in enumerate(chunks):
             start_x = index * chunk_width
-            new_sky = ext_sky[start_x:start_x + chunk_width, :].copy()
-            new_block = ext_block[start_x:start_x + chunk_width, :].copy()
+            new_sky = ext_sky[start_x : start_x + chunk_width, :].copy()
+            new_block = ext_block[start_x : start_x + chunk_width, :].copy()
 
-            if (
-                not np.array_equal(chunk.sky_light_array, new_sky)
-                or not np.array_equal(chunk.block_light_array, new_block)
+            if not np.array_equal(chunk.sky_light_array, new_sky) or not np.array_equal(
+                chunk.block_light_array, new_block
             ):
                 changed_chunks.add(chunk.x)
                 chunk.invalidate_packet_cache()
@@ -478,7 +471,9 @@ class World:
         with self._fluid_lock:
             self._scheduled_fluid_ticks.add((x, y, z))
 
-    def schedule_fluid_around(self, x_loc: int | Location, y: int = None, z: int = None):
+    def schedule_fluid_around(
+        self, x_loc: int | Location, y: int = None, z: int = None
+    ):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         x, y, z = int(x), int(y), int(z)
         for nx, ny, nz in (
@@ -555,7 +550,11 @@ class World:
     ):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         try:
-            particle_cls = get_particle_by_id(particle_id) if isinstance(particle_id, str) else particle_id
+            particle_cls = (
+                get_particle_by_id(particle_id)
+                if isinstance(particle_id, str)
+                else particle_id
+            )
         except ValueError:
             logging.warning(f"Unknown particle ID: {particle_id}")
             return
@@ -578,17 +577,17 @@ class World:
         with self._entities_lock:
             self.entities[entity_uuid] = entity
         for player in self.server.players:
-            if player.is_loading_position(math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)):
+            if player.is_loading_position(
+                math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)
+            ):
                 self.server.send_client_socket(player, entity, "EntitySpawn")
 
     def spawn_experience(self, x: float, y: float, z: int, amount: int):
-        """Create the server-owned orb split for one experience award."""
         from resources.server.entities.experience_orb import ExperienceOrb
 
         return ExperienceOrb.award(self, x, y, z, amount)
 
     def queue_saved_entities(self, records) -> None:
-        """Queue legacy ``level.msgpack`` entities for one-time migration."""
         self._legacy_saved_entities_by_chunk.clear()
         for record in records or ():
             if not isinstance(record, dict):
@@ -635,15 +634,11 @@ class World:
             if entity is not None and entity.health > 0:
                 self.spawn_entity(entity)
             elif entity is None:
-                # Preserve records from temporarily unavailable namespaces.
                 self._unresolved_entities_by_chunk.setdefault(rx, []).append(
                     dict(record)
                 )
 
-    def serialize_entities_in_chunks(
-        self, chunk_rxs
-    ) -> dict[int, list[dict]]:
-        """Snapshot every registered persistent non-player entity by chunk."""
+    def serialize_entities_in_chunks(self, chunk_rxs) -> dict[int, list[dict]]:
         from resources.server.entity_registry import is_entity_persistent
 
         result = {int(rx): [] for rx in chunk_rxs}
@@ -678,7 +673,6 @@ class World:
             }
 
     def serialize_pending_legacy_entities(self) -> list[dict]:
-        """Return only records not yet migrated out of ``level.msgpack``."""
         return [
             dict(record)
             for records in self._legacy_saved_entities_by_chunk.values()
@@ -686,14 +680,12 @@ class World:
         ]
 
     def serialize_persistent_entities(self) -> list[dict]:
-        """Compatibility snapshot for callers of the former level-wide API."""
         loaded = self.serialize_entities_in_chunks(self.regions.keys())
         records = [record for chunk in loaded.values() for record in chunk]
         records.extend(self.serialize_pending_legacy_entities())
         return records
 
     def unload_entities_in_chunks(self, chunk_rxs) -> None:
-        """Detach entities after their chunk snapshots have reached disk."""
         chunk_rxs = {int(rx) for rx in chunk_rxs}
         for rx in chunk_rxs:
             self._unresolved_entities_by_chunk.pop(rx, None)
@@ -726,7 +718,9 @@ class World:
         if removed is not None:
             removed.removed = True
             for player in self.server.players:
-                self.server.send_client_socket(player, {'uuid': entity_uuid}, "EntityRemove")
+                self.server.send_client_socket(
+                    player, {"uuid": entity_uuid}, "EntityRemove"
+                )
 
     def update_entities(self):
         with self._entities_lock:
@@ -739,15 +733,18 @@ class World:
             entity.update()
             updated = time.perf_counter()
             if entity.removed:
-                timings.append((
-                    f"{entity.entity_id}:{str(entity.uuid)[:8]}",
-                    (updated - started) * 1000.0,
-                    0.0,
-                    0.0,
-                ))
+                timings.append(
+                    (
+                        f"{entity.entity_id}:{str(entity.uuid)[:8]}",
+                        (updated - started) * 1000.0,
+                        0.0,
+                        0.0,
+                    )
+                )
                 continue
             recipients = [
-                player for player in self.server.players
+                player
+                for player in self.server.players
                 if player.is_loading_position(
                     math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)
                 )
@@ -760,12 +757,14 @@ class World:
                 for player in recipients:
                     self.server.send_client_socket(player, entity, "EntityUpdate")
             finished = time.perf_counter()
-            timings.append((
-                f"{entity.entity_id}:{str(entity.uuid)[:8]}",
-                (updated - started) * 1000.0,
-                (tracked - updated) * 1000.0,
-                (finished - tracked) * 1000.0,
-            ))
+            timings.append(
+                (
+                    f"{entity.entity_id}:{str(entity.uuid)[:8]}",
+                    (updated - started) * 1000.0,
+                    (tracked - updated) * 1000.0,
+                    (finished - tracked) * 1000.0,
+                )
+            )
         self.last_entity_timings_ms = sorted(
             timings, key=lambda item: sum(item[1:]), reverse=True
         )[:3]
@@ -785,9 +784,15 @@ class World:
         x, y, z = decide_x_or_loc(x_loc, y, z)
         x, y, z = int(x), int(y), int(z)
         chunk = self.regions.get(x // 16)
-        if 0 <= y < self.attribute.MAX_BUILD_HEIGHT and z in (0, 1) and chunk is not None:
+        if (
+            0 <= y < self.attribute.MAX_BUILD_HEIGHT
+            and z in (0, 1)
+            and chunk is not None
+        ):
             rela_x = x % 16
-            block = cast(Block, chunk.region_array[rela_x, y, z]) # 强迫症写法，为了避免烦人的IDE警报
+            block = cast(
+                Block, chunk.region_array[rela_x, y, z]
+            )  # 强迫症写法，为了避免烦人的IDE警报
             return block
         return AIR()
 
@@ -838,8 +843,15 @@ class World:
         block_light = cast(int, chunk.block_light_array[rela_x, y])
         return max(sky_light, block_light)
 
-    def set_block(self, block: Block, x_loc: int | Location, y: int = None, z: int = None
-                  , send_packet: bool = True, block_update: bool = True):
+    def set_block(
+        self,
+        block: Block,
+        x_loc: int | Location,
+        y: int = None,
+        z: int = None,
+        send_packet: bool = True,
+        block_update: bool = True,
+    ):
         """
         设置某位置的方块
         :param block_update: 是否触发方块更新，默认为 True
@@ -898,8 +910,12 @@ class World:
                     self.mark_chunk_dirty(nx // 16)
                     for player in self.server.players:
                         if player.is_loading_position(nx, ny, nz):
-                            self.server.send_client_socket(player, neighbor_block, "BlockUpdate")
-        if getattr(old_block, "is_fluid", False) or getattr(placed_block, "is_fluid", False):
+                            self.server.send_client_socket(
+                                player, neighbor_block, "BlockUpdate"
+                            )
+        if getattr(old_block, "is_fluid", False) or getattr(
+            placed_block, "is_fluid", False
+        ):
             self.schedule_fluid_around(x, y, z)
         on_load = getattr(block, "on_load", None)
         if callable(on_load):
@@ -956,6 +972,7 @@ class World:
             self.schedule_chunk_and_boundary_fluids(rx)
             self._restore_entities_for_chunk(rx)
             from resources.server.entity_spawning import spawn_animals_for_chunk
+
             spawn_animals_for_chunk(self, rx)
             return changed
 
@@ -970,8 +987,15 @@ class World:
             if callable(on_load):
                 on_load()
 
-    def break_block(self, x_loc: int | Location, y: int = None, z: int = None,
-                    tool=None, *, explosion_power: float | None = None):
+    def break_block(
+        self,
+        x_loc: int | Location,
+        y: int = None,
+        z: int = None,
+        tool=None,
+        *,
+        explosion_power: float | None = None,
+    ):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block = self.get_block(x, y, z)
         if isinstance(block, AIR):
@@ -979,8 +1003,7 @@ class World:
         location = Location(self, x, y, z)
         self.spawn_particle(BlockBreakParticleEffect(block, location, count=18))
         block.on_break()
-        # Drops exist in the world first; they are never placed directly into
-        # the miner's inventory.
+
         drops = (
             block.get_drops(tool)
             if explosion_power is None
@@ -995,6 +1018,7 @@ class World:
             if random.random() > drop_chance:
                 continue
             from resources.server.entities.item import Item
+
             self.spawn_entity(Item(x + 0.5, y + 0.45, self, stack, z))
         experience = block.get_experience(tool)
         if experience > 0:
@@ -1016,14 +1040,16 @@ class World:
 
     @staticmethod
     def _explosion_directions() -> tuple[tuple[float, float, float], ...]:
-        """Return Minecraft's 1,352 normalized rays from a 16-cube shell."""
         directions = []
         shell_max = 15
         for ix in range(16):
             for iy in range(16):
                 for iz in range(16):
-                    if ix not in (0, shell_max) and iy not in (0, shell_max) \
-                            and iz not in (0, shell_max):
+                    if (
+                        ix not in (0, shell_max)
+                        and iy not in (0, shell_max)
+                        and iz not in (0, shell_max)
+                    ):
                         continue
                     dx = ix / shell_max * 2.0 - 1.0
                     dy = iy / shell_max * 2.0 - 1.0
@@ -1032,9 +1058,9 @@ class World:
                     directions.append((dx / length, dy / length, dz / length))
         return tuple(directions)
 
-    def _collect_explosion_blocks(self, x: float, y: float, z: int,
-                                  power: float) -> set[tuple[int, int, int]]:
-        """Ray-march blast energy through the two-layer block world."""
+    def _collect_explosion_blocks(
+        self, x: float, y: float, z: int, power: float
+    ) -> set[tuple[int, int, int]]:
         affected: set[tuple[int, int, int]] = set()
         center_z = int(z) + 0.5
         for dx, dy, dz in self._explosion_directions():
@@ -1045,7 +1071,9 @@ class World:
                 if 0 <= by < self.attribute.MAX_BUILD_HEIGHT and bz in (0, 1):
                     block = self.get_block(bx, by, bz)
                     if not isinstance(block, AIR):
-                        resistance = max(0.0, float(getattr(block, "blast_resistance", 0.0)))
+                        resistance = max(
+                            0.0, float(getattr(block, "blast_resistance", 0.0))
+                        )
                         strength -= (resistance + 0.3) * 0.3
                     if strength > 0.0:
                         affected.add((bx, by, bz))
@@ -1055,8 +1083,9 @@ class World:
                 strength -= 0.225
         return affected
 
-    def _explosion_ray_clear(self, start: tuple[float, float, float],
-                             end: tuple[float, float, float]) -> bool:
+    def _explosion_ray_clear(
+        self, start: tuple[float, float, float], end: tuple[float, float, float]
+    ) -> bool:
         dx, dy, dz = (end[index] - start[index] for index in range(3))
         distance = math.sqrt(dx * dx + dy * dy + dz * dz)
         steps = max(1, math.ceil(distance / 0.2))
@@ -1072,8 +1101,7 @@ class World:
             shape = block.get_collision_box()
             local_x, local_y = px - bx, py - by
             if any(
-                box.min_x <= local_x <= box.max_x
-                and box.min_y <= local_y <= box.max_y
+                box.min_x <= local_x <= box.max_x and box.min_y <= local_y <= box.max_y
                 for box in shape
             ):
                 return False
@@ -1095,8 +1123,9 @@ class World:
                     visible += 1
         return visible / total
 
-    def _damage_entities_from_explosion(self, center: tuple[float, float, float],
-                                        power: float, source=None) -> None:
+    def _damage_entities_from_explosion(
+        self, center: tuple[float, float, float], power: float, source=None
+    ) -> None:
         radius = power * 2.0
         if radius <= 0:
             return
@@ -1114,7 +1143,9 @@ class World:
             delta_x = entity_x - center[0]
             delta_y = entity_y - center[1]
             delta_z = entity_z - center[2]
-            distance = math.sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z)
+            distance = math.sqrt(
+                delta_x * delta_x + delta_y * delta_y + delta_z * delta_z
+            )
             if distance > radius:
                 continue
             exposure = self._explosion_exposure(entity, center)
@@ -1153,19 +1184,21 @@ class World:
                     knockback=knockback,
                 )
             if actual_damage <= 0.0:
-                # Explosion impulse is independent of damage immunity.  This
-                # also lets primed TNT and creative players be pushed.
                 apply_knockback = getattr(entity, "apply_knockback", None)
                 if callable(apply_knockback):
                     apply_knockback(knockback)
                 if entity in getattr(self.server, "players", ()):
-                    self.server.send_client_socket(entity, {
-                        "__class__": "PlayerVelocity",
-                        "motion": {
-                            "x": float(entity.motion.x),
-                            "y": float(entity.motion.y),
+                    self.server.send_client_socket(
+                        entity,
+                        {
+                            "__class__": "PlayerVelocity",
+                            "motion": {
+                                "x": float(entity.motion.x),
+                                "y": float(entity.motion.y),
+                            },
                         },
-                    }, "Forward")
+                        "Forward",
+                    )
 
     def _ignite_explosion_fires(self, affected: set[tuple[int, int, int]]) -> None:
         positions = list(affected)
@@ -1179,14 +1212,9 @@ class World:
             if support.has_collision_box():
                 self.set_block(FIRE(), x, y, z)
 
-    def spawn_explosion(self, loc, power=4, break_block=True, catch_fire=False,
-                        source=None):
-        """Create a Minecraft-style ray-marched explosion.
-
-        Entity exposure is measured before blocks are removed, then affected
-        blocks run their polymorphic explosion hook.  This is what allows TNT
-        to turn into a short-fuse entity instead of dropping as an item.
-        """
+    def spawn_explosion(
+        self, loc, power=4, break_block=True, catch_fire=False, source=None
+    ):
         x, y, z = decide_x_or_loc(loc)
         power = max(0.0, float(power))
         z = int(z)
@@ -1206,7 +1234,9 @@ class World:
                     continue
                 if block.on_exploded(power, source=source):
                     self.break_block(
-                        bx, by, bz,
+                        bx,
+                        by,
+                        bz,
                         explosion_power=power,
                     )
 
@@ -1219,14 +1249,10 @@ class World:
                 if power >= 2.0 and break_block
                 else "minecraft:explosion"
             ),
-            float(x), float(y), z,
+            float(x),
+            float(y),
+            z,
             data={"power": power},
         )
         self.server.broadcast_sound("random.explode", float(x), float(y), z)
         return affected
-
-
-
-
-
-

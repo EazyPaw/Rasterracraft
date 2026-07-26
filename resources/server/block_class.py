@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 from abc import ABC
 
 import ast
@@ -22,9 +23,13 @@ from resources.server.block_collision import (
     BlockCollisionBox,
     coerce_collision_shape,
 )
+
 BLOCK_EXPERIENCE = {
-    "coal_ore": (0, 2), "diamond_ore": (3, 7), "emerald_ore": (3, 7),
-    "lapis_ore": (2, 5), "redstone_ore": (1, 5),
+    "coal_ore": (0, 2),
+    "diamond_ore": (3, 7),
+    "emerald_ore": (3, 7),
+    "lapis_ore": (2, 5),
+    "redstone_ore": (1, 5),
 }
 
 
@@ -46,8 +51,6 @@ class PlacementContext:
 
 @dataclass(frozen=True)
 class BlockDrop:
-    """Declarative loot entry that creates a fresh stack per break."""
-
     material_type: type[Material]
     amount: int = 1
     nbt: dict | None = None
@@ -56,6 +59,7 @@ class BlockDrop:
         if self.amount <= 0:
             raise ValueError("Block drop amount must be positive")
         from resources.server.item_class import ItemStack
+
         return ItemStack(
             self.material_type(),
             self.amount,
@@ -66,14 +70,12 @@ class BlockDrop:
 class Block(ABC):
     block_id = None
     name = None
-    _texture_path = None          # 图片文件路径
-    _texture = None      # 原始 Surface（懒加载）
+    _texture_path = None  # 图片文件路径
+    _texture = None  # 原始 Surface（懒加载）
     _last_scaled = -1
-    _last_tex_id = -1    # 用于检测动画帧变化（id(tex)）
+    _last_tex_id = -1  # 用于检测动画帧变化（id(tex)）
     solid = True
-    # ``solid`` is retained for rendering, light and block-support rules.  It
-    # is deliberately not used as the collision source: transparent, partial
-    # and stateful blocks can all have different collision geometry.
+
     collision_box = FULL_BLOCK
 
     # 方块属性
@@ -93,8 +95,8 @@ class Block(ABC):
     preferred_tool = None
     requires_correct_tool = False
     required_tool_tier = "wood"
-    break_sound = 'dig.stone'
-    place_sound = None    # 放置时播放的音效，默认 None 与 break_sound 一样
+    break_sound = "dig.stone"
+    place_sound = None  # 放置时播放的音效，默认 None 与 break_sound 一样
     breakable = True
     light_attenuation = 5
     light_source = 0
@@ -105,7 +107,7 @@ class Block(ABC):
     # 不受影响。渲染器按区块中实际最大偏移动态预留缓存边距。
     render_offset_blocks = (0.0, 0.0)
 
-    def __init__(self, nbt = None):
+    def __init__(self, nbt=None):
         # 方块应该带有的属性
         self.location = None
         if self.place_sound is None:
@@ -114,12 +116,6 @@ class Block(ABC):
             self.write_nbt(nbt)
 
     def get_collision_box(self) -> BlockCollisionBox:
-        """Return this block instance's collision shape.
-
-        Subclasses may override this for NBT/state-dependent geometry (for
-        example a top/bottom slab or a fluid with a changing level).  Returning
-        ``None``/``EMPTY`` means the block is non-collidable.
-        """
         return coerce_collision_shape(self.collision_box)
 
     def has_collision_box(self) -> bool:
@@ -128,16 +124,15 @@ class Block(ABC):
     def get_name(self):
         return transkey(self.name)
 
-    def can_precompose_with(self, rear_block: 'Block') -> bool:
-        """Whether two depth layers may be rendered as one texture."""
+    def can_precompose_with(self, rear_block: "Block") -> bool:
         return False
 
-    def get_precomposed_texture(self, size, rear_block: 'Block'):
+    def get_precomposed_texture(self, size, rear_block: "Block"):
         return None
 
     @classmethod
     @client_method
-    def get_texture(cls, size, client = None):
+    def get_texture(cls, size, client=None):
         """
         返回方块的材质 (client 参数由 @client_only 自动注入)
         :param size:
@@ -154,7 +149,9 @@ class Block(ABC):
 
         # 首次加载纹理时自动检测是否存在透明像素
         if cls.has_transparent_pixels is None:
-            cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(tex)
+            cls.has_transparent_pixels = (
+                client.resources_manager.has_transparent_pixels(tex)
+            )
 
         # 使用 tex 的 id 作为帧标识：静态纹理 id 不变跳过缩放，动画纹理 id 变化则重新缩放
         if id(tex) != cls._last_tex_id or size != cls._last_scaled:
@@ -189,7 +186,8 @@ class Block(ABC):
                     setattr(self, key, value)
                 else:
                     logging.warning(
-                        f"There exists a incorrect type nbt, expect {type(current_attr)}, but got {type(value)}.")
+                        f"There exists a incorrect type nbt, expect {type(current_attr)}, but got {type(value)}."
+                    )
             else:
                 logging.warning(f"Block {self.block_id} has no attribute {key}.")
 
@@ -204,8 +202,14 @@ class Block(ABC):
             return True
         return False
 
-    def get_placement_location(self, target, *, player=None, fore_place=False,
-                               context: PlacementContext | None = None):
+    def get_placement_location(
+        self,
+        target,
+        *,
+        player=None,
+        fore_place=False,
+        context: PlacementContext | None = None,
+    ):
         """返回客户端放置预览应使用的位置。
 
         普通方块默认沿用项目原有的同格/另一深度层规则。需要根据玩家
@@ -237,30 +241,26 @@ class Block(ABC):
         if not self.requires_correct_tool:
             return True
         tiers = {"wood": 0, "stone": 1, "iron": 2, "diamond": 3, "netherite": 4}
-        return (
-            getattr(material, "tool_type", None) == self.preferred_tool
-            and tiers.get(getattr(material, "tier", ""), -1) >= tiers.get(self.required_tool_tier, 0)
-        )
+        return getattr(
+            material, "tool_type", None
+        ) == self.preferred_tool and tiers.get(
+            getattr(material, "tier", ""), -1
+        ) >= tiers.get(self.required_tool_tier, 0)
 
     def get_drops(self, material):
-        """Base loot until specialized loot tables/functions are implemented."""
         if not self.can_harvest(material):
             return []
         from resources.server.item_class import ItemStack
         from resources.server.materials import get_block_item
+
         if self.drops is None:
             return [ItemStack(get_block_item(self), 1)]
         return [drop.create_stack() for drop in self.drops]
 
     def get_explosion_drops(self):
-        """Return loot candidates without applying tool harvest requirements.
-
-        Explosion survival is decided by ``World.break_block`` from the blast
-        power.  Keeping the loot construction here lets concrete blocks retain
-        declarative ``BlockDrop`` data while avoiding a fake mining tool.
-        """
         from resources.server.item_class import ItemStack
         from resources.server.materials import get_block_item
+
         if self.drops is None:
             return [ItemStack(get_block_item(self), 1)]
         return [drop.create_stack() for drop in self.drops]
@@ -269,23 +269,17 @@ class Block(ABC):
         if not self.can_harvest(material):
             return 0
         import random
+
         bounds = BLOCK_EXPERIENCE.get(self.block_id)
         return random.randint(*bounds) if bounds else 0
 
     def on_use(self, player, material) -> bool:
-        """Server-side item-on-block interaction hook."""
         return False
 
     def accepts_item_use(self, material) -> bool:
-        """Return whether this block should consume an item-use right click.
-
-        This predicate is safe to evaluate on the client.  The actual effect
-        remains server-authoritative in ``on_right_click``/``on_use``.
-        """
         return False
 
     def on_exploded(self, power: float, source=None) -> bool:
-        """React to a blast and report whether the world should destroy it."""
         return self.breakable
 
     def on_right_click(self, player) -> bool:
@@ -293,17 +287,15 @@ class Block(ABC):
         执行方块被右键交互时的操作，返回方块交互是否成功（如果方块不可交互则始终返回 False ）
         :return:
         """
-        return False # 返回此方块能否被交互
+        return False  # 返回此方块能否被交互
 
     def on_left_click(self, player) -> bool:
         return False
 
     def on_fallen_on(self, entity, fall_distance: float) -> bool:
-        """React to a landing and report whether the block state changed."""
         return False
 
     def notify_state_changed(self) -> None:
-        """Persist and broadcast an in-place NBT/state mutation."""
         if self.location is None:
             return
         world = self.location.world
@@ -323,7 +315,6 @@ class Block(ABC):
                 server.send_client_socket(player, self, "BlockUpdate")
 
     def get_light_state(self) -> tuple[bool, int, int]:
-        """Return the properties which influence the current light solver."""
         return bool(self.solid), int(self.light_attenuation), int(self.light_source)
 
     def on_update(self):
@@ -331,10 +322,10 @@ class Block(ABC):
 
     def to_dict(self):
         rst = {
-            'id': self.block_id,
+            "id": self.block_id,
         }
         if nbt := self.parse_nbt():
-            rst['nbt'] = nbt
+            rst["nbt"] = nbt
         return rst
 
     def on_random_tick(self):
@@ -350,7 +341,7 @@ class FluidBlock(Block):
     is_fluid = True
 
     _flow_texture_path = None
-    # water_flow frames are 32x32: one frame spans a 2x2 block area.
+
     flow_texture_tile_span = 2
     _texture_cache = {}
     _scaled_atlas_cache = {}
@@ -359,26 +350,26 @@ class FluidBlock(Block):
     source_level = 0
     flow_speed_ticks = 5
     can_create_source = True
-    # 8/9 of a block is the vanilla source/falling height.  Keep pixel
-    # equivalents for callers that use the legacy rendering parameters.
+
     source_surface_pixels = 128.0 / 9.0
     flowing_surface_step_pixels = 16.0 / 9.0
-    # Legacy LEVEL is source=0 and flowing=1..7.  Lava consumes two levels
-    # per horizontal spread while water consumes one.
+
     flow_level_step = 1
     horizontal_flow_range = 5
-    # When a fluid cell is supported by the same fluid below, its horizontal
-    # search must stop at the adjacent cell.  Otherwise, a filled column is
-    # incorrectly treated as an open drop and spreads the full range.
+
     supported_horizontal_flow_range = 1
     flowing_sound = None
     source_sound = None
     blast_resistance = 100
 
-    def __init__(self, level: int = 0, falling: bool = False, flow_direction: int = 0, nbt=None):
+    def __init__(
+        self, level: int = 0, falling: bool = False, flow_direction: int = 0, nbt=None
+    ):
         self.level = max(0, min(self.max_level, int(level)))
         self.falling = bool(falling)
-        self.flow_direction = -1 if flow_direction < 0 else (1 if flow_direction > 0 else 0)
+        self.flow_direction = (
+            -1 if flow_direction < 0 else (1 if flow_direction > 0 else 0)
+        )
         super().__init__(nbt)
 
     @property
@@ -409,8 +400,7 @@ class FluidBlock(Block):
     def fluid_height_ratio(self) -> float:
         if self.location is None:
             return 1.0
-        # This follows FlowingFluid.getOwnHeight(): source and falling states
-        # carry amount 8, while a horizontal state carries amount 8 - LEVEL.
+
         if self._has_same_fluid_above():
             return 1.0
         amount = 8 if self.is_source or self.falling else max(1, 8 - self.level)
@@ -444,8 +434,7 @@ class FluidBlock(Block):
         return edges[0], edges[1]
 
     def can_precompose_with(self, rear_block: Block) -> bool:
-        # Alpha-compositing two equal fluid layers ahead of time preserves the
-        # darker two-layer appearance while avoiding a second world blit.
+
         return type(rear_block) is type(self)
 
     @client_method
@@ -502,7 +491,7 @@ class FluidBlock(Block):
             world_x = int(self.location.x)
             world_y = int(self.location.y)
             phase_x = world_x % tile_span
-            # World Y grows upward while image rows grow downward.
+
             phase_y = (-world_y - 1) % tile_span
 
         cache_key = (
@@ -540,9 +529,7 @@ class FluidBlock(Block):
         tile = scaled.subsurface(
             pygame.Rect(phase_x * size, phase_y * size, size, size)
         )
-        texture = tile.subsurface(
-            pygame.Rect(0, size - tex_h, size, tex_h)
-        ).copy()
+        texture = tile.subsurface(pygame.Rect(0, size - tex_h, size, tex_h)).copy()
         if left_h != right_h:
             denom = max(1, size - 1)
             for px in range(size):
@@ -566,20 +553,13 @@ class FluidBlock(Block):
         y = int(self.location.y)
         z = int(self.location.z)
 
-        # LiquidBlock.shouldSpreadLiquid is an on-place/neighbor callback in
-        # vanilla, not something that waits for the normal lava tick.  The
-        # world calls on_update for the neighbors of a changed block, so a
-        # water neighbor must also be able to wake the lava cell that was just
-        # placed beside it.  The lava helper itself still owns the direction
-        # rules (above + horizontal only; never the block below).
         if getattr(self, "block_id", None) == "lava":
             if self._react_with_adjacent_fluid(world, x, y, z):
                 return
         elif getattr(self, "block_id", None) == "water":
             lava_positions = [(x, y - 1, z)]
             lava_positions.extend(
-                (x + dx, y, z + dz)
-                for dx, dz, _ in self._iter_horizontal_neighbors(z)
+                (x + dx, y, z + dz) for dx, dz, _ in self._iter_horizontal_neighbors(z)
             )
             for lx, ly, lz in lava_positions:
                 lava = world.get_block(lx, ly, lz)
@@ -600,9 +580,6 @@ class FluidBlock(Block):
         y = int(self.location.y)
         z = int(self.location.z)
 
-        # Lava/water interaction is resolved on the lava side, matching the
-        # vanilla rule: contact from above or horizontally converts lava,
-        # while a downward flow converts the water it enters to stone.
         if self._react_with_adjacent_fluid(world, x, y, z):
             return
 
@@ -611,16 +588,17 @@ class FluidBlock(Block):
             if source_level is not None:
                 updated = self.make_fluid(source_level, False, 0)
                 self._replace_self(updated)
-                # FlowingFluid.tick spreads with the newly calculated state
-                # in the same tick.  Do not postpone the downward interaction
-                # until the next lava tick after changing this cell.
+
                 updated.tick_fluid()
                 return
 
             support = self._get_supporting_flow(world, x, y, z)
             if support is None:
                 from resources.server.blocks import AIR
-                world.set_block(AIR(), self.location, send_packet=True, block_update=True)
+
+                world.set_block(
+                    AIR(), self.location, send_packet=True, block_update=True
+                )
                 return
 
             target_level, target_falling, target_direction = support
@@ -629,10 +607,11 @@ class FluidBlock(Block):
                 or target_falling != self.falling
                 or target_direction != self.flow_direction
             ):
-                updated = self.make_fluid(target_level, target_falling, target_direction)
+                updated = self.make_fluid(
+                    target_level, target_falling, target_direction
+                )
                 self._replace_self(updated)
-                # Match FlowingFluid.tick: a recalculated flowing state still
-                # executes its spread pass immediately.
+
                 updated.tick_fluid()
                 return
 
@@ -661,7 +640,9 @@ class FluidBlock(Block):
         next_level = self.level + flow_step
         flow_dirs = self._get_horizontal_flow_directions(world, x, y, z, next_level)
         visible_dirs = [direction for _, _, direction in flow_dirs if direction != 0]
-        self._set_own_direction(visible_dirs[0] if len(visible_dirs) == 1 and len(flow_dirs) == 1 else 0)
+        self._set_own_direction(
+            visible_dirs[0] if len(visible_dirs) == 1 and len(flow_dirs) == 1 else 0
+        )
         for dx, dz, direction in flow_dirs:
             self._try_flow_to(world, x + dx, y, z + dz, next_level, False, direction)
 
@@ -687,8 +668,10 @@ class FluidBlock(Block):
                     horizontal -= direction
         return horizontal, vertical
 
-    def _replace_self(self, fluid: 'FluidBlock'):
-        self.location.world.set_block(fluid, self.location, send_packet=True, block_update=True)
+    def _replace_self(self, fluid: "FluidBlock"):
+        self.location.world.set_block(
+            fluid, self.location, send_packet=True, block_update=True
+        )
 
     def _set_own_direction(self, direction: int):
         direction = -1 if direction < 0 else (1 if direction > 0 else 0)
@@ -698,7 +681,9 @@ class FluidBlock(Block):
         world = self.location.world
         world.mark_chunk_dirty(int(self.location.x) // 16)
         for player in world.server.players:
-            if player.is_loading_position(self.location.x, self.location.y, self.location.z):
+            if player.is_loading_position(
+                self.location.x, self.location.y, self.location.z
+            ):
                 world.server.send_client_socket(player, self, "BlockUpdate")
 
     def _can_destroy_with_fluid(self, block: Block) -> bool:
@@ -706,7 +691,9 @@ class FluidBlock(Block):
             return False
         if getattr(block, "is_fluid", False):
             return False
-        return bool(getattr(block, "breakable", False) and not getattr(block, "solid", True))
+        return bool(
+            getattr(block, "breakable", False) and not getattr(block, "solid", True)
+        )
 
     def _can_flow_into(self, block: Block) -> bool:
         if self.is_same_fluid(block):
@@ -746,10 +733,7 @@ class FluidBlock(Block):
             return False
         level = max(self.source_level, level)
         target = world.get_block(x, y, z)
-        # A horizontal/source lava cell merely touching water below does not
-        # react.  It is only a falling lava cell (created after passing
-        # through an empty cell) that can enter water and turn that water cell
-        # into stone.
+
         if (
             getattr(self, "block_id", None) == "lava"
             and getattr(target, "block_id", None) == "water"
@@ -758,12 +742,9 @@ class FluidBlock(Block):
             return False
         interaction_result = self._interaction_result_for_target(target, falling)
         if interaction_result is not None:
-            # A downward lava flow converts the water cell it enters.  Keep
-            # the lava cell above it intact so the resulting stone is located
-            # in the water plane (rather than floating one block overhead).
-            # Water flowing downward into lava still changes the target lava
-            # cell and never occupies it.
-            world.set_block(interaction_result, x, y, z, send_packet=True, block_update=True)
+            world.set_block(
+                interaction_result, x, y, z, send_packet=True, block_update=True
+            )
             self._emit_lava_fizz(world, x, y, z)
             return True
         if self.is_same_fluid(target):
@@ -781,7 +762,14 @@ class FluidBlock(Block):
         elif self._can_destroy_with_fluid(target):
             target.on_break()
 
-        world.set_block(self.make_fluid(level, falling, direction), x, y, z, send_packet=True, block_update=True)
+        world.set_block(
+            self.make_fluid(level, falling, direction),
+            x,
+            y,
+            z,
+            send_packet=True,
+            block_update=True,
+        )
         return True
 
     def _get_new_source_level(self, world, x: int, y: int, z: int) -> int | None:
@@ -799,7 +787,9 @@ class FluidBlock(Block):
             return self.source_level
         return None
 
-    def _get_supporting_flow(self, world, x: int, y: int, z: int) -> tuple[int, bool, int] | None:
+    def _get_supporting_flow(
+        self, world, x: int, y: int, z: int
+    ) -> tuple[int, bool, int] | None:
         above = world.get_block(x, y + 1, z)
         if self.is_same_fluid(above):
             return self.source_level, True, 0
@@ -809,7 +799,9 @@ class FluidBlock(Block):
             neighbor = world.get_block(x + dx, y, z + dz)
             if not self.is_same_fluid(neighbor):
                 continue
-            candidate_level = neighbor.level + max(1, int(getattr(self, "flow_level_step", 1)))
+            candidate_level = neighbor.level + max(
+                1, int(getattr(self, "flow_level_step", 1))
+            )
             if candidate_level > self.max_level:
                 continue
             candidate_direction = -dx if dx != 0 else 0
@@ -832,41 +824,45 @@ class FluidBlock(Block):
             return candidates
 
         drop_distances = {
-            candidate: self._distance_to_drop(world, x, y, z, candidate[0], candidate[1])
+            candidate: self._distance_to_drop(
+                world, x, y, z, candidate[0], candidate[1]
+            )
             for candidate in candidates
         }
         best_distance = min(drop_distances.values())
         if best_distance < 999:
-            return [candidate for candidate in candidates if drop_distances[candidate] == best_distance]
+            return [
+                candidate
+                for candidate in candidates
+                if drop_distances[candidate] == best_distance
+            ]
         return candidates
 
     def _react_with_adjacent_fluid(self, world, x: int, y: int, z: int) -> bool:
-        """Apply LiquidBlock.shouldSpreadLiquid for an existing lava cell."""
         block_id = getattr(self, "block_id", None)
         if block_id != "lava":
             return False
 
         from resources.server.blocks import COBBLESTONE, OBSIDIAN
 
-        # POSSIBLE_FLOW_DIRECTIONS is DOWN,SOUTH,NORTH,EAST,WEST and the
-        # vanilla code checks direction.getOpposite(), i.e. above + four
-        # horizontal neighbors.  DOWN is deliberately not checked here;
-        # LavaFluid.spreadTo owns the downward water -> stone conversion.
         neighbors = [(x, y + 1, z)]
-        neighbors.extend((x + dx, y, z + dz) for dx, dz, _ in self._iter_horizontal_neighbors(z))
+        neighbors.extend(
+            (x + dx, y, z + dz) for dx, dz, _ in self._iter_horizontal_neighbors(z)
+        )
         for nx, ny, nz in neighbors:
             neighbor = world.get_block(nx, ny, nz)
             if getattr(neighbor, "block_id", None) != "water":
                 continue
             result_type = OBSIDIAN if self.is_source else COBBLESTONE
-            world.set_block(result_type(), self.location, send_packet=True, block_update=True)
+            world.set_block(
+                result_type(), self.location, send_packet=True, block_update=True
+            )
             self._emit_lava_fizz(world, x, y, z)
             return True
         return False
 
     @staticmethod
     def _emit_lava_fizz(world, x: int, y: int, z: int) -> None:
-        """Mirror LavaFluid's level event with the existing smoke particle API."""
         play_particle = getattr(world, "play_particle", None)
         if callable(play_particle):
             play_particle(
@@ -879,19 +875,17 @@ class FluidBlock(Block):
             )
 
     def _interaction_result_for_target(self, target: Block, falling: bool):
-        """Return a replacement block when this flow enters the opposite fluid."""
         block_id = getattr(self, "block_id", None)
         target_id = getattr(target, "block_id", None)
         if {block_id, target_id} != {"water", "lava"}:
             return None
-        # Water never occupies a lava cell.  Existing lava is converted by
-        # its own LiquidBlock neighbor check (above/horizontal), while only a
-        # downward lava spread converts the water cell it enters to stone.
+
         if block_id == "water":
             return None
         if not falling:
             return None
         from resources.server.blocks import STONE
+
         return STONE()
 
     def _can_flow_horizontally(self, world, x: int, y: int, z: int, level: int) -> bool:
@@ -929,28 +923,30 @@ class FluidBlock(Block):
         return 999
 
 
-
 class Plant(Block):
     # 所有植物基类
-    break_sound = 'dig.grass'
+    break_sound = "dig.grass"
     solid = False
     collision_box = EMPTY
     light_attenuation = 1
 
     def on_update(self):
-        if BlockTag.GRASS_BLOCKS not in self.location.world.get_block(self.location.add(0, -1, 0)).Tags:
+        if (
+            BlockTag.GRASS_BLOCKS
+            not in self.location.world.get_block(self.location.add(0, -1, 0)).Tags
+        ):
             self.location.world.break_block(self.location)
+
 
 class GrassStain(Plant):
     # 需要更据生物群系染色的植物（草）
-    _texture_cache = {}  # key: (size, biome_id)
+    _texture_cache = {}
 
     @client_method
     def get_texture(self, size, client):
         # 获取 biome_id 用于缓存键（不同群系染色不同）
         if self.location is not None and self.location.world is not None:
-            biome_id = self.location.world.get_biome(
-                self.location.x, self.location.y)
+            biome_id = self.location.world.get_biome(self.location.x, self.location.y)
         else:
             biome_id = "__default__"
 
@@ -967,24 +963,29 @@ class GrassStain(Plant):
         # 首次加载纹理时自动检测是否存在透明像素
         cls = type(self)
         if cls.has_transparent_pixels is None:
-            cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(base_texture)
+            cls.has_transparent_pixels = (
+                client.resources_manager.has_transparent_pixels(base_texture)
+            )
 
         # 2. 缩放至目标尺寸
         texture_scaled = pygame.transform.scale(base_texture, (size, size))
 
         # 3. 染色纹理 (使用 RGB 元组 (30, 50, 70))
-        stained_texture = client.resources_manager.biome_stain(texture_scaled, self.location).convert_alpha()
+        stained_texture = client.resources_manager.biome_stain(
+            texture_scaled, self.location
+        ).convert_alpha()
 
         # 4. 存入缓存
         self._texture_cache[cache_key] = stained_texture
 
         return stained_texture
 
+
 class Leaves(Block):
     solid = True
-    _texture_cache = {}   # key: (size, biome_id)
-    _effect_cache = {}    # key: (size, biome_id, z, front_same, behind_leaf)
-    break_sound = 'dig.grass'
+    _texture_cache = {}
+    _effect_cache = {}
+    break_sound = "dig.grass"
     hardness = 0.2
     preferred_tool = "hoe"
 
@@ -992,8 +993,7 @@ class Leaves(Block):
     def get_texture(self, size, client):
         # 获取 biome_id 用于缓存键（不同群系染色不同）
         if self.location is not None and self.location.world is not None:
-            biome_id = self.location.world.get_biome(
-                self.location.x, self.location.y)
+            biome_id = self.location.world.get_biome(self.location.x, self.location.y)
         else:
             biome_id = "__default__"
 
@@ -1004,11 +1004,13 @@ class Leaves(Block):
         if self.location is not None and self.location.world is not None:
             if z == 0:
                 front = self.location.world.get_block(
-                    self.location.x, self.location.y, 1)
+                    self.location.x, self.location.y, 1
+                )
                 front_same = type(front) is type(self)
             elif z == 1:
                 behind = self.location.world.get_block(
-                    self.location.x, self.location.y, 0)
+                    self.location.x, self.location.y, 0
+                )
                 behind_leaf = isinstance(behind, Leaves)
 
         # 效果缓存键（含世界状态，状态变化时自动失效）
@@ -1028,7 +1030,9 @@ class Leaves(Block):
             # 首次加载纹理时自动检测是否存在透明像素
             cls = type(self)
             if cls.has_transparent_pixels is None:
-                cls.has_transparent_pixels = client.resources_manager.has_transparent_pixels(base_texture)
+                cls.has_transparent_pixels = (
+                    client.resources_manager.has_transparent_pixels(base_texture)
+                )
 
             scaled = pygame.transform.scale(base_texture, (size, size))
             stained = client.resources_manager.biome_stain(
@@ -1044,8 +1048,8 @@ class Leaves(Block):
             top = stained.subsurface((0, 0, size, half)).copy()
             bottom = stained.subsurface((0, half, size, half)).copy()
             result = pygame.Surface((size, size), pygame.SRCALPHA)
-            result.blit(bottom, (0, 0))       # 下半 → 上半
-            result.blit(top, (0, half))       # 上半 → 下半
+            result.blit(bottom, (0, 0))  # 下半 → 上半
+            result.blit(top, (0, half))  # 上半 → 下半
 
         # z=1 前景层：后方有任意树叶 → RGB 乘法加深（保护 alpha 通道）
         if behind_leaf:
@@ -1058,14 +1062,17 @@ class Leaves(Block):
         self._effect_cache[effect_key] = result
         return result
 
+
 class BottomSupport(Block):
     """
     底部需要支撑的方块
     """
+
     def on_update(self):
         below = self.location.world.get_block(self.location.add(0, -1, 0))
         if not getattr(below, "has_collision_box", lambda: False)():
             self.location.world.break_block(self.location)
+
 
 class Log(Block):
     break_sound = "dig.wood"
@@ -1091,7 +1098,7 @@ class GravityBlock(Block):
         return placed
 
     @server_method
-    def on_update(self, server = None):
+    def on_update(self, server=None):
         if self.location is None:
             return
         # 同一轮连锁更新可能多次通知同一个方块；下落事件尚未执行时只入队一次。
@@ -1124,11 +1131,12 @@ class GravityBlock(Block):
         falling = FallingBlock(x + 0.01, y, z, world, self)
         world.spawn_entity(falling)
 
+
 class SLABS(Block):
     _texture_cache = {}
     has_transparent_pixels = True
 
-    def __init__(self, _type = "bottom"):
+    def __init__(self, _type="bottom"):
         super().__init__()
         self._type = _type
 
@@ -1217,8 +1225,7 @@ class SupportedBlock(Block):
         if len(shape) != 1:
             return False
         box = next(iter(shape))
-        return (box.min_x <= 0 and box.min_y <= 0
-                and box.max_x >= 1 and box.max_y >= 1)
+        return box.min_x <= 0 and box.min_y <= 0 and box.max_x >= 1 and box.max_y >= 1
 
     def get_support_block(self):
         support_location = self.get_support_location()
@@ -1227,7 +1234,9 @@ class SupportedBlock(Block):
         return support_location.world.get_block(support_location)
 
     def can_survive(self) -> bool:
-        return self.location is not None and self.is_full_block(self.get_support_block())
+        return self.location is not None and self.is_full_block(
+            self.get_support_block()
+        )
 
     def can_place_at(self, location: Location) -> bool:
         """预检放置位置，避免短暂生成一个无支撑方块。"""
@@ -1307,7 +1316,9 @@ class ParticleEmitterBlock(SupportedBlock):
         if not callable(register_event):
             return
         self._particle_event_scheduled = True
-        register_event(self._particle_tick, ticks=max(1, int(self.particle_interval_ticks)))
+        register_event(
+            self._particle_tick, ticks=max(1, int(self.particle_interval_ticks))
+        )
 
     def _particle_tick(self):
         self._particle_event_scheduled = False
@@ -1319,8 +1330,12 @@ class ParticleEmitterBlock(SupportedBlock):
         if not self.can_survive():
             support_location = self.get_support_location()
             is_loaded = getattr(world, "is_position_loaded", None)
-            if callable(is_loaded) and support_location is not None and not is_loaded(
-                support_location.x, support_location.y, support_location.z
+            if (
+                callable(is_loaded)
+                and support_location is not None
+                and not is_loaded(
+                    support_location.x, support_location.y, support_location.z
+                )
             ):
                 self._schedule_particle()
                 return
@@ -1367,13 +1382,14 @@ class ParticleEmitterBlock(SupportedBlock):
         self._particles_active = False
         self._particle_event_scheduled = False
 
+
 class Crop(Block):
     solid = False
     collision_box = EMPTY
     light_attenuation = 1
     has_transparent_pixels = True
     hardness = 0.0
-    break_sound = 'dig.grass'
+    break_sound = "dig.grass"
     maintains_farmland = True
     max_age = 7
     _crop_texture_cache = {}
@@ -1393,11 +1409,10 @@ class Crop(Block):
             return
         loc = self.location
         world = loc.world
-        if world.get_block(loc.add(0, -1, 0)).block_id != 'farmland':
+        if world.get_block(loc.add(0, -1, 0)).block_id != "farmland":
             world.break_block(loc)
 
     def _growth_speed(self) -> float:
-        """Vanilla crop fertility adapted to PyCraft2D's two depth layers."""
         loc = self.location
         world = loc.world
         speed = 1.0
@@ -1408,8 +1423,8 @@ class Crop(Block):
                     continue
                 soil = world.get_block(int(loc.x) + dx, int(loc.y) - 1, soil_z)
                 fertility = 0.0
-                if getattr(soil, 'block_id', None) == 'farmland':
-                    fertility = 3.0 if getattr(soil, 'moisture', 0) > 0 else 1.0
+                if getattr(soil, "block_id", None) == "farmland":
+                    fertility = 3.0 if getattr(soil, "moisture", 0) > 0 else 1.0
                 if dx != 0 or dz != 0:
                     fertility /= 4.0
                 speed += fertility
@@ -1420,7 +1435,9 @@ class Crop(Block):
             for dx in (-1, 1)
         )
         other_z = 1 - int(loc.z)
-        has_z_neighbor = world.get_block(int(loc.x), int(loc.y), other_z).block_id == crop_id
+        has_z_neighbor = (
+            world.get_block(int(loc.x), int(loc.y), other_z).block_id == crop_id
+        )
         has_diagonal = any(
             world.get_block(int(loc.x) + dx, int(loc.y), other_z).block_id == crop_id
             for dx in (-1, 1)
@@ -1434,10 +1451,10 @@ class Crop(Block):
             return
         loc = self.location
         world = loc.world
-        if world.get_block(loc.add(0, -1, 0)).block_id != 'farmland':
+        if world.get_block(loc.add(0, -1, 0)).block_id != "farmland":
             world.break_block(loc)
             return
-        get_light = getattr(world, 'get_sum_light', None)
+        get_light = getattr(world, "get_sum_light", None)
         light = get_light(int(loc.x), int(loc.y)) if callable(get_light) else 15
         if light < 9:
             return
@@ -1448,18 +1465,19 @@ class Crop(Block):
         self.notify_state_changed()
 
     def get_texture_path(self) -> str:
-        """Return the real staged path used by rendering and animation probes."""
-        return f'{self._texture_path}_stage_{self.age}'
+        return f"{self._texture_path}_stage_{self.age}"
 
     @client_method
-    def get_texture(self, size, client = None):
+    def get_texture(self, size, client=None):
         texture_path = self.get_texture_path()
         size = max(1, int(round(size)))
         tex = client.resources_manager.get_texture_img(texture_path)
         if tex is None:
             return None
         if self.has_transparent_pixels is None:
-            self.has_transparent_pixels = client.resources_manager.has_transparent_pixels(tex)
+            self.has_transparent_pixels = (
+                client.resources_manager.has_transparent_pixels(tex)
+            )
         key = (type(self), size, texture_path, tex)
         cached = self._crop_texture_cache.get(key)
         if cached is None:

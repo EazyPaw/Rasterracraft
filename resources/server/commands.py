@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import ast
 import logging
 import traceback
@@ -17,57 +18,57 @@ from resources.server.biome import BIOME_PROFILES
 if TYPE_CHECKING:
     from resources.server.server_main import Server
 
+
 class CommandExecutor:
-    def __init__(self,server: 'Server'):
+    def __init__(self, server: "Server"):
         self.server = server
-        self.allow_python_execute = True # 是否允许执行 Python 命令。攻击者可以通过该命令执行任意恶意指令，这十分危险！通常仅应该在开发时被打开！
+        self.allow_python_execute = True  # 是否允许执行 Python 命令。攻击者可以通过该命令执行任意恶意指令，这十分危险！通常仅应该在开发时被打开！
         self.commands_map: Dict[str, Callable[[List[str], Player | str], str]] = {
-        "regions": self.list_region,
-        "players": self.list_players,
-        "tp": self.teleport,
-        "exec": self.python_execute,
-        "setblock": self.set_block_c,
-        "say": self.say_command,
-        "fill": self.fill_command,
-        "time": self.time,
-        "weather": self.weather,
-        "gamemode": self.switch_gamemode,
-        "give": self.give_command,
-        "kick": self.kick_command,
-        "locate": self.locate_command,
-        "summon": self.summon_command,
-        "stop": self.stop_server
-    }
+            "regions": self.list_region,
+            "players": self.list_players,
+            "tp": self.teleport,
+            "exec": self.python_execute,
+            "setblock": self.set_block_c,
+            "say": self.say_command,
+            "fill": self.fill_command,
+            "time": self.time,
+            "weather": self.weather,
+            "gamemode": self.switch_gamemode,
+            "give": self.give_command,
+            "kick": self.kick_command,
+            "locate": self.locate_command,
+            "summon": self.summon_command,
+            "stop": self.stop_server,
+        }
 
     def python_execute(self, args, executor: Player | str):
         """
         执行 Python 命令
         """
-        if not self.allow_python_execute or (isinstance(executor, Player) and not executor.is_operator):
+        if not self.allow_python_execute or (
+            isinstance(executor, Player) and not executor.is_operator
+        ):
             return "python execute is not enabled for this player!"
         code = " ".join(args)
         start_time = time.time()
         exec(code)
         end_time = time.time()
         execution_time = end_time - start_time
-        return f"Done in {execution_time*1000} ms."
-    
+        return f"Done in {execution_time * 1000} ms."
+
     def stop_server(self, args, executor: Player | str):
         self.server.close_server()
-        return 'Stopping server..'
+        return "Stopping server.."
 
     def switch_gamemode(self, args, executor: Player | str):
         if not isinstance(executor, Player) or len(args) != 1:
             raise ValueError("Usage: /gamemode <creative|survival>")
 
         gamemode = get_gamemode_by_id(args[0].lower())
-        # gamemode belongs to an individual player.  Assigning Player.gamemode
-        # only creates a class attribute, leaving executor.gamemode unchanged
-        # and causing GamemodeUpdate to report the old mode to the client.
+
         executor.gamemode = gamemode
         self.server.send_client_socket(executor, executor, "GamemodeUpdate")
         return f"Gamemode is set to {gamemode.name_id}"
-
 
     def give_command(self, args, executor: Player | str):
         """
@@ -124,7 +125,6 @@ class CommandExecutor:
         return f"Gave {given_items}x {item_name} to {given_players} player(s)"
 
     def kick_command(self, args, executor: Player | str):
-        """/kick <target> [reason] -- Minecraft-style server kick command."""
         if not args:
             raise ValueError("Usage: /kick <target> [reason]")
         if isinstance(executor, Player) and not executor.is_operator:
@@ -140,11 +140,6 @@ class CommandExecutor:
         return f"Kicked {kicked} player(s)"
 
     def locate_command(self, args, executor: Player | str):
-        """Locate the nearest generated feature or biome.
-
-        ``/locate biome <id>`` searches the generator's column biome field,
-        returning the surface coordinate nearest to the executing player.
-        """
         if len(args) < 2 or args[0].lower() != "biome":
             raise ValueError("Usage: /locate biome <biome>")
         biome_id = args[1].lower().removeprefix("minecraft:")
@@ -157,13 +152,13 @@ class CommandExecutor:
             world = self.server.worlds[self.server.main_world_id]
             origin_x = 0
         generator = world.generator
-        # Rare climate intersections can be hundreds of thousands of blocks
-        # away on a particular seed. Search far enough to cover those cases
-        # instead of failing at the previous arbitrary 8192-block boundary.
+
         max_radius = 524288
-        # Check the origin first, then alternating columns by distance.
+
         for radius in range(max_radius + 1):
-            candidates = (origin_x,) if radius == 0 else (origin_x - radius, origin_x + radius)
+            candidates = (
+                (origin_x,) if radius == 0 else (origin_x - radius, origin_x + radius)
+            )
             for x in candidates:
                 if generator.get_original_biome(x, 0) != biome_id:
                     continue
@@ -172,15 +167,12 @@ class CommandExecutor:
                 else:
                     y = 70
                 return f"The nearest {biome_id} is at ({x}, {y})"
-        raise ValueError(f"Could not locate biome {biome_id} within {max_radius} blocks")
+        raise ValueError(
+            f"Could not locate biome {biome_id} within {max_radius} blocks"
+        )
 
     @staticmethod
     def _parse_summon_nbt(raw: str) -> dict:
-        """Parse a small, safe subset of SNBT used by summon.
-
-        Python/JSON-style dictionaries are accepted as well as common
-        Minecraft forms such as ``{Health:10f,NoAI:1b}``.
-        """
         raw = raw.strip()
         if not raw:
             return {}
@@ -208,7 +200,6 @@ class CommandExecutor:
         return value
 
     def summon_command(self, args, executor: Player | str):
-        """/summon <entity> [<x> <y> <z>] [<nbt>]."""
         if not args:
             raise ValueError("Usage: /summon <entity> [<x> <y> <z>] [<nbt>]")
         if isinstance(executor, Player) and not executor.is_operator:
@@ -216,6 +207,7 @@ class CommandExecutor:
 
         entity_id = args[0].lower()
         from resources.server.entity_registry import get_entity_type
+
         if get_entity_type(entity_id, summonable_only=True) is None:
             raise ValueError(f"Unknown entity: {args[0]}")
 
@@ -243,9 +235,12 @@ class CommandExecutor:
             nbt = self._parse_summon_nbt(" ".join(args[4:])) if len(args) > 4 else {}
 
         if not 0 <= y < world.attribute.MAX_BUILD_HEIGHT:
-            raise ValueError(f"y must be between 0 and {world.attribute.MAX_BUILD_HEIGHT - 1}")
+            raise ValueError(
+                f"y must be between 0 and {world.attribute.MAX_BUILD_HEIGHT - 1}"
+            )
 
         from resources.server.entity_registry import create_entity
+
         entity = create_entity(entity_id, x, y, world, z)
         entity.apply_summon_nbt(nbt)
         world.spawn_entity(entity)
@@ -264,9 +259,12 @@ class CommandExecutor:
             raise ValueError(f"Invalid args: {args}")
 
     def weather(self, args, executor: Player | str):
-        """Set or query the Minecraft-style global precipitation cycle."""
         if not args or args[0].lower() == "query":
-            world = executor.world if isinstance(executor, Player) else self.server.worlds[self.server.main_world_id]
+            world = (
+                executor.world
+                if isinstance(executor, Player)
+                else self.server.worlds[self.server.main_world_id]
+            )
             return f"Weather is {world.weather.value} ({world.weather_tick} ticks remaining)"
         state = args[0].lower()
         if state not in ("clear", "rain"):
@@ -276,9 +274,16 @@ class CommandExecutor:
             try:
                 duration_ticks = max(1, int(float(args[1]) * self.server.rate))
             except (ValueError, OverflowError) as exc:
-                raise ValueError("Weather duration must be a number of seconds") from exc
-        world = executor.world if isinstance(executor, Player) else self.server.worlds[self.server.main_world_id]
+                raise ValueError(
+                    "Weather duration must be a number of seconds"
+                ) from exc
+        world = (
+            executor.world
+            if isinstance(executor, Player)
+            else self.server.worlds[self.server.main_world_id]
+        )
         from resources.server.world_class import Weather
+
         world.set_weather(Weather(state), duration_ticks)
         return f"Weather set to {state}"
 
@@ -288,7 +293,7 @@ class CommandExecutor:
         return f"{world_name} regions: {regions}"
 
     def list_players(self, args, executor: Player | str):
-        return str((self.server.players[0].x,self.server.players[0].y))
+        return str((self.server.players[0].x, self.server.players[0].y))
 
     def teleport(self, args, executor: Player | str):
         """
@@ -308,8 +313,7 @@ class CommandExecutor:
         def try_parse_coords(s1, s2):
             """尝试将两个字符串解析为浮点坐标（支持 ~ 相对坐标）"""
             try:
-                return (self._parse_coord(s1, ref_x),
-                        self._parse_coord(s2, ref_y))
+                return (self._parse_coord(s1, ref_x), self._parse_coord(s2, ref_y))
             except ValueError:
                 return None
 
@@ -317,7 +321,6 @@ class CommandExecutor:
         target_location = None
 
         if len(args) == 1:
-            # /tp <destination>
             if isinstance(executor, str):
                 raise ValueError("Console must specify target entities when using /tp")
             dest_entities = self.target_selector(args[0], executor)
@@ -347,12 +350,13 @@ class CommandExecutor:
                 if coords is None:
                     raise ValueError(f"Invalid arguments: {' '.join(args)}")
                 if isinstance(executor, str):
-                    raise ValueError("Console cannot teleport itself, must specify targets")
+                    raise ValueError(
+                        "Console cannot teleport itself, must specify targets"
+                    )
                 targets = [executor]
                 target_location = coords
 
         elif len(args) == 3:
-            # /tp <targets> <x> <y>
             targets = self.target_selector(args[0], executor)
             if targets is None or len(targets) == 0:
                 raise ValueError(f"No targets matched: {args[0]}")
@@ -392,7 +396,11 @@ class CommandExecutor:
         if nbt:
             block.write_nbt(nbt)
 
-        world = executor.world if isinstance(executor, Player) else self.server.worlds[self.server.main_world_id]
+        world = (
+            executor.world
+            if isinstance(executor, Player)
+            else self.server.worlds[self.server.main_world_id]
+        )
         block.place_at(Location(world, x, y, z))
         return f"Block placed at {block.location}"
 
@@ -416,15 +424,15 @@ class CommandExecutor:
               'oak_log[axis=y]' → ('oak_log', {'axis': 'y'})
         """
         nbt = {}
-        if '[' in block_str and block_str.rstrip().endswith(']'):
-            bracket_start = block_str.index('[')
+        if "[" in block_str and block_str.rstrip().endswith("]"):
+            bracket_start = block_str.index("[")
             block_id = block_str[:bracket_start]
-            nbt_str = block_str[bracket_start + 1:block_str.rindex(']')]
-            for pair in nbt_str.split(','):
+            nbt_str = block_str[bracket_start + 1 : block_str.rindex("]")]
+            for pair in nbt_str.split(","):
                 pair = pair.strip()
-                if '=' not in pair:
+                if "=" not in pair:
                     continue
-                key, value = pair.split('=', 1)
+                key, value = pair.split("=", 1)
                 key = key.strip()
                 value = value.strip()
                 try:
@@ -446,7 +454,7 @@ class CommandExecutor:
         - '100'    → 100.0
         """
         value = value.strip()
-        if value.startswith('~'):
+        if value.startswith("~"):
             if len(value) == 1:
                 return float(reference)
             else:
@@ -473,7 +481,9 @@ class CommandExecutor:
         模式: replace (默认) | destroy | keep | hollow | outline
         """
         if len(args) < 7:
-            raise ValueError("Usage: /fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [mode]")
+            raise ValueError(
+                "Usage: /fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [mode]"
+            )
 
         # ---- 1. 解析坐标（支持 ~ 相对坐标） ----
         ref_x, ref_y, ref_z = self._get_reference_position(executor)
@@ -501,9 +511,11 @@ class CommandExecutor:
         block_id, nbt = self._parse_block_spec(args[6])
 
         # ---- 4. 解析模式 ----
-        mode = args[7].lower() if len(args) > 7 else 'replace'
-        if mode not in ('replace', 'destroy', 'keep', 'hollow', 'outline'):
-            raise ValueError(f"Invalid mode '{mode}'. Valid modes: replace, destroy, keep, hollow, outline")
+        mode = args[7].lower() if len(args) > 7 else "replace"
+        if mode not in ("replace", "destroy", "keep", "hollow", "outline"):
+            raise ValueError(
+                f"Invalid mode '{mode}'. Valid modes: replace, destroy, keep, hollow, outline"
+            )
 
         # ---- 5. 获取世界 ----
         if isinstance(executor, Player):
@@ -544,21 +556,24 @@ class CommandExecutor:
             for y in range(y_min, y_max + 1):
                 for z in range(z_min, z_max + 1):
                     # 模式过滤
-                    if mode == 'keep':
+                    if mode == "keep":
                         existing = world.get_block(x, y, z)
                         if not existing.replaceable:
                             continue
-                    elif mode in ('hollow', 'outline'):
+                    elif mode in ("hollow", "outline"):
                         # 仅填充三维区域的表面（六个面）
                         is_surface = (
-                            x == x_min or x == x_max or
-                            y == y_min or y == y_max or
-                            z == z_min or z == z_max
+                            x == x_min
+                            or x == x_max
+                            or y == y_min
+                            or y == y_max
+                            or z == z_min
+                            or z == z_max
                         )
                         if not is_surface:
                             continue
 
-                    if mode == 'destroy':
+                    if mode == "destroy":
                         old = world.get_block(x, y, z)
                         old.on_break()
 
@@ -593,7 +608,6 @@ class CommandExecutor:
 
         return f"Filled {filled} block(s) with {block_id}"
 
-
     def execute_command(self, executor: Player | str, args: list) -> str:
         cmd = args.pop(0)
         if cmd in self.commands_map:
@@ -602,15 +616,18 @@ class CommandExecutor:
                 return return_info
             except Exception as e:
                 if self.server.commands_error_traceback:
-                    logging.error(f"§cError executing command: {cmd}\n{traceback.format_exc()}")
+                    logging.error(
+                        f"§cError executing command: {cmd}\n{traceback.format_exc()}"
+                    )
                 else:
                     logging.error(f"§cUnknown or invalid command: {cmd}\n{e}")
                 return f"§cUnknown or invalid command: {cmd}\n{e}"
         else:
             return f"§cUnknown or invalid command: {cmd}"
 
-
-    def target_selector(self, input_str: str, executor: Player | str) -> List[Entity] | None:
+    def target_selector(
+        self, input_str: str, executor: Player | str
+    ) -> List[Entity] | None:
         """
         目标选择器
 
@@ -642,8 +659,10 @@ class CommandExecutor:
 
             if isinstance(executor, Entity):
                 # 找到距离执行者最近的玩家
-                nearest = min(self.server.players,
-                            key=lambda p: (p.x - executor.x)**2 + (p.y - executor.y)**2)
+                nearest = min(
+                    self.server.players,
+                    key=lambda p: (p.x - executor.x) ** 2 + (p.y - executor.y) ** 2,
+                )
                 return [nearest]
             else:
                 # 控制台使用时，返回第一个玩家
@@ -652,6 +671,7 @@ class CommandExecutor:
         elif input_str == "@r":
             # 随机玩家
             import random
+
             if not self.server.players:
                 return []
             return [random.choice(self.server.players)]

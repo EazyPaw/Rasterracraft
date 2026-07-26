@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """
 生成器配置数据类模块
 
@@ -18,30 +19,31 @@ WORLDGEN_DIR = Path(__file__).resolve().parents[2] / "data" / "minecraft" / "wor
 # 数据类：树木配置
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class TreeConfig:
     """单个树木种类的配置（不可变数据类）。
 
-    Parameters
-    ----------
-    trunk : str
+    :param trunk: str
         树干方块的 block_id，如 ``"oak_log"``。
-    leaves : str
+    :param leaves: str
         树叶方块的 block_id，如 ``"oak_leaves"``。
-    base_height : int
+    :param base_height: int
         树干基础高度（不含随机增量）。
-    height_rand_a : int
+    :param height_rand_a: int
         随机高度增量 A 的最大值。
-    height_rand_b : int
+    :param height_rand_b: int
         随机高度增量 B 的最大值。
-    radius : int
+    :param radius: int
         树冠半径。
-    shape : str
+    :param shape: str
         树冠形状标识：
         - ``"blob"`` — 球形 / 椭圆形树冠（橡树、桦树等）
         - ``"spruce"`` — 层叠尖顶形（云杉）
         - ``"flat"`` — 扁平形（金合欢）
+
     """
+
     trunk: str
     leaves: str
     base_height: int

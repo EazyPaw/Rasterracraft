@@ -1,4 +1,4 @@
-"""Server-authoritative experience-orb entity."""
+# Commented and arranged by ChatGPT
 
 from __future__ import annotations
 
@@ -60,7 +60,6 @@ class ExperienceOrb(CollectibleEntity):
 
     @classmethod
     def award(cls, world, x: float, y: float, z: int, amount: int):
-        """Spawn a vanilla-style largest-first collection of experience orbs."""
         spawned = []
         for value in split_experience(amount):
             group = random.randrange(40)
@@ -153,7 +152,7 @@ class ExperienceOrb(CollectibleEntity):
         center_y = self.y + self.height * 0.5
         dx, dy = target_x - center_x, target_y - center_y
         distance_sq = dx * dx + dy * dy
-        if distance_sq <= 0.0 or distance_sq >= self.follow_radius ** 2:
+        if distance_sq <= 0.0 or distance_sq >= self.follow_radius**2:
             return
         distance = math.sqrt(distance_sq)
         strength = (1.0 - distance / self.follow_radius) ** 2 * 0.1
@@ -203,7 +202,6 @@ class ExperienceOrb(CollectibleEntity):
         return []
 
     def die(self) -> None:
-        """Damaged orbs disappear without living-entity death effects."""
         remover = getattr(self.world, "remove_entity", None)
         if callable(remover):
             remover(self)

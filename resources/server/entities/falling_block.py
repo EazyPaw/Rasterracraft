@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import math
 
 from resources.client.entity_skeleton import EntitySkeleton
@@ -11,6 +12,7 @@ from resources.server.utils import client_method
 @register_entity(summonable=False)
 class FallingBlock(Entity):
     entity_id = "falling_block"
+
     def __init__(self, x, y, z, world, block: blocks.Block):
         super().__init__(x, y, world)
         self.entity_id = "falling_block"
@@ -71,9 +73,8 @@ class FallingBlock(Entity):
 
 
 class FallingBlockSkeleton(EntitySkeleton):
-
     @client_method
-    def __init__(self, entity, client = None):
+    def __init__(self, entity, client=None):
         super().__init__(client, "blocks.sand", entity)
         self._visual_center = (0.5, 0.5)
 

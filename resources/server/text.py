@@ -1,5 +1,7 @@
+# Commented and arranged by ChatGPT
 from enum import Enum
 import math
+
 
 class TextColor(Enum):
     # 标准 16 色
@@ -40,12 +42,13 @@ def _is_rgb_color(value) -> bool:
     return (
         isinstance(value, (tuple, list))
         and len(value) == 3
-        and all(isinstance(component, int) and 0 <= component <= 255 for component in value)
+        and all(
+            isinstance(component, int) and 0 <= component <= 255 for component in value
+        )
     )
 
 
 def parse_solid_text_color(value) -> tuple[int, int, int]:
-    """Resolve a named, RGB, integer, or string hex color to RGB."""
     if isinstance(value, TextColor):
         return value.value
     if _is_rgb_color(value):
@@ -73,7 +76,6 @@ def parse_solid_text_color(value) -> tuple[int, int, int]:
 
 
 def is_gradient_text_color(value) -> bool:
-    """Return whether *value* is a tuple of two or more valid color stops."""
     if not isinstance(value, tuple) or _is_rgb_color(value) or len(value) < 2:
         return False
     try:
@@ -85,14 +87,12 @@ def is_gradient_text_color(value) -> bool:
 
 
 def normalize_text_color(value):
-    """Return either one RGB tuple or a tuple of RGB gradient stops."""
     if is_gradient_text_color(value):
         return tuple(parse_solid_text_color(stop) for stop in value)
     return parse_solid_text_color(value)
 
 
 def gradient_text_color_at(stops, progress: float) -> tuple[int, int, int]:
-    """Interpolate through all gradient stops in their declared order."""
     normalized = normalize_text_color(stops)
     if _is_rgb_color(normalized):
         return normalized
@@ -103,13 +103,11 @@ def gradient_text_color_at(stops, progress: float) -> tuple[int, int, int]:
     left = normalized[left_index]
     right = normalized[left_index + 1]
     return tuple(
-        round(start + (end - start) * local_progress)
-        for start, end in zip(left, right)
+        round(start + (end - start) * local_progress) for start, end in zip(left, right)
     )
 
 
 def darken_text_color(value, strength: float):
-    """Apply the same shadow multiplier to a solid color or every stop."""
     normalized = normalize_text_color(value)
     strength = max(0.0, float(strength))
 
@@ -129,9 +127,8 @@ def _serialize_color_stop(value) -> str:
 
 
 def serialize_text_color(value):
-    """Convert a color specification to a msgpack-safe representation."""
     if isinstance(value, TextColor):
-        return value.name  # Preserve the existing wire format for named colors.
+        return value.name
     if is_gradient_text_color(value):
         return {"gradient": [_serialize_color_stop(stop) for stop in value]}
     return _serialize_color_stop(value)
@@ -147,7 +144,6 @@ def _deserialize_color_stop(value):
 
 
 def deserialize_text_color(value):
-    """Read both the legacy enum-name format and custom color formats."""
     if isinstance(value, dict) and "gradient" in value:
         stops = value["gradient"]
         if not isinstance(stops, (tuple, list)) or len(stops) < 2:
@@ -155,16 +151,8 @@ def deserialize_text_color(value):
         return tuple(_deserialize_color_stop(stop) for stop in stops)
     return _deserialize_color_stop(value)
 
+
 class Text:
-    """Styled text with named, RGB/hex, or ordered gradient colors.
-
-    Examples::
-
-        Text("custom", 0x32E6A1)
-        Text("custom", "#32E6A1")
-        Text("gradient", (TextColor.AQUA, "#FF40C8", 0xFFAA00))
-    """
-
     def __init__(
         self,
         text: str | list,
@@ -182,7 +170,13 @@ class Text:
             return Text(self.text + other.text)
         elif isinstance(other, str):
             text_list = self.text.copy()
-            text_list.append({"text": other, "color": self.text[-1]["color"], "bold": self.text[-1].get("bold", False)})
+            text_list.append(
+                {
+                    "text": other,
+                    "color": self.text[-1]["color"],
+                    "bold": self.text[-1].get("bold", False),
+                }
+            )
             return Text(text_list)
         raise TypeError
 
@@ -190,7 +184,13 @@ class Text:
         if isinstance(other, Text):
             self.text.extend(other.text)
         elif isinstance(other, str):
-            self.text.append({"text": other, "color": self.text[-1]["color"], "bold": self.text[-1].get("bold", False)})
+            self.text.append(
+                {
+                    "text": other,
+                    "color": self.text[-1]["color"],
+                    "bold": self.text[-1].get("bold", False),
+                }
+            )
             return
         else:
             raise TypeError
@@ -199,23 +199,30 @@ class Text:
         if isinstance(other, Text):
             self.text.extend(other.text)
         elif isinstance(other, str):
-            self.text.append({"text": other, "color": self.text[-1]["color"], "bold": self.text[-1].get("bold", False)})
+            self.text.append(
+                {
+                    "text": other,
+                    "color": self.text[-1]["color"],
+                    "bold": self.text[-1].get("bold", False),
+                }
+            )
         return self
 
     def join(self, *args, delimiter=""):
         """拼接多个 Text 对象，用 delimiter 分隔。
 
-        Parameters
-        ----------
-        *args : Text
-            要拼接的 Text 对象。
-        delimiter : str
+                *args : Text
+                    要拼接的 Text 对象。
+        :param delimiter: str
             分隔符字符串（放在每两个 Text 之间）。
+
         """
         result = []
         for i, t in enumerate(args):
             if i > 0 and delimiter:
-                result.append({"text": delimiter, "color": TextColor.WHITE, "bold": False})
+                result.append(
+                    {"text": delimiter, "color": TextColor.WHITE, "bold": False}
+                )
             if isinstance(t, Text):
                 result.extend(t.text)
             elif isinstance(t, str):
@@ -246,5 +253,5 @@ class Text:
         for seg in data.get("text", []):
             color = deserialize_text_color(seg.get("color", "WHITE"))
             bold = seg.get("bold", False)
-            segments.append({"text": seg["text"], "color": color, 'bold': bold})
+            segments.append({"text": seg["text"], "color": color, "bold": bold})
         return cls(segments)

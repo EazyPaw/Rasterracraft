@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """Minecraft 风格天气的客户端渲染与音效模块。
 
 本模块定义 WeatherMixin 类，为 Render 主渲染器提供：
@@ -59,7 +60,9 @@ class WeatherMixin:
     # 天气纹理缓存：键 = (种类, 尺寸, 是否翻转)，值 = 缩放后的纹理 Surface
     _weather_texture_cache: dict[tuple[str, int, bool], pygame.Surface]
     # 天气带光照纹理缓存：键 = (种类, 尺寸, 翻转, 染色, 透明度)，值 = 处理后的 Surface
-    _weather_lit_cache: dict[tuple[str, int, bool, tuple[int, int, int], int], pygame.Surface]
+    _weather_lit_cache: dict[
+        tuple[str, int, bool, tuple[int, int, int], int], pygame.Surface
+    ]
     # 云层几何 Surface 缓存：键 = (屏幕宽, 屏幕高, 缩放, 层级, 透明度)
     _cloud_surface_cache: dict[tuple, pygame.Surface]
     # 云层颜色缓存：在保留几何缓存的同时支持逐帧平滑染色
@@ -99,11 +102,15 @@ class WeatherMixin:
             """将世界坐标转换为屏幕坐标（由 Render 提供）。"""
             ...
 
-        def get_world_light_tint(self, world_x: float, world_y: float) -> tuple[int, int, int]:
+        def get_world_light_tint(
+            self, world_x: float, world_y: float
+        ) -> tuple[int, int, int]:
             """获取指定世界位置的光照染色颜色（由 Render 提供）。"""
             ...
 
-        def get_tinted_surface(self, surface: pygame.Surface, tint: tuple[int, int, int]) -> pygame.Surface:
+        def get_tinted_surface(
+            self, surface: pygame.Surface, tint: tuple[int, int, int]
+        ) -> pygame.Surface:
             """对 Surface 应用颜色染色（由 Render 提供）。"""
             ...
 
@@ -185,7 +192,9 @@ class WeatherMixin:
         self._weather_last_update = now
 
         # 根据服务端天气状态确定目标强度
-        target = 1.0 if getattr(self.client_world, "weather", "clear") == "rain" else 0.0
+        target = (
+            1.0 if getattr(self.client_world, "weather", "clear") == "rain" else 0.0
+        )
 
         # 按过渡时间平滑逼近目标值
         step = elapsed / self.WEATHER_FADE_SECONDS
@@ -246,18 +255,28 @@ class WeatherMixin:
                 continue
 
             # z=0 是 PyCraft2D 的前景层，z=1 是后景层
-            #（仅透过透明前景方块可见）
-            precipitation_height = self.client_world.get_precipitation_height(world_x, 0)
+            # （仅透过透明前景方块可见）
+            precipitation_height = self.client_world.get_precipitation_height(
+                world_x, 0
+            )
             if precipitation_height is None:
                 continue
 
             # 世界坐标 → 屏幕 X 坐标
-            screen_x = int((world_x - self.camera.x - 0.5) * block_size + self.SCREEN_WIDTH / 2)
+            screen_x = int(
+                (world_x - self.camera.x - 0.5) * block_size + self.SCREEN_WIDTH / 2
+            )
             # 降水屋顶的屏幕 Y 坐标（雨滴到达此高度后停止下落）
-            roof_screen_y = int(self.trans_world_location((world_x, precipitation_height))[1])
+            roof_screen_y = int(
+                self.trans_world_location((world_x, precipitation_height))[1]
+            )
             # 可见区域底部：屋顶之上、屏幕范围之内
             visible_bottom = max(0, min(self.SCREEN_HEIGHT, roof_screen_y))
-            if visible_bottom <= 0 or screen_x >= self.SCREEN_WIDTH or screen_x + block_size <= 0:
+            if (
+                visible_bottom <= 0
+                or screen_x >= self.SCREEN_WIDTH
+                or screen_x + block_size <= 0
+            ):
                 continue
 
             # 交替列翻转纹理，增加视觉多样性
@@ -275,12 +294,16 @@ class WeatherMixin:
             # 相机垂直移动时，显示的是同一降水场的不同部分，
             # 而不是屏幕空间覆盖层的平移。
             fall_speed = 0.25 if precipitation == "rain" else 0.055
-            scroll = (self.day_time * fall_speed + abs(world_x * 17) * 0.07) % tile_height_world
+            scroll = (
+                self.day_time * fall_speed + abs(world_x * 17) * 0.07
+            ) % tile_height_world
 
             # 世界 Y 向上增长。从 tile 锚点减去滚动量使得纹理在屏幕上
             # 向下移动（而非向上飞），同时保持场域锚定在绝对高度。
             tile_top_world = (
-                math.floor((top_world_y + scroll) / tile_height_world) * tile_height_world - scroll
+                math.floor((top_world_y + scroll) / tile_height_world)
+                * tile_height_world
+                - scroll
             )
 
             # 从屏幕顶部向下逐层绘制天气纹理，直到到达屋顶
@@ -289,7 +312,9 @@ class WeatherMixin:
                 if tile_y >= visible_bottom:
                     break
                 # 获取当前世界位置的光照染色
-                light_tint = self.get_world_light_tint(world_x, tile_top_world - tile_height_world * 0.5)
+                light_tint = self.get_world_light_tint(
+                    world_x, tile_top_world - tile_height_world * 0.5
+                )
                 # 获取（或从缓存创建）带光照的天气纹理
                 texture = self._get_weather_surface(
                     precipitation,
@@ -311,19 +336,20 @@ class WeatherMixin:
     # 天气纹理管理
     # =========================================================================
 
-    def _get_weather_texture(self, kind: str, size: int, flipped: bool) -> pygame.Surface:
+    def _get_weather_texture(
+        self, kind: str, size: int, flipped: bool
+    ) -> pygame.Surface:
         """获取缩放并翻转后的天气纹理（带缓存）。
 
-        参数:
-            kind: 降水类型（"rain" 或 "snow"）
-            size: 目标宽度（像素）
-            flipped: 是否水平翻转
+        :param kind: 降水类型（"rain" 或 "snow"）
+        :param size: 目标宽度（像素）
+        :param flipped: 是否水平翻转
 
-        返回:
-            处理后的纹理 Surface
+        :return: 处理后的纹理 Surface
 
-        缓存策略：
+        :return: 缓存策略：
             以 (kind, size, flipped) 为键缓存纹理，避免每帧重复缩放。
+
         """
         key = (kind, size, flipped)
         cached = self._weather_texture_cache.get(key)
@@ -350,20 +376,19 @@ class WeatherMixin:
     ) -> pygame.Surface:
         """获取带光照染色和透明度处理的天气纹理（带缓存）。
 
-        参数:
-            kind: 降水类型（"rain" 或 "snow"）
-            size: 目标宽度（像素）
-            flipped: 是否水平翻转
-            tint: RGB 染色颜色
-            alpha: 透明度（0-255）
+        :param kind: 降水类型（"rain" 或 "snow"）
+        :param size: 目标宽度（像素）
+        :param flipped: 是否水平翻转
+        :param tint: RGB 染色颜色
+        :param alpha: 透明度（0-255）
 
-        返回:
-            处理后的纹理 Surface
+        :return: 处理后的纹理 Surface
 
-        缓存策略：
+        :return: 缓存策略：
             以 (kind, size, flipped, tint, alpha) 为键。
             颜色和透明度按 8 像素步长量化以减少缓存条目数。
             缓存上限 384 条，超出后按 FIFO 淘汰（弹出一个最早条目）。
+
         """
         # 按 8 像素步长量化颜色和透明度，大幅减少缓存条目数
         tint = tuple(max(0, min(255, int(channel // 8 * 8))) for channel in tint)
@@ -394,20 +419,23 @@ class WeatherMixin:
     def _spawn_rain_impacts(self, x_min: int, x_max: int, ticks: int) -> None:
         """生成稀疏的雨滴溅落粒子和位置相关的环境音效。
 
-        仅在降雨天气（weather == "rain"）且强度 > 0.05 时生效。
-        每 3 ticks 执行一次（降低性能开销）。
+                仅在降雨天气（weather == "rain"）且强度 > 0.05 时生效。
+                每 3 ticks 执行一次（降低性能开销）。
 
-        对每个可见世界列和每个渲染层（z=0, z=1）：
-          - 在降水到达高度处生成 "minecraft:splash" 粒子
-          - 选取最近的可闻溅落点播放立体衰减雨声
+                对每个可见世界列和每个渲染层（z=0, z=1）：
+                  - 在降水到达高度处生成 "minecraft:splash" 粒子
+                  - 选取最近的可闻溅落点播放立体衰减雨声
 
-        参数:
-            x_min: 屏幕可见世界 X 范围下限
-            x_max: 屏幕可见世界 X 范围上限
-            ticks: 当前客户端 tick 计数
+        :param x_min: 屏幕可见世界 X 范围下限
+        :param x_max: 屏幕可见世界 X 范围上限
+        :param ticks: 当前客户端 tick 计数
+
         """
         # 仅在雨天且有一定强度时生效
-        if self.weather_intensity <= 0.05 or getattr(self.client_world, "weather", "clear") != "rain":
+        if (
+            self.weather_intensity <= 0.05
+            or getattr(self.client_world, "weather", "clear") != "rain"
+        ):
             return
         # 每 3 ticks 执行一次，且同 tick 不重复
         if ticks == self._last_impact_tick or ticks % 3:
@@ -438,7 +466,10 @@ class WeatherMixin:
 
                 # 检查溅落点是否在屏幕范围内
                 screen_y = self.trans_world_location((world_x, height))[1]
-                if screen_y < -self.block_size or screen_y > self.SCREEN_HEIGHT + self.block_size:
+                if (
+                    screen_y < -self.block_size
+                    or screen_y > self.SCREEN_HEIGHT + self.block_size
+                ):
                     continue
 
                 # 生成溅落粒子
@@ -473,7 +504,8 @@ class WeatherMixin:
 
                 # 计算溅落点到玩家/相机的距离（用于最近点选取）
                 distance = math.hypot(
-                    (player.x if player is not None else self.camera.x) - (world_x + 0.5),
+                    (player.x if player is not None else self.camera.x)
+                    - (world_x + 0.5),
                     (player.y if player is not None else self.camera.y) - height,
                 )
                 if sound_candidate is None or distance < sound_candidate[0]:
@@ -498,12 +530,12 @@ class WeatherMixin:
                 if player is not None:
                     x, y, z = player.x, player.y, getattr(player, "z", 0)
                 self.client_world.play_sound(
-                    "ambient.weather.rain", x, y, z,
-                    # Rain is ambient background audio; keep it quiet and stable.
+                    "ambient.weather.rain",
+                    x,
+                    y,
+                    z,
                     volume=min(0.22, self.weather_intensity * 0.22),
                 )
-
-
 
     # =========================================================================
     # 云层渲染
@@ -512,14 +544,14 @@ class WeatherMixin:
     def draw_clouds(self, sky_state: dict) -> None:
         """绘制多层缓存云层，带相机相对视差效果。
 
-        三层云分别以不同的水平/垂直视差因子和速度移动，
-        产生深度感。垂直位移使用相机的帧间位移累计，不受世界绝对高度影响。
+                三层云分别以不同的水平/垂直视差因子和速度移动，
+                产生深度感。垂直位移使用相机的帧间位移累计，不受世界绝对高度影响。
 
-        晴天云以天空下半部颜色为基础，日出/日落时跟階sky.py的暖色过渡，
-        正午略微提亮向白色靠拢，阴天则向灰色过渡。
+                晴天云以天空下半部颜色为基础，日出/日落时跟階sky.py的暖色过渡，
+                正午略微提亮向白色靠拢，阴天则向灰色过渡。
 
-        参数:
-            sky_state: 天空状态字典，包含 "sky_light_weight" 等键
+        :param sky_state: 天空状态字典，包含 "sky_light_weight" 等键
+
         """
         intensity = max(0.0, min(1.0, self.weather_intensity))
         # 天空亮度权重（日夜过渡），下限 0.25 防止云完全变黑
@@ -531,7 +563,9 @@ class WeatherMixin:
             clear_color = cyclic_lerp_color(lower_keyframes, float(self.day_time))
         else:
             # 兼容单独测试 WeatherMixin 的调用者。
-            clear_color = tuple(int(channel) for channel in sky_state.get("lower", (242, 246, 255)))
+            clear_color = tuple(
+                int(channel) for channel in sky_state.get("lower", (242, 246, 255))
+            )
 
         # sky.py 的 twilight_color 就是日出/日落的暖色关键帧。
         # 用同一强度染入云色，使云与天空在日出日落时保持一致。
@@ -582,7 +616,9 @@ class WeatherMixin:
             shape_key = (self.SCREEN_WIDTH, self.SCREEN_HEIGHT, scale, index, alpha)
             shape = self._cloud_surface_cache.get(shape_key)
             if shape is None:
-                shape = self._build_cloud_surface(travel, scale, (255, 255, 255), alpha, index)
+                shape = self._build_cloud_surface(
+                    travel, scale, (255, 255, 255), alpha, index
+                )
                 self._cloud_surface_cache[shape_key] = shape
 
             tint_key = (*shape_key, color_key)
@@ -599,10 +635,14 @@ class WeatherMixin:
             # 云场偏移随玩家/相机移动而改变，每层使用不同的视差因子，
             # 产生层次分明的视差效果而非单一覆盖层平移。
             # 微小的漂移速度使天空保持生动但不喧宾夺主。
-            offset = (self.camera.x * self.block_size * parallax_x - now * speed) % travel
+            offset = (
+                self.camera.x * self.block_size * parallax_x - now * speed
+            ) % travel
             # 相机向上移动时，世界屏幕坐标向下移动；云层同向位移，
             # 但各层按不同比例滚动，从而产生垂直深度感。
-            raw_y = self.SCREEN_HEIGHT * y_ratio + self._cloud_vertical_scroll * parallax_y
+            raw_y = (
+                self.SCREEN_HEIGHT * y_ratio + self._cloud_vertical_scroll * parallax_y
+            )
             # 在整个云面离开屏幕后无缝回到另一侧，避免长距离攀爬时云层永久消失。
             cloud_height = 64 * scale
             vertical_travel = self.SCREEN_HEIGHT + cloud_height
@@ -622,19 +662,18 @@ class WeatherMixin:
     ) -> pygame.Surface:
         """构建单层云的 Surface（静态方法）。
 
-        使用确定性的六云布局（与原版天气通道一致）。
-        三层分布确保总体云密度不变，仅每层的视差/透明度不同，
-        因此云的轮廓保持一致，而非随机的噪声团块。
+                使用确定性的六云布局（与原版天气通道一致）。
+                三层分布确保总体云密度不变，仅每层的视差/透明度不同，
+                因此云的轮廓保持一致，而非随机的噪声团块。
 
-        参数:
-            travel: 云条带总长度（像素）
-            scale: 缩放因子
-            color: RGB 颜色
-            alpha: 透明度（0-255）
-            layer: 当前层级（0/1/2），决定分配哪些云块到此层
+        :param travel: 云条带总长度（像素）
+        :param scale: 缩放因子
+        :param color: RGB 颜色
+        :param alpha: 透明度（0-255）
+        :param layer: 当前层级（0/1/2），决定分配哪些云块到此层
 
-        返回:
-            带透明通道的云 Surface
+        :return: 带透明通道的云 Surface
+
         """
         surface = pygame.Surface((travel, 64 * scale), pygame.SRCALPHA)
 

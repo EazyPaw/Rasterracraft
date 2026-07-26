@@ -1,8 +1,14 @@
+# Commented and arranged by ChatGPT
 import math
 import random
 
 from resources.client.entity_skeleton import BodyPart, Pose
-from resources.server.entities.animal import Animal, AnimalSkeleton, crop_rotated_body, crop_x_side
+from resources.server.entities.animal import (
+    Animal,
+    AnimalSkeleton,
+    crop_rotated_body,
+    crop_x_side,
+)
 from resources.server.entities.item import Item
 from resources.server.entity_AI import ChickenAI
 from resources.server.entity_registry import register_entity
@@ -38,20 +44,22 @@ class Chicken(Animal):
         self.finish_animal_init(ChickenAI)
 
     def update_ai(self) -> None:
-        # Vanilla chickens repeatedly damp downward motion while airborne.
+
         if not self.on_ground and self.motion.y < 0.0:
             self.motion.y *= 0.6
         super().update_ai()
         if not self.is_baby:
             self.egg_time -= 1
             if self.egg_time <= 0:
-                self.world.spawn_entity(Item(
-                    self.x + self.width * 0.5,
-                    self.y + 0.2,
-                    self.world,
-                    ItemStack(EGG(), 1),
-                    self.z,
-                ))
+                self.world.spawn_entity(
+                    Item(
+                        self.x + self.width * 0.5,
+                        self.y + 0.2,
+                        self.world,
+                        ItemStack(EGG(), 1),
+                        self.z,
+                    )
+                )
                 server = getattr(self.world, "server", None)
                 if server is not None and not self.silent:
                     server.broadcast_sound(self.sounds["egg"], self.x, self.y, self.z)
@@ -104,13 +112,21 @@ class ChickenSkeleton(AnimalSkeleton):
             "wattle": (0.7125, 0.6275),
         }
         self.body = {
-            "back_leg": BodyPart("back_leg", leg, self._base_anchors["back_leg"], (1.5, 0), layer=0),
+            "back_leg": BodyPart(
+                "back_leg", leg, self._base_anchors["back_leg"], (1.5, 0), layer=0
+            ),
             "body": BodyPart("body", body, self._base_anchors["body"], (0, 0), layer=1),
-            "front_leg": BodyPart("front_leg", leg, self._base_anchors["front_leg"], (1.5, 0), layer=2),
+            "front_leg": BodyPart(
+                "front_leg", leg, self._base_anchors["front_leg"], (1.5, 0), layer=2
+            ),
             "wing": BodyPart("wing", wing, self._base_anchors["wing"], (1, 1), layer=3),
-            "head": BodyPart("head", head, self._base_anchors["head"], (1.5, 3), layer=4),
+            "head": BodyPart(
+                "head", head, self._base_anchors["head"], (1.5, 3), layer=4
+            ),
             "beak": BodyPart("beak", beak, self._base_anchors["beak"], (1, 1), layer=5),
-            "wattle": BodyPart("wattle", wattle, self._base_anchors["wattle"], (1, 1), layer=5),
+            "wattle": BodyPart(
+                "wattle", wattle, self._base_anchors["wattle"], (1, 1), layer=5
+            ),
         }
         self._visual_center = (0.4, 0.35)
         self.conv_size()
@@ -123,19 +139,47 @@ class ChickenSkeleton(AnimalSkeleton):
         wing_angle = math.sin(self.walk_time * 1.8) * 28.0 * flap
         for name in ("body", "head", "beak", "wattle"):
             pivot = self.body[name].target_pivot
-            angle = float(getattr(self.entity, "look_angle", 0.0)) * 0.25 if name == "head" else 0.0
-            self.body[name].set_pose(Pose(
-                self.pose_anchor(name, self._base_anchors[name], flip), pivot, angle, True, flip
-            ))
-        self.body["back_leg"].set_pose(Pose(
-            self.pose_anchor("back_leg", self._base_anchors["back_leg"], flip), (1.5, 0), swing, True, flip
-        ))
-        self.body["front_leg"].set_pose(Pose(
-            self.pose_anchor("front_leg", self._base_anchors["front_leg"], flip), (1.5, 0), -swing, True, flip
-        ))
-        self.body["wing"].set_pose(Pose(
-            self.pose_anchor("wing", self._base_anchors["wing"], flip), (1, 1), wing_angle, True, flip
-        ))
+            angle = (
+                float(getattr(self.entity, "look_angle", 0.0)) * 0.25
+                if name == "head"
+                else 0.0
+            )
+            self.body[name].set_pose(
+                Pose(
+                    self.pose_anchor(name, self._base_anchors[name], flip),
+                    pivot,
+                    angle,
+                    True,
+                    flip,
+                )
+            )
+        self.body["back_leg"].set_pose(
+            Pose(
+                self.pose_anchor("back_leg", self._base_anchors["back_leg"], flip),
+                (1.5, 0),
+                swing,
+                True,
+                flip,
+            )
+        )
+        self.body["front_leg"].set_pose(
+            Pose(
+                self.pose_anchor("front_leg", self._base_anchors["front_leg"], flip),
+                (1.5, 0),
+                -swing,
+                True,
+                flip,
+            )
+        )
+        self.body["wing"].set_pose(
+            Pose(
+                self.pose_anchor("wing", self._base_anchors["wing"], flip),
+                (1, 1),
+                wing_angle,
+                True,
+                flip,
+            )
+        )
 
     def draw(self):
         old_size = self.size

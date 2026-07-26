@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """
 主渲染器
 ========
@@ -30,7 +31,12 @@ from resources.server.text import (
 
 from .block import BlockRenderMixin
 from .constants import BLOCK_TINT_COLOR_STEP
-from .render_utils import cyclic_lerp_color, lerp_color, quantize_color, draw_dashed_rect
+from .render_utils import (
+    cyclic_lerp_color,
+    lerp_color,
+    quantize_color,
+    draw_dashed_rect,
+)
 from .sky import SkyMixin
 from .weather import WeatherMixin
 
@@ -50,11 +56,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     - 方块悬停高亮
     """
 
-    def __init__(self, client: 'Client'):
+    def __init__(self, client: "Client"):
         """初始化渲染器。
 
-        参数:
-            client: Client 主实例引用
+        :param client: Client 主实例引用
+
         """
         # SDL2 默认隐藏原生输入法候选窗；必须在视频子系统初始化前启用。
         os.environ["SDL_IME_SHOW_UI"] = "1"
@@ -143,7 +149,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.MAX_GRADIENT_CACHE: int = 256
         self.lit_tex_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_LIT_CACHE: int = 768
-        self.corner_color_cache: OrderedDict[tuple, tuple[int, int, int]] = OrderedDict()
+        self.corner_color_cache: OrderedDict[tuple, tuple[int, int, int]] = (
+            OrderedDict()
+        )
         self.MAX_CORNER_COLOR_CACHE: int = 4096
         self.celestial_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_CELESTIAL_CACHE: int = 128
@@ -161,9 +169,13 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.MAX_TINTED_SURFACE_CACHE: int = 768
         self.block_section_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_BLOCK_SECTION_CACHE: int = 192
-        self.block_section_surface_pool: dict[tuple[int, int], list[pygame.Surface]] = {}
+        self.block_section_surface_pool: dict[
+            tuple[int, int], list[pygame.Surface]
+        ] = {}
         self.MAX_BLOCK_SECTION_SURFACE_POOL: int = 64
-        self.block_section_animation_cache: OrderedDict[tuple, tuple[str, ...]] = OrderedDict()
+        self.block_section_animation_cache: OrderedDict[tuple, tuple[str, ...]] = (
+            OrderedDict()
+        )
         self.MAX_BLOCK_SECTION_ANIMATION_CACHE: int = 256
         self.block_section_direct_cache: OrderedDict[tuple, bool] = OrderedDict()
         self.MAX_BLOCK_SECTION_DIRECT_CACHE: int = 256
@@ -182,13 +194,12 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def transform_pos(self, pos: tuple[float, float]) -> tuple[float, float]:
         """将相对坐标 [0, 100] 转换为绝对屏幕坐标。
 
-        用于处理窗口大小变化时的 GUI 自适应布局。
+                用于处理窗口大小变化时的 GUI 自适应布局。
 
-        参数:
-            pos: 相对坐标 (x, y)，范围 [0, 100]
+        :param pos: 相对坐标 (x, y)，范围 [0, 100]
 
-        返回:
-            绝对像素坐标
+        :return: 绝对像素坐标
+
         """
         x = pos[0] / 100 * self.SCREEN_WIDTH
         y = pos[1] / 100 * self.SCREEN_HEIGHT
@@ -197,34 +208,38 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def trans_world_location(self, pos: tuple[float, float]) -> tuple[float, float]:
         """将世界坐标转换为屏幕坐标。
 
-        坐标变换公式（等轴测正交投影）：
-          screen_x = (world_x - camera_x - 0.5) * block_size + screen_width / 2
-          screen_y = screen_height - ((world_y - camera_y + 0.5) * block_size + screen_height / 2)
+                坐标变换公式（等轴测正交投影）：
+                  screen_x = (world_x - camera_x - 0.5) * block_size + screen_width / 2
+                  screen_y = screen_height - ((world_y - camera_y + 0.5) * block_size + screen_height / 2)
 
-        参数:
-            pos: 世界坐标 (world_x, world_y)
+        :param pos: 世界坐标 (world_x, world_y)
 
-        返回:
-            屏幕像素坐标 (screen_x, screen_y)
+        :return: 屏幕像素坐标 (screen_x, screen_y)
+
         """
         world_x, world_y = pos
-        screen_x = (world_x - self.camera.x - 0.5) * self.block_size + self.SCREEN_WIDTH // 2
-        screen_y = self.SCREEN_HEIGHT - ((world_y - self.camera.y + 0.5) * self.block_size + self.SCREEN_HEIGHT // 2)
+        screen_x = (
+            world_x - self.camera.x - 0.5
+        ) * self.block_size + self.SCREEN_WIDTH // 2
+        screen_y = self.SCREEN_HEIGHT - (
+            (world_y - self.camera.y + 0.5) * self.block_size + self.SCREEN_HEIGHT // 2
+        )
         return screen_x, screen_y
 
     # ===================== Surface 工具方法（静态） =====================
 
     @staticmethod
-    def create_surface(size: tuple[int, int], *, alpha: bool = False, convert: bool = False) -> pygame.Surface:
+    def create_surface(
+        size: tuple[int, int], *, alpha: bool = False, convert: bool = False
+    ) -> pygame.Surface:
         """创建 pygame Surface 的便捷方法。
 
-        参数:
-            size: 尺寸 (width, height)
-            alpha: 是否启用 Alpha 通道
-            convert: 是否立即转换像素格式（提升 blit 性能）
+        :param size: 尺寸 (width, height)
+        :param alpha: 是否启用 Alpha 通道
+        :param convert: 是否立即转换像素格式（提升 blit 性能）
 
-        返回:
-            创建的 Surface
+        :return: 创建的 Surface
+
         """
         surface = pygame.Surface(size, pygame.SRCALPHA if alpha else 0)
         if convert:
@@ -232,32 +247,46 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         return surface
 
     @staticmethod
-    def scale_surface(surface: pygame.Surface, size: tuple[int, int], *, smooth: bool = False) -> pygame.Surface:
+    def scale_surface(
+        surface: pygame.Surface, size: tuple[int, int], *, smooth: bool = False
+    ) -> pygame.Surface:
         """缩放 Surface 的便捷方法。
 
-        参数:
-            surface: 原始 Surface
-            size: 目标尺寸
-            smooth: 是否使用平滑缩放（smoothscale）
+        :param surface: 原始 Surface
+        :param size: 目标尺寸
+        :param smooth: 是否使用平滑缩放（smoothscale）
 
-        返回:
-            缩放后的 Surface
+        :return: 缩放后的 Surface
+
         """
         if smooth:
             return pygame.transform.smoothscale(surface, size)
         return pygame.transform.scale(surface, size)
 
     @staticmethod
-    def fill_surface(surface: pygame.Surface, color: tuple[int, ...], rect=None, special_flags: int = 0) -> None:
+    def fill_surface(
+        surface: pygame.Surface,
+        color: tuple[int, ...],
+        rect=None,
+        special_flags: int = 0,
+    ) -> None:
         """填充 Surface 的便捷包装。"""
         surface.fill(color, rect, special_flags)
 
     @staticmethod
-    def blit_to(target: pygame.Surface, source: pygame.Surface, dest, area=None, special_flags: int = 0) -> None:
+    def blit_to(
+        target: pygame.Surface,
+        source: pygame.Surface,
+        dest,
+        area=None,
+        special_flags: int = 0,
+    ) -> None:
         """blit 操作的便捷包装。"""
         target.blit(source, dest, area, special_flags)
 
-    def get_world_light_tint(self, world_x: float, world_y: float) -> tuple[int, int, int]:
+    def get_world_light_tint(
+        self, world_x: float, world_y: float
+    ) -> tuple[int, int, int]:
         block_x = _math.floor(world_x)
         block_y = _math.floor(world_y)
         chunk_rx = block_x // 16
@@ -271,7 +300,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             return (255, 255, 255)
 
         sky_state = self.current_sky_state or self.get_sky_state()
-        sky_level = float(sky_map[local_x, block_y]) / 15.0 * sky_state["sky_light_weight"]
+        sky_level = (
+            float(sky_map[local_x, block_y]) / 15.0 * sky_state["sky_light_weight"]
+        )
         block_level = float(block_map[local_x, block_y]) / 15.0
         brightness = min(1.0, sky_level + block_level)
         if brightness <= 0.0:
@@ -289,7 +320,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         sky_ratio = sky_level / total if total > 0.001 else 0.5
         return self._compute_corner_color(brightness, sky_ratio, sky_color)
 
-    def get_tinted_surface(self, surface: pygame.Surface, tint: tuple[int, int, int]) -> pygame.Surface:
+    def get_tinted_surface(
+        self, surface: pygame.Surface, tint: tuple[int, int, int]
+    ) -> pygame.Surface:
         if tint == (255, 255, 255):
             return surface
         key = (surface, tint)
@@ -317,11 +350,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     ) -> None:
         """绘制矩形的便捷方法。
 
-        参数:
-            color: 矩形颜色
-            rect: 矩形区域
-            width: 线宽（0 = 填充）
-            surface: 目标 Surface（默认屏幕）
+        :param color: 矩形颜色
+        :param rect: 矩形区域
+        :param width: 线宽（0 = 填充）
+        :param surface: 目标 Surface（默认屏幕）
+
         """
         pygame.draw.rect(surface or self.screen, color, rect, width)
 
@@ -336,12 +369,12 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     ) -> None:
         """绘制直线的便捷方法。
 
-        参数:
-            color: 线条颜色
-            start_pos: 起点坐标
-            end_pos: 终点坐标
-            width: 线宽
-            surface: 目标 Surface（默认屏幕）
+        :param color: 线条颜色
+        :param start_pos: 起点坐标
+        :param end_pos: 终点坐标
+        :param width: 线宽
+        :param surface: 目标 Surface（默认屏幕）
+
         """
         pygame.draw.line(surface or self.screen, color, start_pos, end_pos, width)
 
@@ -405,17 +438,15 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             try:
                 if self.client.in_game and self.client.client_player is not None:
                     # ---- 游戏内渲染流程 ----
-                    self.draw_sky()                          # 天空背景（来自 SkyMixin）
+                    self.draw_sky()  # 天空背景（来自 SkyMixin）
                     self.camera.update()
                     self.draw_entities(z_filter=1)
-                    self.draw_block()                        # 方块绘制（来自 BlockRenderMixin）
+                    self.draw_block()  # 方块绘制（来自 BlockRenderMixin）
                     if self.debug:
                         self.draw_biome_debug_overlay()
                     self.draw_precipitation()
                     self.draw_entities(z_filter=0)
-                    # Keep particles in their world layer.  In particular,
-                    # rain splashes on z=0 must remain over the foreground,
-                    # while z=1 splashes are not accidentally mixed into it.
+
                     self.client.particle_manager.draw(self, z_filter=1)
                     self.client.particle_manager.draw(self, z_filter=0)
                     self.draw_hovered_block_outline()
@@ -432,12 +463,12 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                             avg_fps = sum(self._fps_samples) / len(self._fps_samples)
                             max_fps = max(self._fps_samples)
                             min_fps = min(self._fps_samples)
-                            self._fps_display_text = (
-                                f"avg. {int(avg_fps)} max. {int(max_fps)} min. {int(min_fps)}"
-                            )
+                            self._fps_display_text = f"avg. {int(avg_fps)} max. {int(max_fps)} min. {int(min_fps)}"
                         self._fps_samples.clear()
                         self._last_fps_update = current_ticks
-                    self.render_text(self._fps_display_text, (10, 10), (255, 255, 255), 36, True)
+                    self.render_text(
+                        self._fps_display_text, (10, 10), (255, 255, 255), 36, True
+                    )
                 else:
                     # ---- 非游戏状态：黑屏 + GUI ----
                     self.stop_weather_audio()
@@ -480,9 +511,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             else:
                 pygame.key.stop_text_input()
             self._text_input_active = should_be_active
-        pygame.key.set_repeat(*(
-            self._text_input_repeat if should_be_active else (0, 0)
-        ))
+        pygame.key.set_repeat(
+            *(self._text_input_repeat if should_be_active else (0, 0))
+        )
 
     def draw_gui(self) -> None:
         """按优先级顺序绘制所有活动 GUI。"""
@@ -492,10 +523,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def show_gui(self, gui: GUI) -> None:
         """打开一个 GUI 界面。
 
-        GUI 按优先级排序绘制，优先级高的 GUI 绘制在上层。
+                GUI 按优先级排序绘制，优先级高的 GUI 绘制在上层。
 
-        参数:
-            gui: 要打开的 GUI 实例
+        :param gui: 要打开的 GUI 实例
+
         """
         if gui in self.drawing_GUIs:
             return
@@ -506,8 +537,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def close_gui(self, gui: GUI) -> None:
         """关闭一个 GUI 界面。
 
-        参数:
-            gui: 要关闭的 GUI 实例
+        :param gui: 要关闭的 GUI 实例
+
         """
         if gui not in self.drawing_GUIs:
             return
@@ -526,8 +557,15 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         entities.sort(key=lambda entity: entity.y)
         for entity in entities:
             if entity.entity_id in (
-                "falling_block", "item", "experience_orb", "zombie", "primed_tnt",
-                "chicken", "cow", "pig", "sheep",
+                "falling_block",
+                "item",
+                "experience_orb",
+                "zombie",
+                "primed_tnt",
+                "chicken",
+                "cow",
+                "pig",
+                "sheep",
             ):
                 if entity.z != z_filter:
                     continue
@@ -541,12 +579,15 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         """将当前鼠标位置转换为世界坐标。"""
         self.mouse_x, self.mouse_y = pygame.mouse.get_pos()
         return (
-            (self.mouse_x - self.SCREEN_WIDTH // 2) / self.block_size + self.camera.x + 0.5,
-            -(self.mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + self.camera.y - 0.5,
+            (self.mouse_x - self.SCREEN_WIDTH // 2) / self.block_size
+            + self.camera.x
+            + 0.5,
+            -(self.mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size
+            + self.camera.y
+            - 0.5,
         )
 
     def get_hovered_entity(self):
-        """Return the closest damageable entity under the cursor and in reach."""
         player = self.client.client_player
         if player is None:
             return None
@@ -569,10 +610,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 continue
             nearest_x = min(max(player_center_x, entity.x), entity.x + entity.width)
             nearest_y = min(max(player_center_y, entity.y), entity.y + entity.height)
-            distance_sq = (
-                (nearest_x - player_center_x) ** 2
-                + (nearest_y - player_center_y) ** 2
-            )
+            distance_sq = (nearest_x - player_center_x) ** 2 + (
+                nearest_y - player_center_y
+            ) ** 2
             if distance_sq <= reach_sq:
                 candidates.append((distance_sq, entity))
         if not candidates:
@@ -582,10 +622,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def get_hovered_block_position(self) -> tuple[int | None, int | None]:
         """获取鼠标当前悬停的方块世界坐标。
 
-        使用逆投影将屏幕坐标转换为世界坐标，并检查交互距离。
+                使用逆投影将屏幕坐标转换为世界坐标，并检查交互距离。
 
-        返回:
-            (block_x, block_y) 或 (None, None)（超出交互范围时）
+        :return: (block_x, block_y) 或 (None, None)（超出交互范围时）
+
         """
         world_x, world_y = self.get_mouse_world_position()
 
@@ -593,10 +633,13 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         block_y = _math.floor(world_y)
 
         # 距离检查
-        distance = _math.sqrt(
-            (self.mouse_x - self.SCREEN_WIDTH / 2) ** 2 +
-            (self.mouse_y - self.SCREEN_HEIGHT / 2) ** 2
-        ) / self.block_size
+        distance = (
+            _math.sqrt(
+                (self.mouse_x - self.SCREEN_WIDTH / 2) ** 2
+                + (self.mouse_y - self.SCREEN_HEIGHT / 2) ** 2
+            )
+            / self.block_size
+        )
 
         if distance > self.client.client_player.block_interaction_range:
             return None, None
@@ -605,8 +648,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         return block_x, block_y
 
     @staticmethod
-    def _ray_hit_face(origin: tuple[float, float], direction: tuple[float, float],
-                      location) -> str | None:
+    def _ray_hit_face(
+        origin: tuple[float, float], direction: tuple[float, float], location
+    ) -> str | None:
         """返回射线进入方块矩形时首先穿过的面。"""
         ox, oy = origin
         dx, dy = direction
@@ -664,37 +708,47 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             return
 
         # 世界坐标 → 屏幕坐标
-        screen_x = (block_x - self.camera.x - 0.5) * self.block_size + self.SCREEN_WIDTH // 2
+        screen_x = (
+            block_x - self.camera.x - 0.5
+        ) * self.block_size + self.SCREEN_WIDTH // 2
         # 方块占据世界坐标 [block_y, block_y+1]，用 block_y+1 定位顶部
         screen_y = self.SCREEN_HEIGHT - (
-            ((block_y + 1) - self.camera.y + 0.5) * self.block_size + self.SCREEN_HEIGHT // 2
+            ((block_y + 1) - self.camera.y + 0.5) * self.block_size
+            + self.SCREEN_HEIGHT // 2
         )
 
         outline_rect = pygame.Rect(screen_x, screen_y, self.block_size, self.block_size)
 
         if getattr(self.client.client_player, "fore_place", False):
-            temp_surf = pygame.Surface((outline_rect.width, outline_rect.height), pygame.SRCALPHA)
+            temp_surf = pygame.Surface(
+                (outline_rect.width, outline_rect.height), pygame.SRCALPHA
+            )
             temp_surf.fill((255, 255, 255, 20))
             self.screen.blit(temp_surf, (outline_rect.x, outline_rect.y))
         if not any(
             getattr(self.client_world.get_block(block_x, block_y, z), "solid", False)
             for z in (0, 1)
         ):
-            draw_dashed_rect(self.screen, (0, 0, 0), outline_rect, dash_length=8, gap_length=4, width=1)
+            draw_dashed_rect(
+                self.screen,
+                (0, 0, 0),
+                outline_rect,
+                dash_length=8,
+                gap_length=4,
+                width=1,
+            )
             return
         pygame.draw.rect(self.screen, (0, 0, 0), outline_rect, 1)
 
     def draw_destroy_progress(self) -> None:
-        """Draw server-authoritative destroy stages for every visible miner."""
         states = self.client_world.iter_break_progress()
-        # Multiple players mining one block share one overlay; render the most
-        # advanced authoritative stage instead of alpha-stacking duplicates.
+
         targets: dict[tuple[int, int, int], float] = {}
         for state in states:
-            progress = max(0.0, min(1.0, float(state.get('progress', 0.0))))
+            progress = max(0.0, min(1.0, float(state.get("progress", 0.0))))
             if progress <= 0.0:
                 continue
-            target = (int(state['x']), int(state['y']), int(state['z']))
+            target = (int(state["x"]), int(state["y"]), int(state["z"]))
             targets[target] = max(progress, targets.get(target, 0.0))
 
         for (x, y, _z), progress in targets.items():
@@ -704,7 +758,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             )
             if texture is None:
                 continue
-            texture = pygame.transform.scale(texture, (self.block_size, self.block_size))
+            texture = pygame.transform.scale(
+                texture, (self.block_size, self.block_size)
+            )
             sx = (x - self.camera.x - 0.5) * self.block_size + self.SCREEN_WIDTH // 2
             sy = self.SCREEN_HEIGHT - (
                 ((y + 1) - self.camera.y + 0.5) * self.block_size
@@ -719,7 +775,6 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.debug = not self.debug
 
     def draw_biome_debug_overlay(self) -> None:
-        """Draw a translucent biome-color overlay and a hover tooltip in debug mode."""
         block_size = self.block_size
         if block_size <= 0:
             return
@@ -731,7 +786,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         y_start = int(self.camera.y - y_blocks // 2 - 1)
         y_end = int(self.camera.y + y_blocks // 2 + 2)
 
-        overlay = pygame.Surface((self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay = pygame.Surface(
+            (self.SCREEN_WIDTH, self.SCREEN_HEIGHT), pygame.SRCALPHA
+        )
         get_biome = self.client_world.get_biome
         for x in range(x_start, x_end + 1):
             for y in range(y_start, y_end + 1):
@@ -741,18 +798,27 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 color = self._biome_debug_color(biome_id)
                 sx = (x - self.camera.x - 0.5) * block_size + self.SCREEN_WIDTH // 2
                 sy = self.SCREEN_HEIGHT - (
-                    ((y + 1) - self.camera.y + 0.5) * block_size + self.SCREEN_HEIGHT // 2
+                    ((y + 1) - self.camera.y + 0.5) * block_size
+                    + self.SCREEN_HEIGHT // 2
                 )
-                pygame.draw.rect(overlay, (*color, 58), (sx, sy, block_size, block_size))
-                pygame.draw.rect(overlay, (*color, 105), (sx, sy, block_size, block_size), 1)
+                pygame.draw.rect(
+                    overlay, (*color, 58), (sx, sy, block_size, block_size)
+                )
+                pygame.draw.rect(
+                    overlay, (*color, 105), (sx, sy, block_size, block_size), 1
+                )
 
         self.screen.blit(overlay, (0, 0))
         self.draw_biome_hover_tooltip()
 
     def draw_biome_hover_tooltip(self) -> None:
         mouse_x, mouse_y = pygame.mouse.get_pos()
-        world_x = (mouse_x - self.SCREEN_WIDTH // 2) / self.block_size + self.camera.x + 0.5
-        world_y = -(mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + self.camera.y - 0.5
+        world_x = (
+            (mouse_x - self.SCREEN_WIDTH // 2) / self.block_size + self.camera.x + 0.5
+        )
+        world_y = (
+            -(mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + self.camera.y - 0.5
+        )
         block_x = _math.floor(world_x)
         block_y = _math.floor(world_y)
         biome_id = self.client_world.get_biome(block_x, block_y)
@@ -765,7 +831,6 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             f"Biome: {biome.name}",
             f"ID: {biome_id}",
             f"Block at {block_x}, {block_y}: {self.client_world.get_block(block_x, block_y, 0).block_id}",
-            # f'{self.client_world.get_block(block_x, block_y, 1).location}'
         ]
         font_size = 18
         font = self.get_font(font_size)
@@ -786,7 +851,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.screen.blit(panel, rect.topleft)
         for index, line in enumerate(text_lines):
             text = font.render(line, True, (245, 245, 245))
-            self.screen.blit(text, (x + padding + 12, y + padding + index * (font_size + line_gap)))
+            self.screen.blit(
+                text, (x + padding + 12, y + padding + index * (font_size + line_gap))
+            )
 
     def _biome_debug_color(self, biome_id: str) -> tuple[int, int, int]:
         palette = {
@@ -835,12 +902,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def get_font(self, size: int, bold: bool = False) -> pygame.font.Font:
         """获取指定大小的字体（带缓存）。
 
-        参数:
-            size: 字体大小（像素）
-            bold: 是否使用粗体
+        :param size: 字体大小（像素）
+        :param bold: 是否使用粗体
 
-        返回:
-            pygame.font.Font 实例
+        :return: pygame.font.Font 实例
+
         """
         cache_key = (size, True) if bold else size
         if cache_key in self.font_cache:
@@ -850,8 +916,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.font_cache[cache_key] = font
         return font
 
-    def _render_text_surface(self, font, text: str, color, fallback_color=(255, 255, 255)):
-        """Render one solid or horizontally gradient-colored text segment."""
+    def _render_text_surface(
+        self, font, text: str, color, fallback_color=(255, 255, 255)
+    ):
         try:
             normalized_color = normalize_text_color(color)
         except (TypeError, ValueError):
@@ -893,7 +960,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         color: tuple[int, int, int] = (255, 255, 255),
         font_size: int = 36,
         shadow: bool = False,
-        shadow_strength = 0.4,
+        shadow_strength=0.4,
         glow: bool = False,
         clip_rect=None,
         bold: bool = False,
@@ -901,16 +968,16 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     ) -> None:
         """在屏幕上渲染文本。
 
-        参数:
-            text: 文本内容；传入 Text 时会逐段应用颜色和粗体样式
-            pos: 位置 (x, y)
-            color: TextColor、RGB、十六进制颜色，或由这些颜色组成的渐变元组
-            font_size: 字体大小
-            shadow: 是否绘制阴影
-            shadow_strength: 阴影亮度
-            glow: 是否添加发光效果
-            bold: 普通字符串是否使用粗体；传入 Text 时作为全局粗体开关
-            alpha: 整体透明度（0-255）
+        :param text: 文本内容；传入 Text 时会逐段应用颜色和粗体样式
+        :param pos: 位置 (x, y)
+        :param color: TextColor、RGB、十六进制颜色，或由这些颜色组成的渐变元组
+        :param font_size: 字体大小
+        :param shadow: 是否绘制阴影
+        :param shadow_strength: 阴影亮度
+        :param glow: 是否添加发光效果
+        :param bold: 普通字符串是否使用粗体；传入 Text 时作为全局粗体开关
+        :param alpha: 整体透明度（0-255）
+
         """
         old_clip = None
         if clip_rect is not None:
@@ -929,7 +996,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             segment_color = segment.get("color", color)
             segment_bold = bold or bool(segment.get("bold", False))
             font = self.get_font(font_size, segment_bold)
-            text_surface = self._render_text_surface(font, segment_text, segment_color, color)
+            text_surface = self._render_text_surface(
+                font, segment_text, segment_color, color
+            )
 
             if shadow:
                 # 阴影：深色版本偏移绘制在文本下方
@@ -937,7 +1006,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     shadow_color = darken_text_color(segment_color, shadow_strength)
                 except (TypeError, ValueError):
                     shadow_color = darken_text_color(color, shadow_strength)
-                shadow_surface = self._render_text_surface(font, segment_text, shadow_color)
+                shadow_surface = self._render_text_surface(
+                    font, segment_text, shadow_color
+                )
                 if alpha < 255:
                     shadow_surface = shadow_surface.copy()
                     shadow_surface.set_alpha(alpha)

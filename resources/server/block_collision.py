@@ -1,11 +1,4 @@
-"""Reusable collision shapes for blocks.
-
-Coordinates are local to one block.  ``x`` and ``y`` are expressed in block
-units, while values outside ``0..1`` are intentionally supported so a future
-fence, wall or multi-block decoration can expose a shape taller than one
-cell.  A shape may contain more than one box; this is useful for posts,
-crosses and other non-convex blocks.
-"""
+# Commented and arranged by ChatGPT
 
 from __future__ import annotations
 
@@ -16,8 +9,6 @@ from typing import Iterable, Sequence
 
 @dataclass(frozen=True)
 class CollisionBox:
-    """One axis-aligned box in block-local coordinates."""
-
     min_x: float
     min_y: float
     max_x: float
@@ -39,27 +30,28 @@ class CollisionBox:
         return self.max_y - self.min_y
 
     def translated(self, x: float, y: float) -> "CollisionBox":
-        return type(self)(self.min_x + x, self.min_y + y,
-                          self.max_x + x, self.max_y + y)
+        return type(self)(
+            self.min_x + x, self.min_y + y, self.max_x + x, self.max_y + y
+        )
 
-    def overlaps(self, min_x: float, min_y: float, max_x: float, max_y: float,
-                 epsilon: float = 1.0e-9) -> bool:
-        """Open AABB overlap; touching faces are not an intersection."""
+    def overlaps(
+        self,
+        min_x: float,
+        min_y: float,
+        max_x: float,
+        max_y: float,
+        epsilon: float = 1.0e-9,
+    ) -> bool:
         return (
-            self.max_x > min_x + epsilon and self.min_x < max_x - epsilon
-            and self.max_y > min_y + epsilon and self.min_y < max_y - epsilon
+            self.max_x > min_x + epsilon
+            and self.min_x < max_x - epsilon
+            and self.max_y > min_y + epsilon
+            and self.min_y < max_y - epsilon
         )
 
 
 @dataclass(frozen=True)
 class BlockCollisionBox:
-    """A block collision shape made up of zero or more AABBs.
-
-    The historical module exposed this name as a placeholder, so it remains
-    the public shape type.  It is iterable and has convenience constructors,
-    making it straightforward for custom blocks and tests to use.
-    """
-
     boxes: tuple[CollisionBox, ...] = ()
 
     def __post_init__(self):
@@ -88,8 +80,6 @@ class BlockCollisionBox:
     def max_height(self) -> float:
         return max((box.max_y for box in self.boxes), default=0.0)
 
-    # Bounding-box compatibility properties.  For a one-box shape these are
-    # the exact bounds; for a compound shape they describe its enclosing box.
     @property
     def min_x(self) -> float:
         return min((box.min_x for box in self.boxes), default=0.0)
@@ -108,8 +98,9 @@ class BlockCollisionBox:
 
     @classmethod
     def from_box(cls, min_x=0.0, min_y=0.0, max_x=1.0, max_y=1.0):
-        return cls((CollisionBox(float(min_x), float(min_y),
-                                 float(max_x), float(max_y)),))
+        return cls(
+            (CollisionBox(float(min_x), float(min_y), float(max_x), float(max_y)),)
+        )
 
     @classmethod
     def full_block(cls) -> "BlockCollisionBox":
@@ -120,8 +111,9 @@ class BlockCollisionBox:
         return EMPTY
 
     @classmethod
-    def from_grid(cls, grid: Sequence[Sequence[int] | str], *, cell_size=16,
-                  origin_y=0.0) -> "BlockCollisionBox":
+    def from_grid(
+        cls, grid: Sequence[Sequence[int] | str], *, cell_size=16, origin_y=0.0
+    ) -> "BlockCollisionBox":
         return grid_collision(grid, cell_size=cell_size, origin_y=origin_y)
 
 
@@ -137,7 +129,7 @@ HALF_TOP = BlockCollisionBox.from_box(0, 0.5, 1, 1)
 QUARTER_BLOCK = BlockCollisionBox.from_box(0, 0, 1, 0.25)
 FENCE_POST = BlockCollisionBox.from_box(0.375, 0, 0.625, 1.5)
 POST = FENCE_POST
-# Friendly aliases used by block definitions and external extensions.
+
 FULL = FULL_BLOCK
 HALF = HALF_BOTTOM
 BOTTOM_SLAB = HALF_BOTTOM
@@ -146,26 +138,24 @@ EMPTY_COLLISION = EMPTY
 FENCE_COLLISION = FENCE_POST
 
 
-def grid_collision(grid: Sequence[Sequence[int] | str], *, cell_size: int = 16,
-                   origin_y: float = 0.0) -> BlockCollisionBox:
-    """Build a shape from a 16x16 (or explicitly sized) 0/1 bitmap.
-
-    Rows are ordered bottom-to-top, matching world ``y``.  Adjacent occupied
-    cells on each row are merged into one box.  ``origin_y`` allows the same
-    bitmap to describe a shape above or below the block's nominal cell.
-    """
+def grid_collision(
+    grid: Sequence[Sequence[int] | str], *, cell_size: int = 16, origin_y: float = 0.0
+) -> BlockCollisionBox:
     if not isinstance(cell_size, int) or cell_size <= 0:
         raise ValueError("cell_size must be a positive integer")
     if isinstance(grid, str):
         lines = [line.strip() for line in grid.splitlines() if line.strip()]
         if len(lines) == 1 and len(lines[0]) == cell_size * cell_size:
-            lines = [lines[0][i:i + cell_size]
-                     for i in range(0, len(lines[0]), cell_size)]
+            lines = [
+                lines[0][i : i + cell_size] for i in range(0, len(lines[0]), cell_size)
+            ]
         grid = lines
-    elif isinstance(grid, Sequence) and len(grid) == cell_size * cell_size \
-            and all(not isinstance(value, (Sequence, str)) for value in grid):
-        grid = [grid[i:i + cell_size]
-                for i in range(0, len(grid), cell_size)]
+    elif (
+        isinstance(grid, Sequence)
+        and len(grid) == cell_size * cell_size
+        and all(not isinstance(value, (Sequence, str)) for value in grid)
+    ):
+        grid = [grid[i : i + cell_size] for i in range(0, len(grid), cell_size)]
     if not isinstance(grid, Sequence) or len(grid) != cell_size:
         raise ValueError(f"collision grid must have {cell_size} rows")
 
@@ -188,12 +178,14 @@ def grid_collision(grid: Sequence[Sequence[int] | str], *, cell_size: int = 16,
             if occupied and run_start is None:
                 run_start = column
             elif not occupied and run_start is not None:
-                boxes.append(CollisionBox(
-                    run_start / cell_size,
-                    origin_y + row_index / cell_size,
-                    column / cell_size,
-                    origin_y + (row_index + 1) / cell_size,
-                ))
+                boxes.append(
+                    CollisionBox(
+                        run_start / cell_size,
+                        origin_y + row_index / cell_size,
+                        column / cell_size,
+                        origin_y + (row_index + 1) / cell_size,
+                    )
+                )
                 run_start = None
     return BlockCollisionBox(tuple(boxes))
 
@@ -202,7 +194,6 @@ custom_collision = grid_collision
 
 
 def coerce_collision_shape(value) -> BlockCollisionBox:
-    """Normalize a block's return value for callers accepting custom APIs."""
     if value is None or value is False:
         return EMPTY
     if isinstance(value, BlockCollisionBox):
@@ -210,8 +201,11 @@ def coerce_collision_shape(value) -> BlockCollisionBox:
     if isinstance(value, CollisionBox):
         return BlockCollisionBox((value,))
     if isinstance(value, Iterable):
-        if isinstance(value, (tuple, list)) and len(value) == 4 \
-                and all(isinstance(item, Real) for item in value):
+        if (
+            isinstance(value, (tuple, list))
+            and len(value) == 4
+            and all(isinstance(item, Real) for item in value)
+        ):
             return BlockCollisionBox((CollisionBox(*value),))
         boxes = []
         for item in value:

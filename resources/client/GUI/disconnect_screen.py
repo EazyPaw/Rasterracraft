@@ -6,8 +6,6 @@ from resources.server.text import Text
 
 
 class DisconnectScreen(GUI):
-    """Minecraft-style full-screen connection failure page."""
-
     def __init__(self, render, title_key: str, reason: str | Text):
         super().__init__(render)
         self.priority = 2000

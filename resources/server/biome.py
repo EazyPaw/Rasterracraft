@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """
 生物群系模块 (Biome Module)
 
@@ -20,6 +21,7 @@ class BiomeProfile:
     每个生物群系定义了该区域的地形起伏、地表方块构成、
     装饰物密度等属性，由噪声驱动的生物群系判定后用于实际方块放置。
     """
+
     biome_id: str
     surface: str
     subsurface: str
@@ -100,13 +102,12 @@ FLOWER_FIELD_FLOWERS = (
     (1.00, "dandelion"),
 )
 
-SWAMP_FLOWERS = (
-    (1.00, "blue_orchid"),
-)
+SWAMP_FLOWERS = ((1.00, "blue_orchid"),)
 
 
 class Biome(ABC):
     """生物群系抽象基类。"""
+
     biome_id = "null"
     name = "null"
     temperature = 0.5
@@ -151,10 +152,14 @@ class Biome(ABC):
             try:
                 self.foliage_color = self._get_color_from_colormap("colormap.foliage")
             except RuntimeError:
-                self.foliage_color = _default_foliage_color(self.temperature, self.downfall)
+                self.foliage_color = _default_foliage_color(
+                    self.temperature, self.downfall
+                )
 
     @client_method
-    def _get_color_from_colormap(self, colormap_name: str, client=None) -> tuple[int, int, int]:
+    def _get_color_from_colormap(
+        self, colormap_name: str, client=None
+    ) -> tuple[int, int, int]:
         colormap_surface = client.resources_manager.get_texture_img(colormap_name)
         if colormap_surface is None:
             logging.error(f"Failed to get colormap {colormap_name}")
@@ -173,6 +178,7 @@ class Biome(ABC):
 # ---------------------------------------------------------------------------
 # 辅助函数
 # ---------------------------------------------------------------------------
+
 
 def _default_grass_color(temperature: float, downfall: float) -> tuple[int, int, int]:
     """根据温度和降水计算默认草色。"""
@@ -200,6 +206,7 @@ def _default_foliage_color(temperature: float, downfall: float) -> tuple[int, in
 # 特殊生物群系
 # ---------------------------------------------------------------------------
 
+
 class Void(Biome):
     biome_id = "void"
     name = "void"
@@ -211,6 +218,7 @@ class Void(Biome):
 # 平原 / 草甸类
 # ---------------------------------------------------------------------------
 
+
 class Plains(Biome):
     biome_id = "plains"
     name = "plains"
@@ -220,10 +228,10 @@ class Plains(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.4)
     foliage_color = _default_foliage_color(0.8, 0.4)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "oak"
     tree_chance = 0.02
     grass_chance = 0.28
     flower_chance = 0.035
@@ -245,10 +253,10 @@ class SunflowerPlains(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.4)
     foliage_color = _default_foliage_color(0.8, 0.4)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "oak"
     tree_chance = 0.02
     grass_chance = 0.32
     flower_chance = 0.08
@@ -272,10 +280,10 @@ class Meadow(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.8)
     foliage_color = _default_foliage_color(0.5, 0.8)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "oak"
     tree_chance = 0.01
     grass_chance = 0.3
     flower_chance = 0.08
@@ -293,6 +301,7 @@ class Meadow(Biome):
 # 森林类
 # ---------------------------------------------------------------------------
 
+
 class Forest(Biome):
     biome_id = "forest"
     name = "forest"
@@ -302,10 +311,10 @@ class Forest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.7, 0.8)
     foliage_color = _default_foliage_color(0.7, 0.8)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "oak"
     tree_chance = 0.24
     grass_chance = 0.42
     flower_chance = 0.045
@@ -328,10 +337,10 @@ class FlowerForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.7, 0.8)
     foliage_color = _default_foliage_color(0.7, 0.8)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "oak"
     tree_chance = 0.21
     grass_chance = 0.44
     flower_chance = 0.32
@@ -355,10 +364,10 @@ class BirchForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.6, 0.6)
     foliage_color = _default_foliage_color(0.6, 0.6)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'birch'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "birch"
     tree_chance = 0.22
     grass_chance = 0.36
     flower_chance = 0.035
@@ -381,10 +390,10 @@ class OldGrowthBirchForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.6, 0.6)
     foliage_color = _default_foliage_color(0.6, 0.6)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'birch'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "birch"
     tree_chance = 0.27
     grass_chance = 0.34
     flower_chance = 0.03
@@ -407,10 +416,10 @@ class DarkForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.7, 0.8)
     foliage_color = _default_foliage_color(0.7, 0.8)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'dark_oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "dark_oak"
     tree_chance = 0.3
     grass_chance = 0.28
     flower_chance = 0.02
@@ -427,6 +436,7 @@ class DarkForest(Biome):
 # 针叶林 / 积雪类
 # ---------------------------------------------------------------------------
 
+
 class Taiga(Biome):
     biome_id = "taiga"
     name = "taiga"
@@ -436,10 +446,10 @@ class Taiga(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.25, 0.8)
     foliage_color = _default_foliage_color(0.25, 0.8)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'spruce'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "spruce"
     tree_chance = 0.135
     grass_chance = 0.24
     flower_chance = 0.012
@@ -462,10 +472,10 @@ class SnowyTaiga(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.5, 0.4)
     foliage_color = _default_foliage_color(-0.5, 0.4)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'spruce'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "spruce"
     tree_chance = 0.125
     grass_chance = 0.18
     flower_chance = 0.018
@@ -489,10 +499,10 @@ class OldGrowthPineTaiga(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.25, 0.8)
     foliage_color = _default_foliage_color(0.25, 0.8)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'spruce'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "spruce"
     tree_chance = 0.165
     grass_chance = 0.22
     flower_chance = 0.01
@@ -515,10 +525,10 @@ class OldGrowthSpruceTaiga(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.25, 0.8)
     foliage_color = _default_foliage_color(0.25, 0.8)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'spruce'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "spruce"
     tree_chance = 0.155
     grass_chance = 0.2
     flower_chance = 0.008
@@ -541,9 +551,9 @@ class SnowyPlains(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.0, 0.5)
     foliage_color = _default_foliage_color(0.0, 0.5)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.16
@@ -568,9 +578,9 @@ class IceSpikes(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.0, 0.5)
     foliage_color = _default_foliage_color(0.0, 0.5)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.05
@@ -593,10 +603,10 @@ class Grove(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.2, 0.8)
     foliage_color = _default_foliage_color(-0.2, 0.8)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'spruce'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "spruce"
     tree_chance = 0.11
     grass_chance = 0.2
     flower_chance = 0.02
@@ -615,6 +625,7 @@ class Grove(Biome):
 # 山地类
 # ---------------------------------------------------------------------------
 
+
 class WindsweptHills(Biome):
     biome_id = "windswept_hills"
     name = "windswept hills"
@@ -624,10 +635,10 @@ class WindsweptHills(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.2, 0.3)
     foliage_color = _default_foliage_color(0.2, 0.3)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'spruce'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "spruce"
     tree_chance = 0.03
     grass_chance = 0.1
     flower_chance = 0.008
@@ -648,10 +659,10 @@ class WindsweptGravellyHills(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.2, 0.3)
     foliage_color = _default_foliage_color(0.2, 0.3)
-    surface = 'grass_block'
-    subsurface = 'gravel'
-    filler = 'stone'
-    tree = 'spruce'
+    surface = "grass_block"
+    subsurface = "gravel"
+    filler = "stone"
+    tree = "spruce"
     tree_chance = 0.02
     grass_chance = 0.06
     flower_chance = 0.004
@@ -672,10 +683,10 @@ class WindsweptForest(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.2, 0.3)
     foliage_color = _default_foliage_color(0.2, 0.3)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "oak"
     tree_chance = 0.055
     grass_chance = 0.14
     flower_chance = 0.012
@@ -696,9 +707,9 @@ class JaggedPeaks(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.7, 0.9)
     foliage_color = _default_foliage_color(-0.7, 0.9)
-    surface = 'stone'
-    subsurface = 'stone'
-    filler = 'stone'
+    surface = "stone"
+    subsurface = "stone"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -721,9 +732,9 @@ class FrozenPeaks(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.7, 0.9)
     foliage_color = _default_foliage_color(-0.7, 0.9)
-    surface = 'snow_block'
-    subsurface = 'stone'
-    filler = 'stone'
+    surface = "snow_block"
+    subsurface = "stone"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -746,9 +757,9 @@ class StonyPeaks(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(1.0, 0.3)
     foliage_color = _default_foliage_color(1.0, 0.3)
-    surface = 'stone'
-    subsurface = 'stone'
-    filler = 'stone'
+    surface = "stone"
+    subsurface = "stone"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -770,10 +781,10 @@ class SnowySlopes(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(-0.3, 0.9)
     foliage_color = _default_foliage_color(-0.3, 0.9)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'spruce'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "spruce"
     tree_chance = 0.02
     grass_chance = 0.08
     flower_chance = 0.004
@@ -790,6 +801,7 @@ class SnowySlopes(Biome):
 # 沙漠 / 热带草原类
 # ---------------------------------------------------------------------------
 
+
 class Desert(Biome):
     biome_id = "desert"
     name = "desert"
@@ -799,9 +811,9 @@ class Desert(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(2.0, 0.0)
     foliage_color = _default_foliage_color(2.0, 0.0)
-    surface = 'sand'
-    subsurface = 'sand'
-    filler = 'sandstone'
+    surface = "sand"
+    subsurface = "sand"
+    filler = "sandstone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -824,10 +836,10 @@ class Savanna(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(1.2, 0.0)
     foliage_color = _default_foliage_color(1.2, 0.0)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'acacia'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "acacia"
     tree_chance = 0.045
     grass_chance = 0.2
     flower_chance = 0.012
@@ -848,10 +860,10 @@ class SavannaPlateau(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(1.0, 0.0)
     foliage_color = _default_foliage_color(1.0, 0.0)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'acacia'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "acacia"
     tree_chance = 0.038
     grass_chance = 0.16
     flower_chance = 0.01
@@ -872,10 +884,10 @@ class WindsweptSavanna(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(1.1, 0.0)
     foliage_color = _default_foliage_color(1.1, 0.0)
-    surface = 'grass_block'
-    subsurface = 'coarse_dirt'
-    filler = 'stone'
-    tree = 'acacia'
+    surface = "grass_block"
+    subsurface = "coarse_dirt"
+    filler = "stone"
+    tree = "acacia"
     tree_chance = 0.035
     grass_chance = 0.12
     flower_chance = 0.006
@@ -896,9 +908,9 @@ class Badlands(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(2.0, 0.0)
     foliage_color = _default_foliage_color(2.0, 0.0)
-    surface = 'red_sand'
-    subsurface = 'hardened_clay'
-    filler = 'red_sandstone'
+    surface = "red_sand"
+    subsurface = "hardened_clay"
+    filler = "red_sandstone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -921,10 +933,10 @@ class WoodedBadlands(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(2.0, 0.0)
     foliage_color = _default_foliage_color(2.0, 0.0)
-    surface = 'red_sand'
-    subsurface = 'hardened_clay'
-    filler = 'red_sandstone'
-    tree = 'oak'
+    surface = "red_sand"
+    subsurface = "hardened_clay"
+    filler = "red_sandstone"
+    tree = "oak"
     tree_chance = 0.03
     grass_chance = 0.06
     flower_chance = 0.0
@@ -946,9 +958,9 @@ class ErodedBadlands(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(2.0, 0.0)
     foliage_color = _default_foliage_color(2.0, 0.0)
-    surface = 'red_sand'
-    subsurface = 'hardened_clay'
-    filler = 'red_sandstone'
+    surface = "red_sand"
+    subsurface = "hardened_clay"
+    filler = "red_sandstone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -966,6 +978,7 @@ class ErodedBadlands(Biome):
 # 丛林类
 # ---------------------------------------------------------------------------
 
+
 class Jungle(Biome):
     biome_id = "jungle"
     name = "jungle"
@@ -975,10 +988,10 @@ class Jungle(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.95, 0.9)
     foliage_color = _default_foliage_color(0.95, 0.9)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'jungle_tree'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "jungle_tree"
     tree_chance = 0.16
     grass_chance = 0.44
     flower_chance = 0.025
@@ -1000,10 +1013,10 @@ class SparseJungle(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.95, 0.8)
     foliage_color = _default_foliage_color(0.95, 0.8)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'jungle_tree'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "jungle_tree"
     tree_chance = 0.06
     grass_chance = 0.4
     flower_chance = 0.02
@@ -1025,10 +1038,10 @@ class BambooJungle(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.95, 0.9)
     foliage_color = _default_foliage_color(0.95, 0.9)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'jungle_tree'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "jungle_tree"
     tree_chance = 0.14
     grass_chance = 0.42
     flower_chance = 0.022
@@ -1045,6 +1058,7 @@ class BambooJungle(Biome):
 # 沼泽类
 # ---------------------------------------------------------------------------
 
+
 class Swamp(Biome):
     biome_id = "swamp"
     name = "swamp"
@@ -1054,10 +1068,10 @@ class Swamp(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.9)
     foliage_color = _default_foliage_color(0.8, 0.9)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "oak"
     tree_chance = 0.055
     grass_chance = 0.36
     flower_chance = 0.015
@@ -1081,10 +1095,10 @@ class MangroveSwamp(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.9)
     foliage_color = _default_foliage_color(0.8, 0.9)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "oak"
     tree_chance = 0.07
     grass_chance = 0.3
     flower_chance = 0.01
@@ -1100,6 +1114,7 @@ class MangroveSwamp(Biome):
 # 海洋类
 # ---------------------------------------------------------------------------
 
+
 class Ocean(Biome):
     biome_id = "ocean"
     name = "ocean"
@@ -1109,9 +1124,9 @@ class Ocean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.5)
     foliage_color = _default_foliage_color(0.5, 0.5)
-    surface = 'sand'
-    subsurface = 'sand'
-    filler = 'stone'
+    surface = "sand"
+    subsurface = "sand"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1133,9 +1148,9 @@ class DeepOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.5)
     foliage_color = _default_foliage_color(0.5, 0.5)
-    surface = 'gravel'
-    subsurface = 'sand'
-    filler = 'stone'
+    surface = "gravel"
+    subsurface = "sand"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1157,9 +1172,9 @@ class WarmOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.5)
     foliage_color = _default_foliage_color(0.8, 0.5)
-    surface = 'sand'
-    subsurface = 'sand'
-    filler = 'stone'
+    surface = "sand"
+    subsurface = "sand"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1181,9 +1196,9 @@ class LukewarmOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.6, 0.5)
     foliage_color = _default_foliage_color(0.6, 0.5)
-    surface = 'sand'
-    subsurface = 'sand'
-    filler = 'stone'
+    surface = "sand"
+    subsurface = "sand"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1205,9 +1220,9 @@ class ColdOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.3, 0.5)
     foliage_color = _default_foliage_color(0.3, 0.5)
-    surface = 'gravel'
-    subsurface = 'sand'
-    filler = 'stone'
+    surface = "gravel"
+    subsurface = "sand"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1244,9 +1259,9 @@ class DeepColdOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.3, 0.5)
     foliage_color = _default_foliage_color(0.3, 0.5)
-    surface = 'gravel'
-    subsurface = 'sand'
-    filler = 'stone'
+    surface = "gravel"
+    subsurface = "sand"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1283,9 +1298,9 @@ class DeepLukewarmOcean(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.6, 0.5)
     foliage_color = _default_foliage_color(0.6, 0.5)
-    surface = 'sand'
-    subsurface = 'sand'
-    filler = 'stone'
+    surface = "sand"
+    subsurface = "sand"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1302,6 +1317,7 @@ class DeepLukewarmOcean(Biome):
 # 沙滩 / 河流类
 # ---------------------------------------------------------------------------
 
+
 class Beach(Biome):
     biome_id = "beach"
     name = "beach"
@@ -1311,9 +1327,9 @@ class Beach(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.4)
     foliage_color = _default_foliage_color(0.8, 0.4)
-    surface = 'sand'
-    subsurface = 'sand'
-    filler = 'sandstone'
+    surface = "sand"
+    subsurface = "sand"
+    filler = "sandstone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1335,9 +1351,9 @@ class SnowyBeach(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.05, 0.3)
     foliage_color = _default_foliage_color(0.05, 0.3)
-    surface = 'sand'
-    subsurface = 'sand'
-    filler = 'sandstone'
+    surface = "sand"
+    subsurface = "sand"
+    filler = "sandstone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1361,9 +1377,9 @@ class StonyShore(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.2, 0.3)
     foliage_color = _default_foliage_color(0.2, 0.3)
-    surface = 'stone'
-    subsurface = 'stone'
-    filler = 'stone'
+    surface = "stone"
+    subsurface = "stone"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1385,9 +1401,9 @@ class River(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.5)
     foliage_color = _default_foliage_color(0.5, 0.5)
-    surface = 'sand'
-    subsurface = 'sand'
-    filler = 'stone'
+    surface = "sand"
+    subsurface = "sand"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1409,9 +1425,9 @@ class FrozenRiver(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.0, 0.5)
     foliage_color = _default_foliage_color(0.0, 0.5)
-    surface = 'sand'
-    subsurface = 'sand'
-    filler = 'stone'
+    surface = "sand"
+    subsurface = "sand"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1429,6 +1445,7 @@ class FrozenRiver(Biome):
 # 洞穴类
 # ---------------------------------------------------------------------------
 
+
 class DripstoneCaves(Biome):
     biome_id = "dripstone_caves"
     name = "dripstone caves"
@@ -1438,9 +1455,9 @@ class DripstoneCaves(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.8, 0.4)
     foliage_color = _default_foliage_color(0.8, 0.4)
-    surface = 'stone'
-    subsurface = 'stone'
-    filler = 'stone'
+    surface = "stone"
+    subsurface = "stone"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.0
@@ -1462,10 +1479,10 @@ class LushCaves(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.5, 0.5)
     foliage_color = _default_foliage_color(0.5, 0.5)
-    surface = 'grass_block'
-    subsurface = 'dirt'
-    filler = 'stone'
-    tree = 'oak'
+    surface = "grass_block"
+    subsurface = "dirt"
+    filler = "stone"
+    tree = "oak"
     tree_chance = 0.02
     grass_chance = 0.22
     flower_chance = 0.03
@@ -1481,6 +1498,7 @@ class LushCaves(Biome):
 # 特殊
 # ---------------------------------------------------------------------------
 
+
 class MushroomFields(Biome):
     biome_id = "mushroom_fields"
     name = "mushroom fields"
@@ -1490,9 +1508,9 @@ class MushroomFields(Biome):
     fog_color = hex_to_rgb("#c0d8ff")
     grass_color = _default_grass_color(0.9, 1.0)
     foliage_color = _default_foliage_color(0.9, 1.0)
-    surface = 'mycelium'
-    subsurface = 'dirt'
-    filler = 'stone'
+    surface = "mycelium"
+    subsurface = "dirt"
+    filler = "stone"
     tree = None
     tree_chance = 0.0
     grass_chance = 0.02
@@ -1505,14 +1523,14 @@ class MushroomFields(Biome):
     amplitude = 1.35
 
 
-
-
 # ---------------------------------------------------------------------------
 # 生物群系世界生成属性
 # ---------------------------------------------------------------------------
 
+
 def _iter_biome_classes():
     """遍历 Biome 的所有子类。"""
+
     def collect(cls):
         for subclass in cls.__subclasses__():
             yield subclass
@@ -1558,8 +1576,12 @@ def _build_biome_profiles() -> dict[str, BiomeProfile]:
 
 
 BIOME_PROFILES: dict[str, BiomeProfile] = _build_biome_profiles()
-COLD_BIOMES = frozenset(bid for bid, profile in BIOME_PROFILES.items() if profile.is_cold)
-ARID_BIOMES = frozenset(bid for bid, profile in BIOME_PROFILES.items() if profile.is_arid)
+COLD_BIOMES = frozenset(
+    bid for bid, profile in BIOME_PROFILES.items() if profile.is_cold
+)
+ARID_BIOMES = frozenset(
+    bid for bid, profile in BIOME_PROFILES.items() if profile.is_arid
+)
 ICE_OCEAN_BIOMES = frozenset(
     bid for bid, profile in BIOME_PROFILES.items() if profile.freezes_ocean_surface
 )
@@ -1616,7 +1638,6 @@ def get_biome_by_id(biome_id: str) -> Biome:
 
 
 def get_effective_temperature(biome_id: str, y: int | float) -> float:
-    """Return Minecraft-style local temperature, including altitude cooling."""
     global _BIOME_REGISTRY
     if _BIOME_REGISTRY is None:
         _BIOME_REGISTRY = _build_biome_id_cache()
@@ -1630,7 +1651,6 @@ def get_effective_temperature(biome_id: str, y: int | float) -> float:
 
 
 def get_precipitation_type(biome_id: str, y: int | float) -> str:
-    """Return ``none``, ``rain`` or ``snow`` for a biome position."""
     global _BIOME_REGISTRY
     if _BIOME_REGISTRY is None:
         _BIOME_REGISTRY = _build_biome_id_cache()

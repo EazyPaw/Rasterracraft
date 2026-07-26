@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import datetime as _datetime
 import time
 
@@ -12,8 +13,6 @@ from resources.server.utils import client_method
 
 
 class SavesMenu(GUI):
-    """Minecraft-style single player world selection menu."""
-
     @client_method
     def __init__(self, render, main_menu=None, client=None):
         super().__init__(render)
@@ -41,7 +40,9 @@ class SavesMenu(GUI):
         self.enter_button = Button(transkey("selectWorld.select"), self.start_selected)
         self.create_button = Button(transkey("selectWorld.create"), self.create_world)
         self.edit_button = Button(transkey("selectServer.edit"), enabled=False)
-        self.delete_button = Button(transkey("selectWorld.delete"), self.delete_selected)
+        self.delete_button = Button(
+            transkey("selectWorld.delete"), self.delete_selected
+        )
         self.recreate_button = Button(transkey("selectWorld.recreate"), enabled=False)
         self.back_button = Button(transkey("gui.back"), self.back)
         self.buttons = [
@@ -69,7 +70,8 @@ class SavesMenu(GUI):
         if not query:
             return self.saves
         return [
-            save for save in self.saves
+            save
+            for save in self.saves
             if query in str(save.get("display_name", "")).lower()
             or query in str(save.get("id", "")).lower()
         ]
@@ -92,7 +94,11 @@ class SavesMenu(GUI):
                 continue
 
             handled = False
-            if event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
+            if event.type in (
+                pygame.MOUSEMOTION,
+                pygame.MOUSEBUTTONDOWN,
+                pygame.MOUSEBUTTONUP,
+            ):
                 for button in self.buttons:
                     if button.handle_event(event):
                         handled = True
@@ -201,8 +207,12 @@ class SavesMenu(GUI):
         self.create_button.set_rect(x + half_w + gap, row1_y, half_w, button_h)
         self.edit_button.set_rect(x, row2_y, quarter_w, button_h)
         self.delete_button.set_rect(x + (quarter_w + gap), row2_y, quarter_w, button_h)
-        self.recreate_button.set_rect(x + (quarter_w + gap) * 2, row2_y, quarter_w, button_h)
-        self.back_button.set_rect(x + (quarter_w + gap) * 3, row2_y, quarter_w, button_h)
+        self.recreate_button.set_rect(
+            x + (quarter_w + gap) * 2, row2_y, quarter_w, button_h
+        )
+        self.back_button.set_rect(
+            x + (quarter_w + gap) * 3, row2_y, quarter_w, button_h
+        )
         self._clamp_scroll()
 
     def _draw_background(self):
@@ -235,8 +245,18 @@ class SavesMenu(GUI):
         self.render.render_text(text, (x, y), (255, 255, 255), self.title_font, True)
 
     def _draw_list(self):
-        self.render.draw_line((55, 55, 55), (0, self.list_top - 12), (self.render.SCREEN_WIDTH, self.list_top - 12), 2)
-        self.render.draw_line((55, 55, 55), (0, self.list_bottom + 8), (self.render.SCREEN_WIDTH, self.list_bottom + 8), 2)
+        self.render.draw_line(
+            (55, 55, 55),
+            (0, self.list_top - 12),
+            (self.render.SCREEN_WIDTH, self.list_top - 12),
+            2,
+        )
+        self.render.draw_line(
+            (55, 55, 55),
+            (0, self.list_bottom + 8),
+            (self.render.SCREEN_WIDTH, self.list_bottom + 8),
+            2,
+        )
         self._entry_rects.clear()
         saves = self.filtered_saves()
         if not saves:
@@ -244,11 +264,18 @@ class SavesMenu(GUI):
             font_size = max(22, min(34, int(self.render.SCREEN_HEIGHT * 0.04)))
             font = self.render.get_font(font_size)
             x = (self.render.SCREEN_WIDTH - font.size(msg)[0]) // 2
-            y = self.list_top + max(20, (self.list_bottom - self.list_top - font_size) // 2)
+            y = self.list_top + max(
+                20, (self.list_bottom - self.list_top - font_size) // 2
+            )
             self.render.render_text(msg, (x, y), (170, 170, 170), font_size, True)
             return
 
-        clip = pygame.Rect(0, self.list_top, self.render.SCREEN_WIDTH, max(1, self.list_bottom - self.list_top))
+        clip = pygame.Rect(
+            0,
+            self.list_top,
+            self.render.SCREEN_WIDTH,
+            max(1, self.list_bottom - self.list_top),
+        )
         old_clip = self.render.screen.get_clip()
         self.render.screen.set_clip(clip)
         for index, save in enumerate(saves):
@@ -269,14 +296,21 @@ class SavesMenu(GUI):
         elif rect.collidepoint(pygame.mouse.get_pos()):
             self.render.draw_rect((120, 120, 120), rect, 1)
 
-        preview_rect = pygame.Rect(rect.x + 12, rect.y + (rect.height - self.preview_size) // 2, self.preview_size, self.preview_size)
+        preview_rect = pygame.Rect(
+            rect.x + 12,
+            rect.y + (rect.height - self.preview_size) // 2,
+            self.preview_size,
+            self.preview_size,
+        )
         preview = self._get_preview(save, self.preview_size)
         if preview is not None:
             self.render.blit(preview, preview_rect.topleft)
 
         text_x = preview_rect.right + 12
         text_w = rect.right - text_x - 8
-        title = str(save.get("display_name") or save.get("id") or transkey("selectWorld.world"))
+        title = str(
+            save.get("display_name") or save.get("id") or transkey("selectWorld.world")
+        )
         last_played = self._format_time(float(save.get("last_played", 0) or 0))
         version = str(save.get("version") or getattr(self.render.client, "version", ""))
         mode = self._mode_text(str(save.get("game_mode", "")))
@@ -287,12 +321,38 @@ class SavesMenu(GUI):
         title_size = max(22, min(32, int(rect.height * 0.34)))
         detail_size = max(18, min(28, int(rect.height * 0.28)))
         clip = pygame.Rect(text_x, rect.y + 4, text_w, rect.height - 8)
-        self.render.render_text(line1, (text_x, rect.y + 8), (255, 255, 255), title_size, True, clip_rect=clip)
-        self.render.render_text(line2, (text_x, rect.y + 8 + title_size), (160, 160, 160), detail_size, True, clip_rect=clip)
-        self.render.render_text(line3, (text_x, rect.y + 8 + title_size + detail_size), (160, 160, 160), detail_size, True, clip_rect=clip)
+        self.render.render_text(
+            line1,
+            (text_x, rect.y + 8),
+            (255, 255, 255),
+            title_size,
+            True,
+            clip_rect=clip,
+        )
+        self.render.render_text(
+            line2,
+            (text_x, rect.y + 8 + title_size),
+            (160, 160, 160),
+            detail_size,
+            True,
+            clip_rect=clip,
+        )
+        self.render.render_text(
+            line3,
+            (text_x, rect.y + 8 + title_size + detail_size),
+            (160, 160, 160),
+            detail_size,
+            True,
+            clip_rect=clip,
+        )
 
     def _draw_bottom_bar(self):
-        rect = pygame.Rect(0, self.bottom_top, self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT - self.bottom_top)
+        rect = pygame.Rect(
+            0,
+            self.bottom_top,
+            self.render.SCREEN_WIDTH,
+            self.render.SCREEN_HEIGHT - self.bottom_top,
+        )
         bar = self.render.create_surface(rect.size, alpha=True)
         self.render.fill_surface(bar, (0, 0, 0, 130))
         self.render.blit(bar, rect.topleft)
@@ -320,7 +380,10 @@ class SavesMenu(GUI):
             if rect.collidepoint(pos):
                 save_id = save["id"]
                 now = time.perf_counter()
-                double_click = self._last_click_id == save_id and now - self._last_click_time < 0.35
+                double_click = (
+                    self._last_click_id == save_id
+                    and now - self._last_click_time < 0.35
+                )
                 self.selected_id = save_id
                 self.confirm_delete_id = None
                 self._last_click_id = save_id
@@ -382,7 +445,11 @@ class SavesMenu(GUI):
             self.delete_button.enabled = has_selection
             self.create_button.enabled = True
             self.back_button.enabled = True
-        self.delete_button.text = transkey("selectWorld.deleteButton") if self.confirm_delete_id == self.selected_id and has_selection else transkey("selectWorld.delete")
+        self.delete_button.text = (
+            transkey("selectWorld.deleteButton")
+            if self.confirm_delete_id == self.selected_id and has_selection
+            else transkey("selectWorld.delete")
+        )
 
     def _next_world_name(self) -> str:
         names = {str(save.get("display_name", "")) for save in self.saves}

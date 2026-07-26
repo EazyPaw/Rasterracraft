@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import logging
 import math
 import threading
@@ -37,12 +38,16 @@ class ClientWorld:
         self._light_update_epochs: dict[int, int] = {}
         self._chunk_load_light_epochs: dict[int, int] = {}
         self._chunk_load_counter = 0
-        self._pending_chunk_block_updates: dict[int, dict[tuple[int, int, int], Block]] = {}
+        self._pending_chunk_block_updates: dict[
+            int, dict[tuple[int, int, int], Block]
+        ] = {}
         self.entities: dict[str, ClientEntity] = {}
         self._entities_lock = threading.RLock()
         self._break_progress: dict[str, dict[str, Any]] = {}
         self._last_fluid_sound_tick = -10_000
-        self._precipitation_height_cache: dict[tuple[int, int], tuple[int, float, bool]] = {}
+        self._precipitation_height_cache: dict[
+            tuple[int, int], tuple[int, float, bool]
+        ] = {}
 
     def _mark_render_chunk_dirty(self, rx: int) -> None:
         self._render_revision += 1
@@ -62,12 +67,6 @@ class ClientWorld:
             return rx in self._regions and rx not in self._loading_chunks
 
     def load_chunk_packet(self, packet: dict, load_version: int) -> None:
-        """Decode and atomically install every part of one chunk.
-
-        Keeping this as one worker task avoids the old race where blocks became
-        visible to physics before lighting/biomes finished, and avoids four Python
-        workers competing with the renderer for the GIL.
-        """
         rx = int(packet["x"])
         try:
             if int(packet.get("format", 1)) == 2:
@@ -90,7 +89,9 @@ class ClientWorld:
         except Exception:
             logging.exception("Failed to decode chunk %s", rx)
 
-    def _load_compact_chunk(self, rx: int, compressed: bytes, load_version: int) -> None:
+    def _load_compact_chunk(
+        self, rx: int, compressed: bytes, load_version: int
+    ) -> None:
         data = msgpack.unpackb(zlib.decompress(compressed), raw=False)
         height = int(data["height"])
         depth = int(data["depth"])
@@ -110,8 +111,6 @@ class ClientWorld:
         chunk_array = np.full((16, height, depth), AIR(), dtype=Block)
         stride = height * depth
         for flat_index, palette_index in enumerate(indices):
-            # Eight coarse yields per chunk preserve render responsiveness
-            # without the 8,192 scheduler round-trips of the old decoder.
             if flat_index and flat_index % 1024 == 0:
                 time.sleep(0)
             block_data = palette[int(palette_index)]
@@ -124,8 +123,14 @@ class ClientWorld:
             block.location = Location(self, rx * 16 + x, y, z)
             chunk_array[x, y, z] = block
 
-        sky = np.frombuffer(data["sky_light"], dtype=np.uint8).reshape(16, height).copy()
-        block_light = np.frombuffer(data["block_light"], dtype=np.uint8).reshape(16, height).copy()
+        sky = (
+            np.frombuffer(data["sky_light"], dtype=np.uint8).reshape(16, height).copy()
+        )
+        block_light = (
+            np.frombuffer(data["block_light"], dtype=np.uint8)
+            .reshape(16, height)
+            .copy()
+        )
         light = np.maximum(sky, block_light)
 
         biome_width = int(data.get("biome_index_width", 1))
@@ -141,17 +146,21 @@ class ClientWorld:
         with self._chunk_state_lock:
             if self._chunk_load_versions.get(rx) != load_version:
                 return
-            for (world_x, y, z), block in self._pending_chunk_block_updates.pop(rx, {}).items():
+            for (world_x, y, z), block in self._pending_chunk_block_updates.pop(
+                rx, {}
+            ).items():
                 block.location = Location(self, world_x, y, z)
                 chunk_array[world_x % 16, y, z] = block
             self._regions[rx] = chunk_array
-            light_changed_during_load = (
-                self._light_update_epochs.get(rx, 0)
-                != self._chunk_load_light_epochs.get(rx, 0)
-            )
+            light_changed_during_load = self._light_update_epochs.get(
+                rx, 0
+            ) != self._chunk_load_light_epochs.get(rx, 0)
             if light_changed_during_load and all(
-                rx in mapping for mapping in (
-                    self.light_map, self.sky_light_map, self.block_light_map
+                rx in mapping
+                for mapping in (
+                    self.light_map,
+                    self.sky_light_map,
+                    self.block_light_map,
                 )
             ):
                 light = self.light_map[rx]
@@ -166,7 +175,9 @@ class ClientWorld:
             self._loading_chunks.discard(rx)
             self._mark_render_chunk_dirty(rx)
 
-    def load_chunk(self, rx: int, chunk: dict[str, dict], load_version: int | None = None):
+    def load_chunk(
+        self, rx: int, chunk: dict[str, dict], load_version: int | None = None
+    ):
         if load_version is None:
             load_version = self.begin_chunk_load(rx)
         chunk_array = np.full((16, self.y_max, 2), AIR(), dtype=Block)
@@ -175,7 +186,7 @@ class ClientWorld:
             x, y, z = map(int, key.split(","))
             world_x = rx * 16 + x  # 计算世界绝对坐标
             block = get_block_by_id(value["id"])
-            block.write_nbt(value.get('nbt', {}))
+            block.write_nbt(value.get("nbt", {}))
             block.location = Location(self, world_x, y, z)  # 使用绝对坐标
             chunk_array[x][y][z] = block
         with self._chunk_state_lock:
@@ -189,25 +200,38 @@ class ClientWorld:
             self._loading_chunks.discard(rx)
             self._mark_render_chunk_dirty(rx)
 
-    def load_lights(self, rx: int, light_map: dict[str, int],
-                    sky_light_map: dict[str, int] | None = None,
-                    block_light_map: dict[str, int] | None = None,
-                    load_version: int | None = None):
+    def load_lights(
+        self,
+        rx: int,
+        light_map: dict[str, int],
+        sky_light_map: dict[str, int] | None = None,
+        block_light_map: dict[str, int] | None = None,
+        load_version: int | None = None,
+    ):
         light_array = np.full((16, self.y_max), 0, dtype=np.uint8)
         for key, value in light_map.items():
             x, y = key.split(",")
             x, y = int(x), int(y)
             light_array[x][y] = value
-        sky_array = self._dict_to_light_array(sky_light_map) if sky_light_map is not None else None
-        block_array = self._dict_to_light_array(block_light_map) if block_light_map is not None else None
+        sky_array = (
+            self._dict_to_light_array(sky_light_map)
+            if sky_light_map is not None
+            else None
+        )
+        block_array = (
+            self._dict_to_light_array(block_light_map)
+            if block_light_map is not None
+            else None
+        )
         with self._chunk_state_lock:
-            if load_version is not None and self._chunk_load_versions.get(rx) != load_version:
-                return
             if (
                 load_version is not None
-                and self._light_update_epochs.get(rx, 0)
-                != self._chunk_load_light_epochs.get(rx, 0)
+                and self._chunk_load_versions.get(rx) != load_version
             ):
+                return
+            if load_version is not None and self._light_update_epochs.get(
+                rx, 0
+            ) != self._chunk_load_light_epochs.get(rx, 0):
                 return
             self.light_map[rx] = light_array
             if sky_array is not None:
@@ -221,16 +245,17 @@ class ClientWorld:
             )
             self._mark_render_chunk_dirty(rx)
 
-    def update_lights(self, rx: int, light_map: dict[str, int],
-                      sky_light_map: dict[str, int] | None = None,
-                      block_light_map: dict[str, int] | None = None):
+    def update_lights(
+        self,
+        rx: int,
+        light_map: dict[str, int],
+        sky_light_map: dict[str, int] | None = None,
+        block_light_map: dict[str, int] | None = None,
+    ):
         """
         增量更新光照数据（只更新变化的部分）
         """
         with self._chunk_state_lock:
-            # Build and publish one complete copy-on-write snapshot while the
-            # chunk installer is excluded. Whichever operation gets the lock
-            # last can now determine ordering through the light epoch.
             previous_light = self.light_map.get(rx)
             light_array = (
                 previous_light.copy()
@@ -262,17 +287,27 @@ class ClientWorld:
             self._light_snapshots[rx] = (light_array, sky_array, block_array)
             self._mark_render_chunk_dirty(rx)
 
-    def update_lights_compact(self, rx: int, height: int,
-                              sky_light: bytes, block_light: bytes) -> None:
-        """Install a full light snapshot from the compact server packet."""
+    def update_lights_compact(
+        self, rx: int, height: int, sky_light: bytes, block_light: bytes
+    ) -> None:
         try:
             height = int(height)
             expected = 16 * height
-            if height != self.y_max or len(sky_light) != expected or len(block_light) != expected:
-                logging.warning("Ignoring malformed compact light update for chunk %s", rx)
+            if (
+                height != self.y_max
+                or len(sky_light) != expected
+                or len(block_light) != expected
+            ):
+                logging.warning(
+                    "Ignoring malformed compact light update for chunk %s", rx
+                )
                 return
-            sky_array = np.frombuffer(sky_light, dtype=np.uint8).reshape((16, height)).copy()
-            block_array = np.frombuffer(block_light, dtype=np.uint8).reshape((16, height)).copy()
+            sky_array = (
+                np.frombuffer(sky_light, dtype=np.uint8).reshape((16, height)).copy()
+            )
+            block_array = (
+                np.frombuffer(block_light, dtype=np.uint8).reshape((16, height)).copy()
+            )
         except (TypeError, ValueError):
             logging.warning("Ignoring malformed compact light update for chunk %s", rx)
             return
@@ -287,7 +322,6 @@ class ClientWorld:
             self._mark_render_chunk_dirty(rx)
 
     def get_light_snapshot(self, rx: int):
-        """Return one internally consistent light state for a render pass."""
         snapshot = self._light_snapshots.get(rx)
         if snapshot is not None:
             return snapshot
@@ -304,7 +338,9 @@ class ClientWorld:
             light_array[int(x)][int(y)] = value
         return light_array
 
-    def load_biomes(self, rx: int, biome_dict: dict[str, str], load_version: int | None = None):
+    def load_biomes(
+        self, rx: int, biome_dict: dict[str, str], load_version: int | None = None
+    ):
         """从服务器数据包加载整个区块的生物群系数据"""
         biome_array = np.full((16, self.y_max), "void", dtype="<U32")
         for key, biome_id in biome_dict.items():
@@ -312,7 +348,10 @@ class ClientWorld:
             x, y = int(x_str), int(y_str)
             biome_array[x][y] = biome_id
         with self._chunk_state_lock:
-            if load_version is not None and self._chunk_load_versions.get(rx) != load_version:
+            if (
+                load_version is not None
+                and self._chunk_load_versions.get(rx) != load_version
+            ):
                 return
             self.biome_map[rx] = biome_array
             self._mark_render_chunk_dirty(rx)
@@ -348,15 +387,9 @@ class ClientWorld:
             return "none"
         return get_precipitation_type(biome_id, y)
 
-    def get_precipitation_surface(self, x: int, z: int = 0) -> tuple[float, bool] | None:
-        """Return the first precipitation impact surface in one layer.
-
-        Solid blocks stop rain at their top face.  Fluids are non-solid for
-        movement, but rain must stop at their visible surface; otherwise the
-        weather pass continues through the water and the splash is spawned
-        below it.  The fluid height is allowed to be fractional for flowing
-        water.
-        """
+    def get_precipitation_surface(
+        self, x: int, z: int = 0
+    ) -> tuple[float, bool] | None:
         rx = int(x) // 16
         chunk = self._regions.get(rx)
         if chunk is None:
@@ -388,7 +421,6 @@ class ClientWorld:
         return height, is_water
 
     def get_precipitation_height(self, x: int, z: int = 0) -> float | None:
-        """Return the first open Y above the highest solid block or water surface."""
         surface = self.get_precipitation_surface(x, z)
         return None if surface is None else surface[0]
 
@@ -417,12 +449,12 @@ class ClientWorld:
                 if int(entity.x // 16) == x:
                     self.entities.pop(uuid, None)
             for miner_uuid, state in list(self._break_progress.items()):
-                if int(state['x']) // 16 == x:
+                if int(state["x"]) // 16 == x:
                     self._break_progress.pop(miner_uuid, None)
         self._mark_render_chunk_dirty(x)
 
     def update_entity(self, packet: dict):
-        entity_uuid = str(packet.get('uuid', ''))
+        entity_uuid = str(packet.get("uuid", ""))
         if not entity_uuid:
             return
         if entity_uuid == getattr(self.client, "server_player_uuid", None):
@@ -435,14 +467,20 @@ class ClientWorld:
                 self.entities[entity_uuid] = entity
             else:
                 entity.apply_packet(packet)
-            if entity.entity_id == 'player' and entity.breaking and entity.break_target is not None:
+            if (
+                entity.entity_id == "player"
+                and entity.breaking
+                and entity.break_target is not None
+            ):
                 x, y, z = entity.break_target
                 self._break_progress[entity_uuid] = {
-                    'miner_uuid': entity_uuid,
-                    'x': int(x), 'y': int(y), 'z': int(z),
-                    'progress': max(0.0, min(1.0, float(entity.break_progress))),
+                    "miner_uuid": entity_uuid,
+                    "x": int(x),
+                    "y": int(y),
+                    "z": int(z),
+                    "progress": max(0.0, min(1.0, float(entity.break_progress))),
                 }
-            elif entity.entity_id == 'player':
+            elif entity.entity_id == "player":
                 self._break_progress.pop(entity_uuid, None)
 
     def remove_entity(self, entity_uuid: str):
@@ -455,10 +493,10 @@ class ClientWorld:
             return list(self.entities.values())
 
     def update_break_progress(self, packet: dict) -> None:
-        miner_uuid = str(packet.get('miner_uuid', ''))
+        miner_uuid = str(packet.get("miner_uuid", ""))
         if not miner_uuid:
             return
-        active = packet.get('active') is True
+        active = packet.get("active") is True
         with self._entities_lock:
             entity = self.entities.get(miner_uuid)
             if not active:
@@ -469,16 +507,18 @@ class ClientWorld:
                     entity.break_target = None
                 return
             try:
-                x = int(packet.get('x'))
-                y = int(packet.get('y'))
-                z = int(packet.get('z'))
-                progress = max(0.0, min(1.0, float(packet.get('progress', 0.0))))
+                x = int(packet.get("x"))
+                y = int(packet.get("y"))
+                z = int(packet.get("z"))
+                progress = max(0.0, min(1.0, float(packet.get("progress", 0.0))))
             except (TypeError, ValueError, OverflowError):
                 return
             state = {
-                'miner_uuid': miner_uuid,
-                'x': x, 'y': y, 'z': z,
-                'progress': progress,
+                "miner_uuid": miner_uuid,
+                "x": x,
+                "y": y,
+                "z": z,
+                "progress": progress,
             }
             self._break_progress[miner_uuid] = state
             if entity is not None:
@@ -494,7 +534,7 @@ class ClientWorld:
         target = int(x), int(y), int(z)
         with self._entities_lock:
             for miner_uuid, state in list(self._break_progress.items()):
-                if (state['x'], state['y'], state['z']) == target:
+                if (state["x"], state["y"], state["z"]) == target:
                     self._break_progress.pop(miner_uuid, None)
                     entity = self.entities.get(miner_uuid)
                     if entity is not None:
@@ -502,7 +542,9 @@ class ClientWorld:
                         entity.break_progress = 0.0
                         entity.break_target = None
 
-    def get_block(self, x_loc: int | Location, y: int | None = None, z: int | None = None) -> Block:
+    def get_block(
+        self, x_loc: int | Location, y: int | None = None, z: int | None = None
+    ) -> Block:
         x, y, z = decide_x_or_loc(x_loc, y, z)
         x, y, z = int(x), int(y), int(z)
         if y < 0 or y >= self.y_max:
@@ -511,10 +553,16 @@ class ClientWorld:
         rela_x = x % 16
         if chunk is None:
             return AIR()
-        block = cast(Block, chunk[rela_x, y, z]) # 强迫症写法，为了避免烦人的IDE警报
+        block = cast(Block, chunk[rela_x, y, z])  # 强迫症写法，为了避免烦人的IDE警报
         return block
 
-    def set_block(self, block: Block, x_loc: int | Location, y: int | None = None, z: int | None = None):
+    def set_block(
+        self,
+        block: Block,
+        x_loc: int | Location,
+        y: int | None = None,
+        z: int | None = None,
+    ):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block.location = Location(self, x, y, z)
         rx = x // 16
@@ -528,7 +576,9 @@ class ClientWorld:
         chunk[rela_x, y, z] = block
         self._mark_render_chunk_dirty(rx)
 
-    def break_block(self,x_loc: int | Location, y: int | None = None, z: int | None = None):
+    def break_block(
+        self, x_loc: int | Location, y: int | None = None, z: int | None = None
+    ):
         """
         破坏客户端世界的方块
         :param x_loc: 可传入 x 或 Location
@@ -538,7 +588,8 @@ class ClientWorld:
         """
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block = self.get_block(x, y, z)
-        if isinstance(block, AIR): return
+        if isinstance(block, AIR):
+            return
         block.on_break()
         self.play_sound(block.break_sound, block.location)
         self.set_block(AIR(), x, y, z)
@@ -559,24 +610,26 @@ class ClientWorld:
         x, y, z = decide_x_or_loc(x_loc, y, z)
 
         # 客户端实际使用 client_player；兼容旧的 client.player 引用。
-        player = getattr(self.client, 'client_player', None) or getattr(self.client, 'player', None)
+        player = getattr(self.client, "client_player", None) or getattr(
+            self.client, "player", None
+        )
         if player is None:
             # 无玩家信息时降级为普通播放
             self.client.resources_manager.play_sound(sound_id, volume=volume)
             return
 
-        px, py, pz = player.x, player.y, getattr(player, 'z', 0.0)
+        px, py, pz = player.x, player.y, getattr(player, "z", 0.0)
 
         # 计算相对位置
         dx = x - px
         dy = y - py
         dz = z - pz
         dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-        max_dist = 16.0          # 最大可听距离（可根据需要调整）
-        max_pan_range = 10.0     # 立体声完全偏到一侧的水平距离
+        max_dist = 16.0  # 最大可听距离（可根据需要调整）
+        max_pan_range = 10.0  # 立体声完全偏到一侧的水平距离
 
         if dist > max_dist:
-            return               # 太远，不播放
+            return  # 太远，不播放
 
         # 距离衰减因子（线性衰减）
         vol_factor = max(0.0, 1.0 - dist / max_dist)
@@ -584,25 +637,23 @@ class ClientWorld:
         # 立体声左右平衡计算（基于水平偏移 dx）
         # pan 范围 [-1, 1]，-1 完全左声道，1 完全右声道
         pan = max(-1.0, min(1.0, dx / max_pan_range))
-        # Equal-power panning keeps a centered source from sounding quieter
-        # while still reaching a single channel at the far left/right.
+
         left_vol = vol_factor * math.sqrt((1.0 - pan) / 2.0)
         right_vol = vol_factor * math.sqrt((1.0 + pan) / 2.0)
 
         # 调用资源管理器播放立体声音效
         self.client.resources_manager.play_sound(
-            sound_id,
-            stereo_balance=(left_vol * volume, right_vol * volume)
+            sound_id, stereo_balance=(left_vol * volume, right_vol * volume)
         )
 
     def tick_fluid_sounds(self) -> None:
-        """Play a throttled ambient sound for the nearest loaded fluid cell."""
-        player = getattr(self.client, "client_player", None) or getattr(self.client, "player", None)
+        player = getattr(self.client, "client_player", None) or getattr(
+            self.client, "player", None
+        )
         if player is None:
             return
         tick = int(getattr(self.client, "client_ticks", 0))
-        # One sound every ~1.5 seconds is enough to make flowing fluids
-        # audible without starting a channel for every visible block.
+
         if tick - self._last_fluid_sound_tick < 30:
             return
 
@@ -631,7 +682,6 @@ class ClientWorld:
         if best is None:
             return
         try:
-            
             _, sound_id, x, y, z = best
         except (TypeError, ValueError):
             if best is None:

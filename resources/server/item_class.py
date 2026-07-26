@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import colorsys
 import math
 import random
@@ -15,7 +16,7 @@ from resources.server.utils import client_method
 class ItemStack:
     _durability_bar_cache = {}
 
-    def __init__(self, material, amount: int = 1, nbt = None):
+    def __init__(self, material, amount: int = 1, nbt=None):
         if nbt is None:
             nbt = {}
         self.nbt = nbt
@@ -36,7 +37,6 @@ class ItemStack:
         return self.material == materials.AIR() or self.amount == 0
 
     def get_max_damage(self) -> int:
-        """Return the stack's data-component override or material durability."""
         raw = self.nbt.get(
             "minecraft:max_damage",
             self.nbt.get("max_damage", getattr(self.material, "max_damage", 0)),
@@ -47,10 +47,8 @@ class ItemStack:
             return max(0, int(getattr(self.material, "max_damage", 0)))
 
     def is_unbreakable(self) -> bool:
-        """Support both modern component presence and legacy boolean NBT."""
-        return (
-            "minecraft:unbreakable" in self.nbt
-            or bool(self.nbt.get("unbreakable", self.nbt.get("Unbreakable", False)))
+        return "minecraft:unbreakable" in self.nbt or bool(
+            self.nbt.get("unbreakable", self.nbt.get("Unbreakable", False))
         )
 
     def is_damageable(self) -> bool:
@@ -89,7 +87,6 @@ class ItemStack:
         return max(0, self.get_max_damage() - self.get_damage())
 
     def _get_enchantment_level(self, enchantment_id: str) -> int:
-        """Read common modern and legacy enchantment payload shapes."""
         wanted = str(enchantment_id).split(":")[-1]
         components = (
             self.nbt.get("minecraft:enchantments"),
@@ -139,12 +136,6 @@ class ItemStack:
             )
 
     def hurt_and_break(self, amount: int, holder=None) -> bool:
-        """Apply server-owned durability damage and remove a broken item.
-
-        Unbreaking is evaluated independently for every requested point, as it
-        is for non-armour items in Java Edition.  ``True`` means stack state
-        changed and callers should synchronize the authoritative inventory.
-        """
         try:
             amount = int(amount)
         except (TypeError, ValueError):
@@ -193,9 +184,9 @@ class ItemStack:
         red, green, blue = colorsys.hsv_to_rgb(max(0.0, remaining) / 3.0, 1.0, 1.0)
         return int(red * 255), int(green * 255), int(blue * 255)
 
-    def draw_durability_bar(self, render, slot_x: float, slot_y: float,
-                            slot_size: float) -> None:
-        """Draw Minecraft's 13x2 durability meter in a GUI slot."""
+    def draw_durability_bar(
+        self, render, slot_x: float, slot_y: float, slot_size: float
+    ) -> None:
         if not self.is_damaged():
             return
         pixel = max(1, round(float(slot_size) / 18.0))
@@ -217,7 +208,7 @@ class ItemStack:
         render.blit(meter, (x, y))
 
     def is_stackable_with(
-        self, other: 'ItemStack', *, require_full_fit: bool = True
+        self, other: "ItemStack", *, require_full_fit: bool = True
     ) -> bool:
         """
         判断两个物品是否可以堆叠。
@@ -227,16 +218,10 @@ class ItemStack:
         """
         compatible = self.material == other.material and self.nbt == other.nbt
         return compatible and (
-            not require_full_fit
-            or self.amount + other.amount <= self.max_stack_size
+            not require_full_fit or self.amount + other.amount <= self.max_stack_size
         )
 
     def get_attribute_modifiers(self, equipment_slot: str = "mainhand"):
-        """Return validated ``(attribute id, modifier)`` pairs for this slot.
-
-        An explicit modern ``attribute_modifiers`` item component replaces the
-        material defaults, matching Java Edition's data-component behavior.
-        """
         slot = str(equipment_slot).lower().replace("_", "")
         sentinel = object()
         component = self.nbt.get(
@@ -260,8 +245,10 @@ class ItemStack:
             valid_slot = (
                 entry_slot == "any"
                 or entry_slot == slot
-                or entry_slot == "hand" and slot in {"mainhand", "offhand"}
-                or entry_slot == "armor" and slot in {"head", "chest", "legs", "feet"}
+                or entry_slot == "hand"
+                and slot in {"mainhand", "offhand"}
+                or entry_slot == "armor"
+                and slot in {"head", "chest", "legs", "feet"}
             )
             if not valid_slot:
                 continue
@@ -274,7 +261,7 @@ class ItemStack:
                 continue
         return tuple(result)
 
-    def stack_item(self, other: 'ItemStack') -> bool:
+    def stack_item(self, other: "ItemStack") -> bool:
         """
         尝试将两个物品堆叠在一起, 返回是否成功
         """
@@ -319,22 +306,21 @@ class ItemStack:
 
         res = self.material.get_texture(scale)
         if shadow and res is not None:
-
             # 创建带阴影的最终纹理
             width = res.get_width()
             height = res.get_height()
-            
+
             # 创建一个更大的surface来容纳阴影偏移
-            result = pygame.Surface((width + px_scale, height + px_scale), pygame.SRCALPHA)
-            
-            # Vectorised alpha-preserving shadow tint.  The old nested Python
-            # pixel loop ran again for every animated frame.
+            result = pygame.Surface(
+                (width + px_scale, height + px_scale), pygame.SRCALPHA
+            )
+
             shadow_surface = res.copy()
             shadow_surface.fill(
                 (0, 0, 0, 128),
                 special_flags=pygame.BLEND_RGBA_MULT,
             )
-            
+
             # 将阴影绘制到结果surface（向右下偏移1px）
             result.blit(shadow_surface, (px_scale, px_scale))
 
@@ -346,15 +332,19 @@ class ItemStack:
             self.material.texture_cache[cache_key] = result
             if len(self.material.texture_cache) > 128:
                 self.material.texture_cache.pop(next(iter(self.material.texture_cache)))
-            
+
             return result
-        
+
         return res
 
     def get_lore(self) -> list[str | Text]:
         lore = []
         if self.is_damageable() and self.get_damage() != 0:
-            lore.append(Text(f'durability: {self.get_max_damage() - self.get_damage()} / {self.get_max_damage()}'))
+            lore.append(
+                Text(
+                    f"durability: {self.get_max_damage() - self.get_damage()} / {self.get_max_damage()}"
+                )
+            )
         return lore
 
 

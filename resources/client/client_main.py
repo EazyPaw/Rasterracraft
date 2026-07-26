@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import logging
 import os
 import socket
@@ -29,6 +30,7 @@ from resources.server.server_main import Server
 from resources.server.text import Text
 from resources.server.utils import recv_exact, set_client
 
+
 class Client:
     def __init__(self):
         # 初始化剪贴板（Ctrl+V 粘贴用）
@@ -58,9 +60,10 @@ class Client:
         self._prepare_server_thread()
         self.server: Server | None = None
         self.server_process: subprocess.Popen | None = None
-        # One persistent decoder avoids several Python workers contending with
-        # pygame for the GIL.  zlib/msgpack/numpy still do their bulk work in C.
-        self.chunk_load_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ChunkLoader")
+
+        self.chunk_load_pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="ChunkLoader"
+        )
         self.save_complete_event = threading.Event()
         self.in_game = False
         self.world_loading = False
@@ -74,18 +77,20 @@ class Client:
         self.initial_load_started = False
         self.game_started = False
         self.resources_manager = ResourcesManager(self)
-        self.resources_manager.load_sounds_json('assets/minecraft/sounds.json')
+        self.resources_manager.load_sounds_json("assets/minecraft/sounds.json")
         self.rate = 20
         self.client_ticks = 0
         # 聊天消息历史
-        self.chat_messages: list[dict] = []  # [{'text': str, 'color': tuple, 'time': float}]
+        self.chat_messages: list[dict] = []
         self.max_chat_messages = 100
         self.chat_gui = None  # ChatGUI 在步骤 6 初始化
         self.client_player: ClientPlayer | None = None
         self.server_player_uuid: str | None = None
         self.game_manager = GameManager(self)
         self.particle_manager = ParticleManager(self)
-        self.game_thread = threading.Thread(target=self.game_manager.start_game_loop, name="InGameThread")
+        self.game_thread = threading.Thread(
+            target=self.game_manager.start_game_loop, name="InGameThread"
+        )
         self.game_thread.daemon = True
         self.hold_mouse_buttons = [False, False, False]
         self.hold_key_map = {}
@@ -99,18 +104,21 @@ class Client:
         self.render.request_text_input(False)
 
         # 简写方法
-        # self.transkey = self.resources_manager.get_translation_key
 
     def _prepare_socket_transport(self):
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._send_lock = threading.Lock()
         self.socket_connected = threading.Event()
         self.socket_thread_running = True
-        self.socket_thread = threading.Thread(target=self.start_socket, name="SocketThread")
+        self.socket_thread = threading.Thread(
+            target=self.start_socket, name="SocketThread"
+        )
         self.socket_thread.daemon = True
 
     def _prepare_server_thread(self):
-        self.server_thread = threading.Thread(target=self.start_server, name="ServerThread")
+        self.server_thread = threading.Thread(
+            target=self.start_server, name="ServerThread"
+        )
         self.server_thread.daemon = True
 
     def start_socket(self):
@@ -129,7 +137,9 @@ class Client:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                 else:
-                    logging.error("Could not connect to integrated server after retries")
+                    logging.error(
+                        "Could not connect to integrated server after retries"
+                    )
             except OSError as e:
                 last_error = e
                 if not self.socket_thread_running or self.is_shutting_down:
@@ -151,10 +161,9 @@ class Client:
         while self.socket_thread_running:
             try:
                 raw_len = recv_exact(self.client_sock, 4)  # 先读 4 字节长度头
-                msg_len = struct.unpack('>I', raw_len)[0]  # 解析出长度（大端序）
+                msg_len = struct.unpack(">I", raw_len)[0]  # 解析出长度（大端序）
                 msg_body = recv_exact(self.client_sock, msg_len)  # 再读消息体
 
-                # logging.debug(f"Received {msg_len} data from server")
                 obj_dict = msgpack.unpackb(msg_body, raw=False)
                 decode_packet(obj_dict, self)
             except (ConnectionError, OSError) as e:
@@ -188,7 +197,6 @@ class Client:
         return f"{type(error).__name__}: {message}" if message else type(error).__name__
 
     def show_disconnect(self, title_key: str, reason: str | Text) -> None:
-        """Stop gameplay and show exactly one connection failure screen."""
         if self.is_shutting_down or self.disconnect_screen is not None:
             return
         self.socket_connected.clear()
@@ -202,14 +210,14 @@ class Client:
         self.disconnect_screen = DisconnectScreen(self.render, title_key, reason)
         self.render.show_gui(self.disconnect_screen)
 
-    def sent_packet(self, obj, obj_type = None, *args) -> bool:
+    def sent_packet(self, obj, obj_type=None, *args) -> bool:
         """
         发送数据包到服务器
 
-        参数：
         - obj: 要编码的对象
         - obj_type: 包类型
         - *args: 额外参数（如 location）
+
         """
         try:
             # 在子进程模式下，服务端需要时间启动并监听端口，
@@ -217,27 +225,22 @@ class Client:
             if not self.socket_connected.is_set():
                 return False
 
-            # if obj_type == "BreakBlock":
-            #     location: Location = obj.location
-            #     print(get_light_levels_at(self.client_world.light_map, location.x, location.y))
             packet_dict = encode_packet(obj, obj_type, list(args))
 
             # 检查是否编码成功
             if not packet_dict:
-                logging.warning(f"Failed to encode packet: obj={type(obj)}, type={obj_type}")
+                logging.warning(
+                    f"Failed to encode packet: obj={type(obj)}, type={obj_type}"
+                )
                 return False
 
             packet_data = msgpack.packb(packet_dict, use_bin_type=True)
             length = len(packet_data)
-            packet = struct.pack('>I', length) + packet_data
+            packet = struct.pack(">I", length) + packet_data
 
-            # Movement, chunk acknowledgements and GUI actions originate on
-            # different threads.  Serialize whole frames so TCP packets cannot
-            # interleave at byte level.
             with self._send_lock:
                 self.client_sock.sendall(packet)
 
-            # logging.debug(f"Sent {obj_type} packet ({length} bytes)")
             return True
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError) as e:
             logging.warning(f"Connection lost while sending {obj_type}: {e}")
@@ -278,11 +281,12 @@ class Client:
             self.render.close_gui(self.saves_menu)
         level = save_manager.load_level(save_id) or {}
         requested_mode = str(level.get("game_mode", "survival")).lower()
-        self.current_game_mode = requested_mode if requested_mode in ("creative", "survival") else "survival"
+        self.current_game_mode = (
+            requested_mode if requested_mode in ("creative", "survival") else "survival"
+        )
         self.client_player = ClientPlayer(self, self.current_game_mode)
         self._install_game_controls()
-        # ClientPlayer's game-mode constructor rebuilds the in-game GUI list,
-        # so install the join screen after it has finished doing that.
+
         self.loading_screen = LoadingScreen(self.render)
         self.render.show_gui(self.loading_screen)
 
@@ -293,14 +297,12 @@ class Client:
         self.socket_thread.start()
 
     def on_chunk_loaded(self, rx: int) -> None:
-        """Called after the decoder atomically installed a chunk."""
         self.loaded_chunk_regions.add(int(rx))
         if self.client_player is not None:
-            self.sent_packet({'__class__': 'ChunkReady', 'rx': int(rx)})
+            self.sent_packet({"__class__": "ChunkReady", "rx": int(rx)})
         self._try_finish_world_loading()
 
     def handle_initial_world_complete(self, regions) -> None:
-        """Arm the final join gate after the server queued the initial batch."""
         try:
             loaded_targets = {int(rx) for rx in regions}
         except (TypeError, ValueError):
@@ -338,13 +340,18 @@ class Client:
         if not self.required_spawn_regions.issubset(self.loaded_chunk_regions):
             return
         if self.pending_teleport_id is not None:
-            self.sent_packet({'__class__': 'TeleportConfirm', 'teleport_id': self.pending_teleport_id})
+            self.sent_packet(
+                {
+                    "__class__": "TeleportConfirm",
+                    "teleport_id": self.pending_teleport_id,
+                }
+            )
             self.pending_teleport_id = None
-        # The first visible frame should already be at the authoritative
-        # position/time; do not expose camera or sky interpolation behind the
-        # loading screen.
+
         player = self.client_player
-        visual_mid_y = player.y + player.skeleton.size * player.skeleton.AUTHORED_HEIGHT_BLOCKS / 2
+        visual_mid_y = (
+            player.y + player.skeleton.size * player.skeleton.AUTHORED_HEIGHT_BLOCKS / 2
+        )
         self.render.camera.snap_to(
             player.x + player.width / 2 - 0.5,
             visual_mid_y + 0.5,
@@ -360,12 +367,14 @@ class Client:
             self.loading_screen = None
 
     def can_simulate_player(self, player: ClientPlayer) -> bool:
-        """Collision queries must never treat an unreceived chunk as air."""
         if self.world_loading:
             return False
-        x_values = (player.x, player.x + player.width - 1e-6,
-                    player.x + player.motion.x,
-                    player.x + player.motion.x + player.width - 1e-6)
+        x_values = (
+            player.x,
+            player.x + player.width - 1e-6,
+            player.x + player.motion.x,
+            player.x + player.motion.x + player.width - 1e-6,
+        )
         return all(int(x // 16) in self.loaded_chunk_regions for x in x_values)
 
     def open_pause_menu(self):
@@ -426,7 +435,9 @@ class Client:
         self._request_server_save(timeout=8.0)
         self._close_current_game_transport()
         self.chunk_load_pool.shutdown(wait=True)
-        self.chunk_load_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ChunkLoader")
+        self.chunk_load_pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="ChunkLoader"
+        )
         self.client_world = client_world.ClientWorld(self)
         self.render.client_world = self.client_world
         self.client_player = None
@@ -480,7 +491,7 @@ class Client:
             }
             if self.fore_place_switch_mode == "switch":
                 self.key_map[pygame.K_q] = lambda: setattr(
-                    self.client_player, 'fore_place', not self.client_player.fore_place
+                    self.client_player, "fore_place", not self.client_player.fore_place
                 )
 
     @staticmethod
@@ -489,11 +500,13 @@ class Client:
         获取资源文件的绝对路径，兼容开发环境和 Nuitka 打包环境。
         """
         # Nuitka 打包后会将资源解压到 sys._MEIPASS（如果有）
-        if getattr(sys, '_MEIPASS', False):
+        if getattr(sys, "_MEIPASS", False):
             base_path = sys._MEIPASS
         else:
             # 开发环境下，根据当前文件位置推算（这里根据你的目录结构）
-            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            base_path = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
         return os.path.join(base_path, relative_path)
 
     def _start_server_subprocess(self):
@@ -514,8 +527,14 @@ class Client:
             # 3. 启动子进程（建议传递干净的环境副本，避免 Nuitka 注入变量干扰）
             clean_env = os.environ.copy()
             # 移除可能引起冲突的环境变量（可选）
-            keys_to_remove = ['PYTHONPATH', 'PYTHONHOME', 'NUITKA_ONEFILE_PARENT',
-                              'NUITKA_RESUME_FILENAME', 'TCL_LIBRARY', 'TK_LIBRARY']
+            keys_to_remove = [
+                "PYTHONPATH",
+                "PYTHONHOME",
+                "NUITKA_ONEFILE_PARENT",
+                "NUITKA_RESUME_FILENAME",
+                "TCL_LIBRARY",
+                "TK_LIBRARY",
+            ]
             for key in keys_to_remove:
                 clean_env.pop(key, None)
 
@@ -532,7 +551,9 @@ class Client:
 
     def _start_server_thread(self):
         """以线程方式启动服务端（同一进程，受 GIL 影响）。"""
-        logging.warning("Server is running on threading mode, if you are not debugging your client/server, please use subprocess mode instead to have a better performance.")
+        logging.warning(
+            "Server is running on threading mode, if you are not debugging your client/server, please use subprocess mode instead to have a better performance."
+        )
         try:
             self.server = Server(True, self, self.current_save_id)
             self.server_thread.start()
@@ -544,13 +565,9 @@ class Client:
 
     def add_chat_message(self, text, color=(255, 255, 255)):
         """添加聊天消息到历史记录"""
-        self.chat_messages.append({
-            'text': text,
-            'color': color,
-            'time': time.time()
-        })
+        self.chat_messages.append({"text": text, "color": color, "time": time.time()})
         if len(self.chat_messages) > self.max_chat_messages:
-            self.chat_messages = self.chat_messages[-self.max_chat_messages:]
+            self.chat_messages = self.chat_messages[-self.max_chat_messages :]
 
     def _close_current_game_transport(self):
         self.socket_thread_running = False
@@ -608,7 +625,7 @@ class Client:
         self.chunk_load_pool.shutdown(wait=True)
 
         # 清理音频设备
-        if hasattr(self, 'audio_device'):
+        if hasattr(self, "audio_device"):
             try:
                 self.audio_device.stop()
             except Exception:
@@ -624,7 +641,9 @@ class Client:
             self.server_process.terminate()
             self.server_process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            logging.warning("Server subprocess did not terminate in time, force killing")
+            logging.warning(
+                "Server subprocess did not terminate in time, force killing"
+            )
             self.server_process.kill()
             self.server_process.wait()
         except Exception:
@@ -652,9 +671,7 @@ class Client:
             return
         try:
             self.save_complete_event.clear()
-            self.sent_packet({'__class__': 'ClientShutdown'})
+            self.sent_packet({"__class__": "ClientShutdown"})
             self.save_complete_event.wait(timeout=timeout)
         except Exception:
             pass
-
-

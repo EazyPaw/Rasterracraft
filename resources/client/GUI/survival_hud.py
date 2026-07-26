@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """Minecraft风格的生存模式HUD：快捷栏、生命值、饥饿值、经验条以及受伤反馈。
 
 该GUI叠加在快捷栏（HotBar）之上，以原版Minecraft布局渲染状态计量条（生命值和饥饿值）
@@ -32,9 +33,9 @@ class SurvivalHUD(HotBar):
     def _icon(self, name: str) -> pygame.Surface:
         """返回一个尺寸为 9×gui_scale 像素的HUD精灵图，首次使用时加载并缓存。
 
-        参数:
-            name: 精灵图ID，例如 ``"heart.full"``。完整纹理路径
-                  ``gui.sprites.hud.<name>`` 由资源管理器解析。
+        :param name: 精灵图ID，例如 ``"heart.full"``。完整纹理路径
+            ``gui.sprites.hud.<name>`` 由资源管理器解析。
+
         """
         cached = self._icons.get(name)
         if cached is not None:
@@ -50,15 +51,15 @@ class SurvivalHUD(HotBar):
     def _draw_meter(self, value: float, maximum: float, x: int, y: int, *, food: bool):
         """绘制一行包含10个图标的计量条（生命心或饥饿鸡腿）。
 
-        生命值从左向右填充；饥饿值从右向左填充（镜像），
-        使得两个计量条在快捷栏上方自然相对。
+                生命值从左向右填充；饥饿值从右向左填充（镜像），
+                使得两个计量条在快捷栏上方自然相对。
 
-        参数:
-            value:   当前玩家属性值（例如 18.0 生命值）。
-            maximum: 最大可能值（例如 20.0）。
-            x:       第一个（索引0）图标的屏幕左坐标。
-            y:       整行图标的屏幕顶部坐标。
-            food:    ``True`` 渲染饥饿鸡腿，``False`` 渲染生命心。
+        :param value: 当前玩家属性值（例如 18.0 生命值）。
+        :param maximum: 最大可能值（例如 20.0）。
+        :param x: 第一个（索引0）图标的屏幕左坐标。
+        :param y: 整行图标的屏幕顶部坐标。
+        :param food: ``True`` 渲染饥饿鸡腿，``False`` 渲染生命心。
+
         """
         empty = self._icon("food_empty" if food else "heart.container")
         half = self._icon("food_half" if food else "heart.half")
@@ -105,7 +106,8 @@ class SurvivalHUD(HotBar):
 
         # ---- 经验条（最下方的辅助行） ----
         experience_background = self.get_texture(
-            self.render.gui_scale, self.render.client,
+            self.render.gui_scale,
+            self.render.client,
             "gui.sprites.hud.experience_bar_background",
         )
         experience_y = (
@@ -121,7 +123,9 @@ class SurvivalHUD(HotBar):
         health_x = bar_x - (icon_w - self.render.gui_scale * 9)
         hunger_x = bar_x + hotbar.get_width() - icon_w * 9
 
-        self._draw_meter(player.health, player.max_health, health_x, meter_y, food=False)
+        self._draw_meter(
+            player.health, player.max_health, health_x, meter_y, food=False
+        )
         self._draw_meter(player.food_level, 20, hunger_x, meter_y, food=True)
 
         # ---- 经验条（填充条 + 等级数字） ----
@@ -135,17 +139,19 @@ class SurvivalHUD(HotBar):
     def _draw_experience(self, player, x: int, hotbar_y: int):
         """在快捷栏上方绘制经验进度条和等级数字。
 
-        参数:
-            player:    本地玩家实体。
-            x:         屏幕左坐标（与快捷栏对齐）。
-            hotbar_y:  快捷栏纹理的屏幕顶部坐标。
+        :param player: 本地玩家实体。
+        :param x: 屏幕左坐标（与快捷栏对齐）。
+        :param hotbar_y: 快捷栏纹理的屏幕顶部坐标。
+
         """
         background = self.get_texture(
-            self.render.gui_scale, self.render.client,
+            self.render.gui_scale,
+            self.render.client,
             "gui.sprites.hud.experience_bar_background",
         )
         progress = self.get_texture(
-            self.render.gui_scale, self.render.client,
+            self.render.gui_scale,
+            self.render.client,
             "gui.sprites.hud.experience_bar_progress",
         )
 
@@ -165,10 +171,16 @@ class SurvivalHUD(HotBar):
         # 在经验条上方居中绘制等级数字（绿色带黑色阴影）。
         if player.experience_level > 0:
             text = str(player.experience_level)
-            font = self.render.get_font(max(12, round(14 * self.render.gui_scale / 3.5)))
+            font = self.render.get_font(
+                max(12, round(14 * self.render.gui_scale / 3.5))
+            )
             surface = font.render(text, True, (128, 255, 32))
             shadow = font.render(text, True, (0, 0, 0))
             center_x = x + background.get_width() // 2
-            self.render.render_text(text, (center_x, y - self.render.gui_scale * 5), (128, 255, 32), 28, shadow = True)
-            # self.render.blit(shadow, shadow.get_rect(center=(center_x + 1, y - 1)))
-            # self.render.blit(surface, surface.get_rect(center=(center_x, y - 2)))
+            self.render.render_text(
+                text,
+                (center_x, y - self.render.gui_scale * 5),
+                (128, 255, 32),
+                28,
+                shadow=True,
+            )

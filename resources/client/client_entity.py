@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import math
 import time
 
@@ -21,10 +22,6 @@ from resources.server.experience import experience_orb_icon
 
 
 class ItemEntityRenderer:
-    """Small, bobbing world item renderer for server-synchronised drops."""
-    # Minecraft resets its item-render random source to a fixed seed, which
-    # makes equal stacks use the same copy layout on every frame.  In the 2D
-    # renderer an explicit table is clearer and preserves that determinism.
     COPY_OFFSETS = (
         (0.000, 0.000),
         (-0.095, 0.035),
@@ -34,7 +31,7 @@ class ItemEntityRenderer:
     )
 
     @client_method
-    def __init__(self, entity, client = None):
+    def __init__(self, entity, client=None):
         self.client = client
         self.entity = entity
         self.created_at = time.perf_counter()
@@ -57,7 +54,7 @@ class ItemEntityRenderer:
 
     @classmethod
     def get_copy_offsets(cls, amount: int):
-        return cls.COPY_OFFSETS[:cls.get_render_copy_count(amount)]
+        return cls.COPY_OFFSETS[: cls.get_render_copy_count(amount)]
 
     def draw(self):
         item = getattr(self.entity, "item", None)
@@ -67,24 +64,28 @@ class ItemEntityRenderer:
         texture = item.get_texture(render.trans_scale * 0.36, shadow=True)
         if texture is None:
             return
-        bob = math.sin((time.perf_counter() - self.created_at) * 4.0) * render.block_size * 0.04
+        bob = (
+            math.sin((time.perf_counter() - self.created_at) * 4.0)
+            * render.block_size
+            * 0.04
+        )
         sx, sy = render.trans_world_location((self.entity.x, self.entity.y + 0.22))
-        # Item entities deliberately do not use the living-entity red hurt
-        # flash.  World lighting still applies to every rendered copy.
+
         tint = render.get_world_light_tint(self.entity.x, self.entity.y)
         texture = render.get_tinted_surface(texture, tint)
         origin_x = sx - texture.get_width() / 2
         origin_y = sy - texture.get_height() / 2 + bob
         for offset_x, offset_y in self.get_copy_offsets(item.amount):
-            render.blit(texture, (
-                round(origin_x + offset_x * render.block_size),
-                round(origin_y + offset_y * render.block_size),
-            ))
+            render.blit(
+                texture,
+                (
+                    round(origin_x + offset_x * render.block_size),
+                    round(origin_y + offset_y * render.block_size),
+                ),
+            )
 
 
 class ExperienceOrbRenderer:
-    """Render one 16×16 value cell from the grayscale 64×64 orb sheet."""
-
     TEXTURE_KEY = "entity.experience_orb"
 
     @client_method
@@ -105,9 +106,7 @@ class ExperienceOrbRenderer:
     def get_color(age: float) -> tuple[int, int, int]:
         phase = float(age) / 2.0
         red = int((math.sin(phase) + 1.0) * 0.5 * 255.0)
-        blue = int(
-            (math.sin(phase + math.pi * 4.0 / 3.0) + 1.0) * 0.1 * 255.0
-        )
+        blue = int((math.sin(phase + math.pi * 4.0 / 3.0) + 1.0) * 0.1 * 255.0)
         return red, 255, blue
 
     def _get_frame(self):
@@ -128,12 +127,10 @@ class ExperienceOrbRenderer:
         frame = self._get_frame()
         age = float(getattr(self.entity, "orb_age", 0))
         size = max(1, round(render.block_size * 0.5))
-        # Vanilla experience orbs add seven block-light levels.  Blend the
-        # ordinary world tint toward white by the same 7/15 fraction.
+
         world_tint = render.get_world_light_tint(self.entity.x, self.entity.y)
         glow_tint = tuple(
-            round(channel + (255 - channel) * 7 / 15)
-            for channel in world_tint
+            round(channel + (255 - channel) * 7 / 15) for channel in world_tint
         )
         color = self.get_color(age)
         cache_key = (self._frame_icon, color, size, glow_tint)
@@ -141,126 +138,134 @@ class ExperienceOrbRenderer:
             colored = self.client.resources_manager.stain_grayscale(frame, color)
             colored = pygame.transform.scale(colored, (size, size))
             colored.set_alpha(128)
-            self._rendered_surface = render.get_tinted_surface(
-                colored, glow_tint
-            )
+            self._rendered_surface = render.get_tinted_surface(colored, glow_tint)
             self._render_cache_key = cache_key
         colored = self._rendered_surface
         center_x = self.entity.x + self.entity.width * 0.5
         center_y = self.entity.y + self.entity.height * 0.5 + 0.1
         sx, sy = render.trans_world_location((center_x, center_y))
-        render.blit(colored, (
-            round(sx - colored.get_width() * 0.5),
-            round(sy - colored.get_height() * 0.5),
-        ))
+        render.blit(
+            colored,
+            (
+                round(sx - colored.get_width() * 0.5),
+                round(sy - colored.get_height() * 0.5),
+            ),
+        )
 
 
 class ClientEntity:
     def __init__(self, client, packet: dict):
         self.client = client
-        self.uuid = str(packet.get('uuid', ''))
-        self.entity_id = packet.get('entity_id', 'null')
-        self.x = float(packet.get('x', 0.0))
-        self.y = float(packet.get('y', 0.0))
-        self.z = int(packet.get('z', 0))
-        self.width = float(packet.get('width', 1.0))
-        self.height = float(packet.get('height', 1.0))
+        self.uuid = str(packet.get("uuid", ""))
+        self.entity_id = packet.get("entity_id", "null")
+        self.x = float(packet.get("x", 0.0))
+        self.y = float(packet.get("y", 0.0))
+        self.z = int(packet.get("z", 0))
+        self.width = float(packet.get("width", 1.0))
+        self.height = float(packet.get("height", 1.0))
         self.motion = Vector(0.0, 0.0)
-        self.facing = int(packet.get('facing', 0))
-        self.sneaking = bool(packet.get('sneaking', False))
-        self.sprinting = bool(packet.get('sprinting', False))
-        self.on_ground = bool(packet.get('on_ground', False))
-        self.health = float(packet.get('health', 20))
-        self.max_health = float(packet.get('max_health', 20))
+        self.facing = int(packet.get("facing", 0))
+        self.sneaking = bool(packet.get("sneaking", False))
+        self.sprinting = bool(packet.get("sprinting", False))
+        self.on_ground = bool(packet.get("on_ground", False))
+        self.health = float(packet.get("health", 20))
+        self.max_health = float(packet.get("max_health", 20))
         self.attributes = AttributeMap()
-        self.hurt_time = int(packet.get('hurt_time', 0))
-        self.aggressive = bool(packet.get('aggressive', False))
-        self.look_angle = float(packet.get('look_angle', 0.0))
-        self.attack_animation_ticks = int(packet.get('attack_animation_ticks', 0))
-        self.attackable = bool(packet.get('attackable', True))
-        self.experience_value = max(1, int(packet.get('experience_value', 1)))
-        self.orb_age = max(0, int(packet.get('orb_age', 0)))
-        self.orb_count = max(1, int(packet.get('orb_count', 1)))
-        self.is_baby = bool(packet.get('is_baby', False))
-        self.age_scale = float(packet.get('age_scale', 1.0))
-        self.flap_speed = float(packet.get('flap_speed', 0.0))
-        self.sheared = bool(packet.get('sheared', False))
-        self.wool_color = packet.get('wool_color', 'white')
-        self.eat_animation_ticks = int(packet.get('eat_animation_ticks', 0))
-        self.saddled = bool(packet.get('saddled', False))
-        self.breaking = bool(packet.get('breaking', False))
-        self.eating = bool(packet.get('eating', False))
-        self.break_progress = float(packet.get('break_progress', 0.0))
-        raw_break_target = packet.get('break_target')
-        self.break_target = tuple(raw_break_target[:3]) if isinstance(raw_break_target, (list, tuple)) else None
-        self.fuse = int(packet.get('fuse', 0))
-        self.initial_fuse = int(packet.get('initial_fuse', self.fuse))
-        self.name = packet.get('name', self.uuid[:8])
+        self.hurt_time = int(packet.get("hurt_time", 0))
+        self.aggressive = bool(packet.get("aggressive", False))
+        self.look_angle = float(packet.get("look_angle", 0.0))
+        self.attack_animation_ticks = int(packet.get("attack_animation_ticks", 0))
+        self.attackable = bool(packet.get("attackable", True))
+        self.experience_value = max(1, int(packet.get("experience_value", 1)))
+        self.orb_age = max(0, int(packet.get("orb_age", 0)))
+        self.orb_count = max(1, int(packet.get("orb_count", 1)))
+        self.is_baby = bool(packet.get("is_baby", False))
+        self.age_scale = float(packet.get("age_scale", 1.0))
+        self.flap_speed = float(packet.get("flap_speed", 0.0))
+        self.sheared = bool(packet.get("sheared", False))
+        self.wool_color = packet.get("wool_color", "white")
+        self.eat_animation_ticks = int(packet.get("eat_animation_ticks", 0))
+        self.saddled = bool(packet.get("saddled", False))
+        self.breaking = bool(packet.get("breaking", False))
+        self.eating = bool(packet.get("eating", False))
+        self.break_progress = float(packet.get("break_progress", 0.0))
+        raw_break_target = packet.get("break_target")
+        self.break_target = (
+            tuple(raw_break_target[:3])
+            if isinstance(raw_break_target, (list, tuple))
+            else None
+        )
+        self.fuse = int(packet.get("fuse", 0))
+        self.initial_fuse = int(packet.get("initial_fuse", self.fuse))
+        self.name = packet.get("name", self.uuid[:8])
         self.block = None
         self.skeleton = None
         self.apply_packet(packet, initial=True)
 
     def apply_packet(self, packet: dict, *, initial: bool = False):
         old_attack_animation_ticks = self.attack_animation_ticks
-        new_x = float(packet.get('x', self.x))
-        new_y = float(packet.get('y', self.y))
+        new_x = float(packet.get("x", self.x))
+        new_y = float(packet.get("y", self.y))
 
-        self.entity_id = packet.get('entity_id', self.entity_id)
+        self.entity_id = packet.get("entity_id", self.entity_id)
         self.x = new_x
         self.y = new_y
-        self.z = int(packet.get('z', self.z))
-        self.width = float(packet.get('width', self.width))
-        self.height = float(packet.get('height', self.height))
-        motion = packet.get('motion', {})
-        self.motion.x = float(motion.get('x', self.motion.x))
-        self.motion.y = float(motion.get('y', self.motion.y))
-        self.facing = int(packet.get('facing', self.facing))
-        self.sneaking = bool(packet.get('sneaking', self.sneaking))
-        self.sprinting = bool(packet.get('sprinting', self.sprinting))
-        self.on_ground = bool(packet.get('on_ground', self.on_ground))
-        self.health = float(packet.get('health', self.health))
-        self.max_health = float(packet.get('max_health', self.max_health))
-        if 'attributes' in packet:
-            self.attributes.apply_sync_snapshot(packet['attributes'])
-        self.hurt_time = int(packet.get('hurt_time', self.hurt_time))
-        self.aggressive = bool(packet.get('aggressive', self.aggressive))
-        self.look_angle = float(packet.get('look_angle', self.look_angle))
-        self.attack_animation_ticks = int(packet.get(
-            'attack_animation_ticks', self.attack_animation_ticks
-        ))
-        self.attackable = bool(packet.get('attackable', self.attackable))
-        self.experience_value = max(
-            1, int(packet.get('experience_value', self.experience_value))
+        self.z = int(packet.get("z", self.z))
+        self.width = float(packet.get("width", self.width))
+        self.height = float(packet.get("height", self.height))
+        motion = packet.get("motion", {})
+        self.motion.x = float(motion.get("x", self.motion.x))
+        self.motion.y = float(motion.get("y", self.motion.y))
+        self.facing = int(packet.get("facing", self.facing))
+        self.sneaking = bool(packet.get("sneaking", self.sneaking))
+        self.sprinting = bool(packet.get("sprinting", self.sprinting))
+        self.on_ground = bool(packet.get("on_ground", self.on_ground))
+        self.health = float(packet.get("health", self.health))
+        self.max_health = float(packet.get("max_health", self.max_health))
+        if "attributes" in packet:
+            self.attributes.apply_sync_snapshot(packet["attributes"])
+        self.hurt_time = int(packet.get("hurt_time", self.hurt_time))
+        self.aggressive = bool(packet.get("aggressive", self.aggressive))
+        self.look_angle = float(packet.get("look_angle", self.look_angle))
+        self.attack_animation_ticks = int(
+            packet.get("attack_animation_ticks", self.attack_animation_ticks)
         )
-        self.orb_age = max(0, int(packet.get('orb_age', self.orb_age)))
-        self.orb_count = max(1, int(packet.get('orb_count', self.orb_count)))
-        self.is_baby = bool(packet.get('is_baby', self.is_baby))
-        self.age_scale = float(packet.get('age_scale', self.age_scale))
-        self.flap_speed = float(packet.get('flap_speed', self.flap_speed))
-        self.sheared = bool(packet.get('sheared', self.sheared))
-        self.wool_color = packet.get('wool_color', self.wool_color)
-        self.eat_animation_ticks = int(packet.get('eat_animation_ticks', self.eat_animation_ticks))
-        self.saddled = bool(packet.get('saddled', self.saddled))
-        self.breaking = bool(packet.get('breaking', self.breaking))
-        self.eating = bool(packet.get('eating', self.eating))
-        self.break_progress = float(packet.get('break_progress', self.break_progress))
-        if 'break_target' in packet:
-            raw_break_target = packet.get('break_target')
+        self.attackable = bool(packet.get("attackable", self.attackable))
+        self.experience_value = max(
+            1, int(packet.get("experience_value", self.experience_value))
+        )
+        self.orb_age = max(0, int(packet.get("orb_age", self.orb_age)))
+        self.orb_count = max(1, int(packet.get("orb_count", self.orb_count)))
+        self.is_baby = bool(packet.get("is_baby", self.is_baby))
+        self.age_scale = float(packet.get("age_scale", self.age_scale))
+        self.flap_speed = float(packet.get("flap_speed", self.flap_speed))
+        self.sheared = bool(packet.get("sheared", self.sheared))
+        self.wool_color = packet.get("wool_color", self.wool_color)
+        self.eat_animation_ticks = int(
+            packet.get("eat_animation_ticks", self.eat_animation_ticks)
+        )
+        self.saddled = bool(packet.get("saddled", self.saddled))
+        self.breaking = bool(packet.get("breaking", self.breaking))
+        self.eating = bool(packet.get("eating", self.eating))
+        self.break_progress = float(packet.get("break_progress", self.break_progress))
+        if "break_target" in packet:
+            raw_break_target = packet.get("break_target")
             self.break_target = (
                 tuple(raw_break_target[:3])
-                if isinstance(raw_break_target, (list, tuple)) and len(raw_break_target) >= 3
+                if isinstance(raw_break_target, (list, tuple))
+                and len(raw_break_target) >= 3
                 else None
             )
         elif not self.breaking:
             self.break_target = None
-        self.fuse = int(packet.get('fuse', self.fuse))
-        self.initial_fuse = int(packet.get('initial_fuse', self.initial_fuse))
-        self.name = packet.get('name', self.name)
+        self.fuse = int(packet.get("fuse", self.fuse))
+        self.initial_fuse = int(packet.get("initial_fuse", self.initial_fuse))
+        self.name = packet.get("name", self.name)
 
-        block_data = packet.get('block_data')
+        block_data = packet.get("block_data")
         if block_data:
-            block = get_block_by_id(block_data['id'])
-            block.write_nbt(block_data.get('nbt', {}))
+            block = get_block_by_id(block_data["id"])
+            block.write_nbt(block_data.get("nbt", {}))
             block.location = Location(
                 self.client.client_world,
                 math.floor(self.x),
@@ -268,19 +273,19 @@ class ClientEntity:
                 self.z,
             )
             self.block = block
-        item_data = packet.get('item_data')
+        item_data = packet.get("item_data")
         if item_data:
             self.item = ItemStack(
-                get_material_by_id(item_data.get('id', 'air')),
-                int(item_data.get('amount', 1)),
-                item_data.get('nbt', {}),
+                get_material_by_id(item_data.get("id", "air")),
+                int(item_data.get("amount", 1)),
+                item_data.get("nbt", {}),
             )
-        held_item_data = packet.get('held_item_data')
+        held_item_data = packet.get("held_item_data")
         if held_item_data is not None:
             self.held_item = ItemStack(
-                get_material_by_id(held_item_data.get('id', 'air')),
-                int(held_item_data.get('amount', 0)),
-                held_item_data.get('nbt', {}),
+                get_material_by_id(held_item_data.get("id", "air")),
+                int(held_item_data.get("amount", 0)),
+                held_item_data.get("nbt", {}),
             )
         self._ensure_skeleton()
         if (

@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """
 聊天栏 GUI 组件
 
@@ -23,10 +24,8 @@ class ChatGUI(GUI):
     始终在 drawing_GUIs 中。
     优先级 = 5（高于 HotBar(0)，低于 Backpack(10)）。
 
-    Parameters
-    ----------
-    render : Render
-        渲染器实例。
+    :param render: 渲染器实例。
+    :type render: Render
     """
 
     def __init__(self, render):
@@ -46,7 +45,7 @@ class ChatGUI(GUI):
         self._history_index = -1
         self._saved_input = ""
 
-        self.message_fade_time = 8.0   # 8 秒后完全消失
+        self.message_fade_time = 8.0  # 8 秒后完全消失
         self.message_opaque_time = 5.0  # 前 5 秒完全不透明
 
         self._text_input_started = False
@@ -62,24 +61,24 @@ class ChatGUI(GUI):
         sw = self.render.SCREEN_WIDTH
         sh = self.render.SCREEN_HEIGHT
         return {
-            'screen_w': sw,
-            'screen_h': sh,
-            'msg_area_w': int(sw * MESSAGE_DISPLAY_WIDTH_RATIO),
-            'msg_font_size': max(14, int(sh * 0.025)),
-            'input_font_size': max(16, int(sh * 0.028)),
-            'input_bar_height': max(24, int(sh * 0.04)),
-            'msg_x': 6,
-            'hotbar_margin': int(sh * 0.06),
+            "screen_w": sw,
+            "screen_h": sh,
+            "msg_area_w": int(sw * MESSAGE_DISPLAY_WIDTH_RATIO),
+            "msg_font_size": max(14, int(sh * 0.025)),
+            "input_font_size": max(16, int(sh * 0.028)),
+            "input_bar_height": max(24, int(sh * 0.04)),
+            "msg_x": 6,
+            "hotbar_margin": int(sh * 0.06),
         }
 
     def _get_msg_bottom_y(self):
         """消息区域底部 Y 坐标。"""
         lay = self._layout()
-        bar_h = lay['input_bar_height']
+        bar_h = lay["input_bar_height"]
         return (
-            lay['screen_h'] - bar_h - 10
+            lay["screen_h"] - bar_h - 10
             if self.is_open
-            else lay['screen_h'] - lay['hotbar_margin']
+            else lay["screen_h"] - lay["hotbar_margin"]
         )
 
     # ------------------------------------------------------------------
@@ -130,19 +129,15 @@ class ChatGUI(GUI):
         # 限制历史数量
         if len(self.sent_history) > 50:
             self.sent_history = self.sent_history[-50:]
-        self.render.client.sent_packet(
-            {'__class__': 'ChatMessage', 'text': text}
-        )
+        self.render.client.sent_packet({"__class__": "ChatMessage", "text": text})
         self.close_chat()
 
     def _recalc_input_scroll(self, font):
         lay = self._layout()
         prompt = "> "
-        max_visible_w = lay['screen_w'] - 16
+        max_visible_w = lay["screen_w"] - 16
         prompt_w = font.size(prompt)[0]
-        cursor_prefix = (
-            self.input_text[:self.cursor_pos] + self._composition_text
-        )
+        cursor_prefix = self.input_text[: self.cursor_pos] + self._composition_text
         cursor_px = prompt_w + font.size(cursor_prefix)[0]
 
         if cursor_px - self._input_scroll < prompt_w:
@@ -151,13 +146,16 @@ class ChatGUI(GUI):
             self._input_scroll = cursor_px - (max_visible_w - prompt_w)
 
         display_text = (
-            self.input_text[:self.cursor_pos]
+            self.input_text[: self.cursor_pos]
             + self._composition_text
-            + self.input_text[self.cursor_pos:]
+            + self.input_text[self.cursor_pos :]
         )
         end_px = prompt_w + font.size(display_text)[0]
         if end_px - self._input_scroll < max_visible_w - 4:
-            if self._input_scroll > 0 and end_px - self._input_scroll < max_visible_w - 40:
+            if (
+                self._input_scroll > 0
+                and end_px - self._input_scroll < max_visible_w - 40
+            ):
                 self._input_scroll = max(0, end_px - (max_visible_w - 40))
 
         if self._input_scroll < 0:
@@ -181,7 +179,12 @@ class ChatGUI(GUI):
 
             elif event.type == pygame.KEYDOWN:
                 if not self.is_open:
-                    if event.key in (pygame.K_t, pygame.K_SLASH, pygame.K_RETURN, pygame.K_KP_ENTER):
+                    if event.key in (
+                        pygame.K_t,
+                        pygame.K_SLASH,
+                        pygame.K_RETURN,
+                        pygame.K_KP_ENTER,
+                    ):
                         prefix = "/" if event.key == pygame.K_SLASH else ""
                         self.open_chat(prefix)
                         events.remove(event)
@@ -217,16 +220,16 @@ class ChatGUI(GUI):
                     elif event.key == pygame.K_BACKSPACE:
                         if self.cursor_pos > 0:
                             self.input_text = (
-                                self.input_text[:self.cursor_pos - 1] +
-                                self.input_text[self.cursor_pos:]
+                                self.input_text[: self.cursor_pos - 1]
+                                + self.input_text[self.cursor_pos :]
                             )
                             self.cursor_pos -= 1
                         events.remove(event)
                     elif event.key == pygame.K_DELETE:
                         if self.cursor_pos < len(self.input_text):
                             self.input_text = (
-                                self.input_text[:self.cursor_pos] +
-                                self.input_text[self.cursor_pos + 1:]
+                                self.input_text[: self.cursor_pos]
+                                + self.input_text[self.cursor_pos + 1 :]
                             )
                         events.remove(event)
                     elif event.key == pygame.K_LEFT:
@@ -284,17 +287,17 @@ class ChatGUI(GUI):
                     continue
                 char = event.text[:remaining]
                 self.input_text = (
-                    self.input_text[:self.cursor_pos] +
-                    char +
-                    self.input_text[self.cursor_pos:]
+                    self.input_text[: self.cursor_pos]
+                    + char
+                    + self.input_text[self.cursor_pos :]
                 )
                 self.cursor_pos += len(char)
                 events.remove(event)
 
             elif event.type == pygame.TEXTEDITING and self.is_open:
                 self._composition_text = self._sanitize_input(event.text)
-                self._composition_start = getattr(event, 'start', 0)
-                self._composition_length = getattr(event, 'length', 0)
+                self._composition_start = getattr(event, "start", 0)
+                self._composition_length = getattr(event, "length", 0)
                 events.remove(event)
 
     @staticmethod
@@ -306,13 +309,14 @@ class ChatGUI(GUI):
                 pygame.scrap.init()
             clip = pygame.scrap.get(pygame.SCRAP_TEXT)
             if clip:
-                return clip.decode('utf-8')
+                return clip.decode("utf-8")
         except Exception:
             pass
 
         # 方案 2: Windows 剪贴板 API（ctypes 直调 Win32）
         try:
             import ctypes
+
             CF_UNICODETEXT = 13
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
@@ -333,6 +337,7 @@ class ChatGUI(GUI):
         # 方案 3: tkinter（最后手段，跨平台但会短暂创建窗口）
         try:
             import tkinter as tk
+
             root = tk.Tk()
             root.withdraw()
             text = root.clipboard_get()
@@ -350,7 +355,7 @@ class ChatGUI(GUI):
         try:
             if not pygame.scrap.get_init():
                 pygame.scrap.init()
-            pygame.scrap.put(pygame.SCRAP_TEXT, text.encode('utf-8'))
+            pygame.scrap.put(pygame.SCRAP_TEXT, text.encode("utf-8"))
             return
         except Exception:
             pass
@@ -358,11 +363,12 @@ class ChatGUI(GUI):
         # 方案 2: Windows 剪贴板 API
         try:
             import ctypes
+
             CF_UNICODETEXT = 13
             GMEM_MOVEABLE = 0x0002
             user32 = ctypes.windll.user32
             kernel32 = ctypes.windll.kernel32
-            wide_text = text + '\x00'
+            wide_text = text + "\x00"
             buf_size = len(wide_text) * 2
             h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, buf_size)
             if h_mem:
@@ -382,6 +388,7 @@ class ChatGUI(GUI):
         # 方案 3: tkinter
         try:
             import tkinter as tk
+
             root = tk.Tk()
             root.withdraw()
             root.clipboard_clear()
@@ -400,9 +407,10 @@ class ChatGUI(GUI):
         """
         # 保留可打印字符（0x20-0x7E）、常见多字节字符（中文等 >0x7F），
         # 去除 null（\\x00）和其他控制字符（0x01-0x1F，保留 \\n \\r \\t）
-        return ''.join(
-            ch for ch in text
-            if ch == '\n' or ch == '\r' or ch == '\t' or ord(ch) >= 0x20
+        return "".join(
+            ch
+            for ch in text
+            if ch == "\n" or ch == "\r" or ch == "\t" or ord(ch) >= 0x20
         )
 
     def _paste_from_clipboard(self):
@@ -412,15 +420,15 @@ class ChatGUI(GUI):
             return
         # 去除换行和控制字符，仅保留单行纯文本
         pasted = self._sanitize_input(clip)
-        pasted = pasted.replace('\r', '').replace('\n', '')
+        pasted = pasted.replace("\r", "").replace("\n", "")
         remaining = MAX_INPUT_LENGTH - len(self.input_text)
         if remaining <= 0:
             return
         pasted = pasted[:remaining]
         self.input_text = (
-            self.input_text[:self.cursor_pos] +
-            pasted +
-            self.input_text[self.cursor_pos:]
+            self.input_text[: self.cursor_pos]
+            + pasted
+            + self.input_text[self.cursor_pos :]
         )
         self.cursor_pos += len(pasted)
 
@@ -451,19 +459,19 @@ class ChatGUI(GUI):
             last_was_newline = False
             skip_lf_after_cr = False
             for segment in text.text:
-                segment_color = segment.get('color')
-                segment_bold = bool(segment.get('bold', False))
+                segment_color = segment.get("color")
+                segment_bold = bool(segment.get("bold", False))
                 segment_font = self.render.get_font(font_size, segment_bold)
-                for ch in str(segment.get('text', '')):
-                    if ch == '\n' and skip_lf_after_cr:
+                for ch in str(segment.get("text", "")):
+                    if ch == "\n" and skip_lf_after_cr:
                         skip_lf_after_cr = False
                         continue
-                    if ch == '\r':
-                        ch = '\n'
+                    if ch == "\r":
+                        ch = "\n"
                         skip_lf_after_cr = True
                     else:
                         skip_lf_after_cr = False
-                    if ch == '\n':
+                    if ch == "\n":
                         lines.append(Text(current_segments))
                         current_segments = []
                         current_width = 0
@@ -476,16 +484,18 @@ class ChatGUI(GUI):
                         current_width = 0
                     if (
                         current_segments
-                        and current_segments[-1]['color'] == segment_color
-                        and current_segments[-1]['bold'] == segment_bold
+                        and current_segments[-1]["color"] == segment_color
+                        and current_segments[-1]["bold"] == segment_bold
                     ):
-                        current_segments[-1]['text'] += ch
+                        current_segments[-1]["text"] += ch
                     else:
-                        current_segments.append({
-                            'text': ch,
-                            'color': segment_color,
-                            'bold': segment_bold,
-                        })
+                        current_segments.append(
+                            {
+                                "text": ch,
+                                "color": segment_color,
+                                "bold": segment_bold,
+                            }
+                        )
                     current_width += char_width
                     last_was_newline = False
             if current_segments or last_was_newline or not lines:
@@ -494,9 +504,9 @@ class ChatGUI(GUI):
 
         lines = []
         current_line = ""
-        normalized = str(text).replace('\r\n', '\n').replace('\r', '\n')
+        normalized = str(text).replace("\r\n", "\n").replace("\r", "\n")
         for ch in normalized:
-            if ch == '\n':
+            if ch == "\n":
                 lines.append(current_line)
                 current_line = ""
                 continue
@@ -506,7 +516,7 @@ class ChatGUI(GUI):
                 current_line = ch
             else:
                 current_line = test_line
-        if current_line or normalized.endswith('\n') or not lines:
+        if current_line or normalized.endswith("\n") or not lines:
             lines.append(current_line)
         return lines
 
@@ -534,15 +544,15 @@ class ChatGUI(GUI):
             return
 
         lay = self._layout()
-        font = self.render.get_font(lay['msg_font_size'])
-        line_h = lay['msg_font_size'] + 4
-        max_msg_w = lay['msg_area_w']
+        font = self.render.get_font(lay["msg_font_size"])
+        line_h = lay["msg_font_size"] + 4
+        max_msg_w = lay["msg_area_w"]
         text_max_w = max_msg_w - 10
 
         # ---- 阶段 1: 构建所有可见行（从旧到新） ----
         all_rows = []
         for msg in messages:
-            age = now - msg['time']
+            age = now - msg["time"]
             if self.is_open:
                 # 聊天打开时：显示全部历史消息，不透明
                 alpha = 255
@@ -559,8 +569,8 @@ class ChatGUI(GUI):
                     alpha = int(255 * (1.0 - fade))
                     if alpha <= 0:
                         continue
-            color = msg.get('color', (255, 255, 255))
-            wrapped = self._wrap_text(msg['text'], lay['msg_font_size'], text_max_w)
+            color = msg.get("color", (255, 255, 255))
+            wrapped = self._wrap_text(msg["text"], lay["msg_font_size"], text_max_w)
             for line in wrapped:
                 all_rows.append((line, color, alpha))
 
@@ -571,7 +581,7 @@ class ChatGUI(GUI):
         bottom_y = self._get_msg_bottom_y()
         if self.is_open:
             # 聊天打开时：最多显示到屏幕一半高度，超出则滚轮翻阅
-            max_chat_h = lay['screen_h'] // 2
+            max_chat_h = lay["screen_h"] // 2
             max_visible = max(1, max_chat_h // line_h)
         else:
             max_visible = 12  # 未激活时固定 12 行
@@ -589,10 +599,10 @@ class ChatGUI(GUI):
         if start_idx < 0:
             start_idx = 0
         # 确保不会取太少：至少显示 max_visible 条（如果可用）
-        visible_rows = all_rows[start_idx:start_idx + max_visible]
+        visible_rows = all_rows[start_idx : start_idx + max_visible]
 
         # ---- 阶段 3: 从下往上绘制（最新在最下方） ----
-        x = lay['msg_x']
+        x = lay["msg_x"]
         for i in range(len(visible_rows)):
             row_idx_from_bottom = len(visible_rows) - 1 - i
             draw_y = bottom_y - (row_idx_from_bottom + 1) * line_h
@@ -604,7 +614,7 @@ class ChatGUI(GUI):
             bg_surf.fill((0, 0, 0, int(alpha * 0.45)))
             self.render.blit(bg_surf, (bg_rect.x, bg_rect.y))
             self._render_row(
-                line, x + 2, draw_y + 2, color, alpha, lay['msg_font_size']
+                line, x + 2, draw_y + 2, color, alpha, lay["msg_font_size"]
             )
 
     # ------------------------------------------------------------------
@@ -613,21 +623,21 @@ class ChatGUI(GUI):
 
     def _draw_input_bar(self):
         lay = self._layout()
-        bar_h = lay['input_bar_height']
-        y = lay['screen_h'] - bar_h - 10
-        sw = lay['screen_w']
+        bar_h = lay["input_bar_height"]
+        y = lay["screen_h"] - bar_h - 10
+        sw = lay["screen_w"]
 
         bg = pygame.Surface((sw, bar_h), pygame.SRCALPHA)
         bg.fill((0, 0, 0, 180))
         self.render.blit(bg, (0, y))
 
-        font = self.render.get_font(lay['input_font_size'])
-        prompt = "" # 可自定义输入前文字
+        font = self.render.get_font(lay["input_font_size"])
+        prompt = ""  # 可自定义输入前文字
         # 渲染前清理非法字符（null 等会导致 font.render 崩溃）
         display_text = self._sanitize_input(
-            self.input_text[:self.cursor_pos]
+            self.input_text[: self.cursor_pos]
             + self._composition_text
-            + self.input_text[self.cursor_pos:]
+            + self.input_text[self.cursor_pos :]
         )
 
         self._recalc_input_scroll(font)
@@ -640,7 +650,9 @@ class ChatGUI(GUI):
         text_surf = font.render(display_text, True, (255, 255, 255))
         max_visible_w = sw - 8
         if text_surf.get_width() > max_visible_w:
-            clip_rect = pygame.Rect(self._input_scroll, 0, max_visible_w, text_surf.get_height())
+            clip_rect = pygame.Rect(
+                self._input_scroll, 0, max_visible_w, text_surf.get_height()
+            )
             if clip_rect.right > text_surf.get_width():
                 clip_rect.right = text_surf.get_width()
             try:
@@ -653,8 +665,9 @@ class ChatGUI(GUI):
 
         prompt_w = font.size(prompt)[0]
         composition_x = (
-            4 + prompt_w
-            + font.size(self.input_text[:self.cursor_pos])[0]
+            4
+            + prompt_w
+            + font.size(self.input_text[: self.cursor_pos])[0]
             - self._input_scroll
         )
         cursor_x = composition_x + font.size(self._composition_text)[0]
@@ -674,7 +687,7 @@ class ChatGUI(GUI):
 
         if self.cursor_visible:
             if 0 <= cursor_x <= max_visible_w - 2:
-                cursor_rect = pygame.Rect(cursor_x, y + 5, 2, lay['input_font_size'])
+                cursor_rect = pygame.Rect(cursor_x, y + 5, 2, lay["input_font_size"])
                 pygame.draw.rect(self.render.screen, (255, 255, 255), cursor_rect)
 
         # 把系统候选窗定位到聊天输入光标附近；请求会在下一帧由窗口

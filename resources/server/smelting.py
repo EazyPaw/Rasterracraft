@@ -1,4 +1,4 @@
-"""Data-driven furnace recipes and vanilla-style fuel values."""
+# Commented and arranged by ChatGPT
 
 import json
 import logging
@@ -35,7 +35,6 @@ def _material_id(stack: ItemStack | None) -> str | None:
 
 
 def ingredient_matches(stack: ItemStack | None, ingredient) -> bool:
-    """Match the item/list/tag forms used by Minecraft recipe JSON."""
     if isinstance(ingredient, list):
         return any(ingredient_matches(stack, option) for option in ingredient)
     if not isinstance(ingredient, dict) or stack is None or stack.is_empty():
@@ -66,7 +65,6 @@ def ingredient_matches(stack: ItemStack | None, ingredient) -> bool:
 
 @lru_cache(maxsize=None)
 def load_item_tag(tag: str) -> frozenset[str]:
-    """Resolve a Minecraft item tag, including nested ``#tag`` entries."""
     tag = str(tag).removeprefix("#").removeprefix("minecraft:")
 
     def resolve(current: str, resolving: set[str]) -> set[str]:
@@ -107,12 +105,14 @@ def load_smelting_recipes() -> tuple[SmeltingRecipe, ...]:
         result = data.get("result", "minecraft:air")
         if isinstance(result, dict):
             result = result.get("id", result.get("item", "minecraft:air"))
-        recipes.append(SmeltingRecipe(
-            ingredient=data.get("ingredient", {}),
-            result_id=str(result).removeprefix("minecraft:"),
-            cooking_time=max(1, int(data.get("cookingtime", 200))),
-            experience=max(0.0, float(data.get("experience", 0.0))),
-        ))
+        recipes.append(
+            SmeltingRecipe(
+                ingredient=data.get("ingredient", {}),
+                result_id=str(result).removeprefix("minecraft:"),
+                cooking_time=max(1, int(data.get("cookingtime", 200))),
+                experience=max(0.0, float(data.get("experience", 0.0))),
+            )
+        )
     logging.info("Loaded %d furnace recipes", len(recipes))
     return tuple(recipes)
 
@@ -127,7 +127,6 @@ def find_smelting_recipe(stack: ItemStack | None) -> SmeltingRecipe | None:
 
 
 def get_fuel_burn_time(stack: ItemStack | None) -> int:
-    """Return one item's Java-furnace burn duration in game ticks."""
     item_id = _material_id(stack)
     if not item_id:
         return 0
@@ -155,12 +154,20 @@ def get_fuel_burn_time(stack: ItemStack | None) -> int:
     if item_id.endswith(("_log", "_plank", "_planks")):
         return 300
     if item_id in {
-        "crafting_table", "chest", "trapped_chest", "bookshelf",
-        "jukebox", "note_block", "ladder",
+        "crafting_table",
+        "chest",
+        "trapped_chest",
+        "bookshelf",
+        "jukebox",
+        "note_block",
+        "ladder",
     }:
         return 300
     if item_id.startswith("wooden_") or item_id in {
-        "bow", "fishing_rod", "sign", "oak_sign",
+        "bow",
+        "fishing_rod",
+        "sign",
+        "oak_sign",
     }:
         return 200
     return 0

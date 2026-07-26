@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import pygame
 import math
 
@@ -20,7 +21,7 @@ class Material:
 
     def __init__(self):
         self.texture_cache = {}
-    
+
     @classmethod
     @client_method
     def get_texture(cls, size: float, client):
@@ -34,9 +35,6 @@ class Material:
         if cls._texture_path is None:
             return None
 
-        # Always ask the resource manager for the current surface.  Static
-        # textures return the same object, while animated textures return the
-        # current frame surface.
         original = client.resources_manager.get_texture_img(cls._texture_path)
         if original is None:
             return None
@@ -91,28 +89,20 @@ class Material:
     def __str__(self):
         return self.name_id
 
-
     def get_name(self) -> str:
         """返回用于 HUD、背包等界面的可读物品名称。"""
         return transkey(self.name)
 
     @classmethod
     def get_default_attribute_modifiers(cls):
-        """Declarative item modifiers, consumed only in matching equipment slots."""
         return tuple(cls.attribute_modifiers)
 
     @client_method
     def get_anchor(self):
-        return {'anchor':(0.5,0.9),'offset':(0, 0),'scale':0.5,'rotation':-90}
+        return {"anchor": (0.5, 0.9), "offset": (0, 0), "scale": 0.5, "rotation": -90}
 
 
 class DamageableItem(Material):
-    """Base for items which store vanilla-style damage on their ItemStack.
-
-    Concrete items own their event hooks and therefore the amount consumed by
-    each successful action.  Server action code only reports what happened.
-    """
-
     max_stack_size = 1
     max_damage = 0
 
@@ -133,14 +123,6 @@ class DamageableItem(Material):
 
 
 class Food(Material):
-    """Common interface for materials which can be eaten.
-
-    Food definitions own their nutrition, saturation and use duration.  The
-    consumer owns the kind of food state it supports; this keeps the callback
-    usable by future animals or other entities instead of coupling it to
-    ``Player``.
-    """
-
     food_value = 0
     saturation_modifier = 0.0
     consume_duration_ticks = 32
@@ -156,7 +138,6 @@ class Food(Material):
         return bool(self.always_edible or float(food_level) < 20.0)
 
     def on_consume(self, consumer) -> None:
-        """Apply this food after its use duration has completed."""
         handler = getattr(consumer, "consume_food", None)
         if callable(handler):
             handler(self)
@@ -167,15 +148,10 @@ class BlockItem(Material):
 
     @classmethod
     def create_block(cls):
-        """Create the block represented by this inventory material.
-
-        Block classes are resolved only when the item is actually used.  This
-        keeps the material definitions independent of ``blocks.py`` during
-        module initialization while retaining a stable, serializable link.
-        """
         if cls.target_block_id is None:
             return None
         from resources.server.blocks import get_block_by_id
+
         return get_block_by_id(cls.target_block_id)
 
     @classmethod
@@ -185,9 +161,7 @@ class BlockItem(Material):
         if block is None:
             return None
         block_size = max(1, int(round(16 * size)))
-        # Some block item textures (grass/leaves) use biome coloring.  Item
-        # entities do not carry a Block instance, so borrow the local player's
-        # biome solely for rendering instead of dereferencing a None location.
+
         player = getattr(client, "client_player", None)
         block.location = Location(
             client.client_world,
@@ -208,11 +182,13 @@ class BlockItem(Material):
                 texture_path = None
             else:
                 path_getter = getattr(block, "get_texture_path", None)
-                texture_path = path_getter() if callable(path_getter) else block._texture_path
+                texture_path = (
+                    path_getter() if callable(path_getter) else block._texture_path
+                )
             cls._animation_texture_path = texture_path
         if texture_path is None:
             return None
         return client.resources_manager.get_texture_animation_key(texture_path)
 
-class Projectile(Material):
-    ...
+
+class Projectile(Material): ...

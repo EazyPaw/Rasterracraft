@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import random
 
 from resources.client.entity_skeleton import BodyPart, Pose
@@ -62,20 +63,32 @@ class PigSkeleton(QuadrupedSkeleton):
         super().__init__(entity, "entity.pig.pig", client=client)
         self.model_width = 1.25
         self.configure_quadruped(
-            body_uv=(28, 8), body_size=(10, 16, 8),
-            head_uv=(0, 0), head_size=(8, 8, 8),
-            leg_uv=(0, 16), leg_size=(4, 6, 4),
-            body_anchor=(0.08, 0.875), head_anchor=(1.03, 0.65),
-            rear_leg_anchor=(0.305, 0.375), front_leg_anchor=(0.845, 0.375),
+            body_uv=(28, 8),
+            body_size=(10, 16, 8),
+            head_uv=(0, 0),
+            head_size=(8, 8, 8),
+            leg_uv=(0, 16),
+            leg_size=(4, 6, 4),
+            body_anchor=(0.08, 0.875),
+            head_anchor=(1.03, 0.65),
+            rear_leg_anchor=(0.305, 0.375),
+            front_leg_anchor=(0.845, 0.375),
         )
         snout = crop_x_side(self.texture, (16, 16), (4, 3, 1))
         self._base_anchors["snout"] = (1.31125, 0.62625)
-        self.body["snout"] = BodyPart("snout", snout, self._base_anchors["snout"], (0.5, 1.5), layer=4)
+        self.body["snout"] = BodyPart(
+            "snout", snout, self._base_anchors["snout"], (0.5, 1.5), layer=4
+        )
         self._visual_center = (0.625, 0.45)
         self.conv_size()
 
     def apply_extra_pose(self, flip: bool, swing: float) -> None:
-        self.body["snout"].set_pose(Pose(
-            self.pose_anchor("snout", self._base_anchors["snout"], flip),
-            self.body["snout"].target_pivot, 0.0, True, flip,
-        ))
+        self.body["snout"].set_pose(
+            Pose(
+                self.pose_anchor("snout", self._base_anchors["snout"], flip),
+                self.body["snout"].target_pivot,
+                0.0,
+                True,
+                flip,
+            )
+        )

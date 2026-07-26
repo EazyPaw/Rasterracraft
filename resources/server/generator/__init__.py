@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """
 世界生成器包 (World Generator Package)
 

@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import pygame
 
 from resources.client.GUI.inventory.backpack import Backpack
@@ -6,8 +7,6 @@ from resources.server.smelting import find_smelting_recipe, is_fuel
 
 
 class Furnace(Backpack):
-    """Server-authoritative Minecraft furnace container."""
-
     _texture_path = "gui.container.furnace"
     inventory_offset = (7, 84)
     furnace_offsets = ((56, 17), (56, 53), (116, 35))
@@ -30,11 +29,7 @@ class Furnace(Backpack):
 
     @staticmethod
     def _is_crafting_slot(slot):
-        return (
-            isinstance(slot, tuple)
-            and len(slot) == 2
-            and slot[0] == "furnace"
-        )
+        return isinstance(slot, tuple) and len(slot) == 2 and slot[0] == "furnace"
 
     def _slot_descriptor(self, slot):
         if isinstance(slot, int):
@@ -91,27 +86,28 @@ class Furnace(Backpack):
         return super()._slot_capacity(slot, source)
 
     def _finish_drag(self):
-        inventory_slots = [
-            slot for slot in self.drag_slots if isinstance(slot, int)
-        ]
+        inventory_slots = [slot for slot in self.drag_slots if isinstance(slot, int)]
         furnace_slots = [
-            slot[1] for slot in self.drag_slots
-            if self._is_crafting_slot(slot)
+            slot[1] for slot in self.drag_slots if self._is_crafting_slot(slot)
         ]
         if inventory_slots:
-            self.render.client.sent_packet({
-                "__class__": "ContainerDrag",
-                "container": "inventory",
-                "slots": inventory_slots,
-                "button": self.drag_button,
-            })
+            self.render.client.sent_packet(
+                {
+                    "__class__": "ContainerDrag",
+                    "container": "inventory",
+                    "slots": inventory_slots,
+                    "button": self.drag_button,
+                }
+            )
         if furnace_slots:
-            self.render.client.sent_packet({
-                "__class__": "ContainerDrag",
-                "container": self.container_id,
-                "slots": furnace_slots,
-                "button": self.drag_button,
-            })
+            self.render.client.sent_packet(
+                {
+                    "__class__": "ContainerDrag",
+                    "container": self.container_id,
+                    "slots": furnace_slots,
+                    "button": self.drag_button,
+                }
+            )
         self._drag_material = None
         self._reset_drag()
 
@@ -143,7 +139,8 @@ class Furnace(Backpack):
 
     def _draw_crafting(self):
         texture = self.get_texture(
-            self.render.gui_scale, self.render.client,
+            self.render.gui_scale,
+            self.render.client,
         )
         gui_x = (self.render.SCREEN_WIDTH - texture.get_width()) // 2
         gui_y = (self.render.SCREEN_HEIGHT - texture.get_height()) // 2
@@ -163,12 +160,10 @@ class Furnace(Backpack):
             font_size,
         )
         burn_ratio = (
-            self.burn_time / self.burn_time_total
-            if self.burn_time_total > 0 else 0.0
+            self.burn_time / self.burn_time_total if self.burn_time_total > 0 else 0.0
         )
         cook_ratio = (
-            self.cook_time / self.cook_time_total
-            if self.cook_time_total > 0 else 0.0
+            self.cook_time / self.cook_time_total if self.cook_time_total > 0 else 0.0
         )
         self._draw_progress_sprite(
             "gui.sprites.container.furnace.lit_progress",
@@ -191,8 +186,7 @@ class Furnace(Backpack):
             if target in self.drag_slots or target == hovered:
                 self.render.blit(
                     self.selection_texture,
-                    (pos[0] + self.render.gui_scale,
-                     pos[1] + self.render.gui_scale),
+                    (pos[0] + self.render.gui_scale, pos[1] + self.render.gui_scale),
                 )
             self._draw_crafting_stack(self.furnace_slots[index], pos)
         if self._is_crafting_slot(hovered):
@@ -204,7 +198,10 @@ class Furnace(Backpack):
             return
         restore_inventory(self.furnace_slots, packet.get("slots", []))
         for key in (
-            "burn_time", "burn_time_total", "cook_time", "cook_time_total",
+            "burn_time",
+            "burn_time_total",
+            "cook_time",
+            "cook_time_total",
         ):
             try:
                 setattr(self, key, max(0, int(packet.get(key, getattr(self, key)))))
@@ -219,8 +216,10 @@ class Furnace(Backpack):
         if not self._is_empty(self.dragging_item):
             self.dragging_item = self._empty_stack()
         if not self._server_closed:
-            self.render.client.sent_packet({
-                "__class__": "CloseFurnace",
-                "container": self.container_id,
-            })
+            self.render.client.sent_packet(
+                {
+                    "__class__": "CloseFurnace",
+                    "container": self.container_id,
+                }
+            )
         self.render.client.game_manager.release_game_input()

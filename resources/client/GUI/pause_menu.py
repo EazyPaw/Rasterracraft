@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import pygame
 
 from resources.client.GUI.button import Button
@@ -16,7 +17,9 @@ class PauseMenu(GUI):
 
     def draw(self):
         self._layout_buttons()
-        overlay = pygame.Surface((self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay = pygame.Surface(
+            (self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT), pygame.SRCALPHA
+        )
         overlay.fill((0, 0, 0, 120))
         self.render.blit(overlay, (0, 0))
         for button in self.buttons:
@@ -25,7 +28,11 @@ class PauseMenu(GUI):
     def handle_events(self, events: list[pygame.event.Event]):
         for event in events[:]:
             handled = False
-            if event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
+            if event.type in (
+                pygame.MOUSEMOTION,
+                pygame.MOUSEBUTTONDOWN,
+                pygame.MOUSEBUTTONUP,
+            ):
                 for button in self.buttons:
                     if button.handle_event(event):
                         handled = True

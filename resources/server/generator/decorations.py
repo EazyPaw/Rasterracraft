@@ -1,4 +1,4 @@
-"""Surface decoration generation for the Minecraft-like 2D generator."""
+# Commented and arranged by ChatGPT
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from resources.server.generator.noise import NoiseMixin
 
 
 class DecorationMixin(NoiseMixin):
-    """Trees, leaf caps, plants, mushrooms, cacti and sugar cane."""
-
     foreground_leaf_clearance = 2
     jungle_biomes = frozenset({"jungle", "sparse_jungle", "bamboo_jungle"})
 
@@ -21,10 +19,11 @@ class DecorationMixin(NoiseMixin):
         "oak": TreeConfig("oak_log", "oak_leaves", 4, 2, 0, 2, "oak"),
         "birch": TreeConfig("birch_log", "birch_leaves", 5, 2, 0, 2, "birch"),
         "spruce": TreeConfig("spruce_log", "spruce_leaves", 6, 3, 1, 2, "spruce"),
-        # Requested Java/Bedrock ranges and species-specific shapes.
         "jungle_tree": TreeConfig("jungle_log", "jungle_leaves", 5, 8, 0, 3, "jungle"),
         "acacia": TreeConfig("acacia_log", "acacia_leaves", 6, 5, 0, 2, "acacia"),
-        "dark_oak": TreeConfig("dark_oak_log", "dark_oak_leaves", 7, 4, 0, 3, "dark_oak"),
+        "dark_oak": TreeConfig(
+            "dark_oak_log", "dark_oak_leaves", 7, 4, 0, 3, "dark_oak"
+        ),
     }
 
     def _build_block_factories(self) -> dict[str, Callable[[], Block]]:
@@ -74,9 +73,15 @@ class DecorationMixin(NoiseMixin):
                 trunk=trunk,
                 leaves=leaves,
                 base_height=int(trunk_placer.get("base_height", fallback.base_height)),
-                height_rand_a=int(trunk_placer.get("height_rand_a", fallback.height_rand_a)),
-                height_rand_b=int(trunk_placer.get("height_rand_b", fallback.height_rand_b)),
-                radius=self._read_int_provider(foliage_placer.get("radius", fallback.radius)),
+                height_rand_a=int(
+                    trunk_placer.get("height_rand_a", fallback.height_rand_a)
+                ),
+                height_rand_b=int(
+                    trunk_placer.get("height_rand_b", fallback.height_rand_b)
+                ),
+                radius=self._read_int_provider(
+                    foliage_placer.get("radius", fallback.radius)
+                ),
                 shape=fallback.shape,
             )
         return configs
@@ -95,8 +100,15 @@ class DecorationMixin(NoiseMixin):
             return fallback
         return str(name).split(":", 1)[-1]
 
-    def get_structure_block(self, x: int, y: int, z: int, surface_y: int,
-                            profile: BiomeProfile, foreground_surface_y: int | None = None):
+    def get_structure_block(
+        self,
+        x: int,
+        y: int,
+        z: int,
+        surface_y: int,
+        profile: BiomeProfile,
+        foreground_surface_y: int | None = None,
+    ):
         if foreground_surface_y is None:
             foreground_surface_y = surface_y
 
@@ -118,7 +130,6 @@ class DecorationMixin(NoiseMixin):
         if cap_block is not None:
             return cap_block
 
-        # Vines are the lowest-priority foliage: never overwrite a leaf cap.
         vine = self.get_large_jungle_vine_block(x, y)
         if vine is not None:
             return vine
@@ -126,7 +137,6 @@ class DecorationMixin(NoiseMixin):
         return self.get_ground_decoration_block(x, y, z, surface_y, profile)
 
     def get_jungle_shrub_block(self, x: int, y: int, z: int):
-        """Generate 2-3 block jungle bushes with one jungle-log base."""
         if z != 1:
             return None
         spacing = 6
@@ -154,10 +164,13 @@ class DecorationMixin(NoiseMixin):
         return None
 
     def get_large_jungle_vine_block(self, x: int, y: int):
-        """Place hanging vines along exposed sides of large jungle trunks."""
         for trunk_x in range(x - 3, x + 4):
             tree = self._tree_at_column(trunk_x, 1)
-            if tree is None or tree[0] != "jungle_tree" or not self._is_large_jungle(trunk_x):
+            if (
+                tree is None
+                or tree[0] != "jungle_tree"
+                or not self._is_large_jungle(trunk_x)
+            ):
                 continue
             ground_y = tree[1]
             height = self._tree_height(self.tree_configs["jungle_tree"], trunk_x)
@@ -169,8 +182,9 @@ class DecorationMixin(NoiseMixin):
                 return VINE()
         return None
 
-    def get_ground_decoration_block(self, x: int, y: int, z: int, surface_y: int,
-                                    profile: BiomeProfile):
+    def get_ground_decoration_block(
+        self, x: int, y: int, z: int, surface_y: int, profile: BiomeProfile
+    ):
         stacked_plant = self._stacked_plant_for_column(x, surface_y, profile)
         if stacked_plant is not None:
             block_cls, height = stacked_plant
@@ -190,28 +204,43 @@ class DecorationMixin(NoiseMixin):
 
         local = self._noise1(x, 0.18, 1, 710)
 
-        if (profile.is_arid
-                and self._rand01(x, surface_y, 701) < 0.07
-                and local > -0.25):
+        if profile.is_arid and self._rand01(x, surface_y, 701) < 0.07 and local > -0.25:
             return DEAD_BUSH()
 
-        if (profile.fern_chance
-                and self._rand01(x, surface_y, 703) < profile.fern_chance
-                and local > -0.45):
+        if (
+            profile.fern_chance
+            and self._rand01(x, surface_y, 703) < profile.fern_chance
+            and local > -0.45
+        ):
             return FERN()
 
         if profile.biome_id == "mushroom_fields":
-            if (self._rand01(x, surface_y, 704) < profile.mushroom_chance
-                    and local < 0.60):
-                return BROWN_MUSHROOM() if self._rand01(x, surface_y, 711) < 0.50 else RED_MUSHROOM()
-        elif (profile.mushroom_chance
-                and self._rand01(x, surface_y, 704) < profile.mushroom_chance * profile.mushroom_boost
-                and local < 0.22):
-            return BROWN_MUSHROOM() if self._rand01(x, surface_y, 711) < 0.55 else RED_MUSHROOM()
+            if (
+                self._rand01(x, surface_y, 704) < profile.mushroom_chance
+                and local < 0.60
+            ):
+                return (
+                    BROWN_MUSHROOM()
+                    if self._rand01(x, surface_y, 711) < 0.50
+                    else RED_MUSHROOM()
+                )
+        elif (
+            profile.mushroom_chance
+            and self._rand01(x, surface_y, 704)
+            < profile.mushroom_chance * profile.mushroom_boost
+            and local < 0.22
+        ):
+            return (
+                BROWN_MUSHROOM()
+                if self._rand01(x, surface_y, 711) < 0.55
+                else RED_MUSHROOM()
+            )
 
-        if (profile.flower_chance
-                and self._rand01(x, surface_y, 705) < profile.flower_chance
-                and local > 0.02):
+        if (
+            profile.flower_chance
+            and self._rand01(x, surface_y, 705) < profile.flower_chance
+            and local > 0.02
+        ):
             return self._flower_for_profile(profile, x, surface_y)
 
         grass_chance = self._grass_chance(profile)
@@ -229,7 +258,6 @@ class DecorationMixin(NoiseMixin):
         return None
 
     def get_giant_mushroom_block(self, x: int, y: int, z: int, surface_y: int):
-        """Deterministic 2.5D giant mushroom silhouettes for mushroom fields."""
         spacing = 10
         for cell in range(x // spacing - 1, x // spacing + 2):
             if self._stable_hash(cell, 977) % 100 >= 62:
@@ -244,8 +272,7 @@ class DecorationMixin(NoiseMixin):
             height = 5 + self._stable_hash(cell, 979) % 4
             dy = y - ground_y
             dx = x - stem_x
-            # Stems, like tree trunks, remain in the background layer so the
-            # player can walk past them.
+
             if z == 1 and dx == 0 and 1 <= dy <= height:
                 return MUSHROOM_STEM()
             red = self._stable_hash(cell, 980) % 2 == 0
@@ -269,7 +296,10 @@ class DecorationMixin(NoiseMixin):
         if surface_y < self.sea_level:
             return None
 
-        if profile.cactus_chance and self._rand01(x, surface_y, 700) < profile.cactus_chance:
+        if (
+            profile.cactus_chance
+            and self._rand01(x, surface_y, 700) < profile.cactus_chance
+        ):
             height = 1 + self._stable_hash(x, surface_y, 721) % 3
             return CACTUS, height
 
@@ -286,7 +316,9 @@ class DecorationMixin(NoiseMixin):
             return profile.grass_chance
         return max(profile.grass_chance, 0.10)
 
-    def _double_plant_for_column(self, x: int, surface_y: int, z: int, profile: BiomeProfile):
+    def _double_plant_for_column(
+        self, x: int, surface_y: int, z: int, profile: BiomeProfile
+    ):
         if surface_y < self.sea_level or profile.surface != "grass_block":
             return None
 
@@ -314,12 +346,15 @@ class DecorationMixin(NoiseMixin):
                 return self._block(block_id)
         return self._block(profile.flower_options[-1][1])
 
-    def get_tree_block(self, x: int, y: int, surface_y: int,
-                       profile: BiomeProfile, z: int = 1):
+    def get_tree_block(
+        self, x: int, y: int, surface_y: int, profile: BiomeProfile, z: int = 1
+    ):
         if z != 1:
             return None
         if z == 1:
-            for trunk_x in range(x - self.max_tree_lookup, x + self.max_tree_lookup + 1):
+            for trunk_x in range(
+                x - self.max_tree_lookup, x + self.max_tree_lookup + 1
+            ):
                 tree = self._tree_at_column(trunk_x, 1)
                 if tree is None or tree[0] != "spruce":
                     continue
@@ -331,10 +366,15 @@ class DecorationMixin(NoiseMixin):
                 height = self._tree_height(config, trunk_x)
                 dx = abs(x - trunk_x)
                 leaf_levels = [
-                    dy for dy in range(height - 6, height + 2)
-                    if (radius := self._background_leaf_radius(
-                        config, height, dy, "spruce", trunk_x
-                    )) is not None and dx <= radius
+                    dy
+                    for dy in range(height - 6, height + 2)
+                    if (
+                        radius := self._background_leaf_radius(
+                            config, height, dy, "spruce", trunk_x
+                        )
+                    )
+                    is not None
+                    and dx <= radius
                 ]
                 if leaf_levels and y - ground_y == max(leaf_levels) + 1:
                     return SNOW(layer=1)
@@ -359,8 +399,7 @@ class DecorationMixin(NoiseMixin):
                 return self._block(block_id)
         return None
 
-    def get_leaf_cap_block(self, x: int, y: int, surface_y: int,
-                           profile: BiomeProfile):
+    def get_leaf_cap_block(self, x: int, y: int, surface_y: int, profile: BiomeProfile):
         for trunk_x in range(x - self.max_tree_lookup, x + self.max_tree_lookup + 1):
             tree = self._tree_at_column(trunk_x, 1)
             if tree is None:
@@ -368,13 +407,12 @@ class DecorationMixin(NoiseMixin):
             tree_name, trunk_surface = tree
             config = self.tree_configs[tree_name]
             height = self._tree_height(config, trunk_x)
-            clearance_surface = (trunk_surface if config.shape == "acacia"
-                                 else surface_y)
+            clearance_surface = trunk_surface if config.shape == "acacia" else surface_y
             if y <= clearance_surface + self.foreground_leaf_clearance:
                 continue
             if config.shape == "acacia":
                 if (x - trunk_x, y - trunk_surface) in self._acacia_geometry(
-                        trunk_x, height
+                    trunk_x, height
                 )[2]:
                     return self._block(config.leaves)
                 continue
@@ -399,7 +437,9 @@ class DecorationMixin(NoiseMixin):
             cache[key] = result
         return result
 
-    def has_tree_at(self, x: int, surface_y: int, profile: BiomeProfile, z: int = 1) -> bool:
+    def has_tree_at(
+        self, x: int, surface_y: int, profile: BiomeProfile, z: int = 1
+    ) -> bool:
         cache = getattr(self, "_tree_presence_cache", None)
         key = (x, surface_y, profile.biome_id, z)
         if cache is not None and key in cache:
@@ -410,7 +450,9 @@ class DecorationMixin(NoiseMixin):
             cache[key] = result
         return result
 
-    def _compute_has_tree_at(self, x: int, surface_y: int, profile: BiomeProfile, z: int = 1) -> bool:
+    def _compute_has_tree_at(
+        self, x: int, surface_y: int, profile: BiomeProfile, z: int = 1
+    ) -> bool:
         if surface_y < self.sea_level or profile.tree_chance <= 0:
             return False
 
@@ -446,7 +488,10 @@ class DecorationMixin(NoiseMixin):
                 continue
             competing_profile, competing_surface = competing
             competing_gap = min_gap
-            if abs(nx - x) < competing_gap and self._stable_hash(nx, competing_surface, 817) < priority:
+            if (
+                abs(nx - x) < competing_gap
+                and self._stable_hash(nx, competing_surface, 817) < priority
+            ):
                 return False
         return True
 
@@ -503,8 +548,6 @@ class DecorationMixin(NoiseMixin):
         elif shape == "jungle":
             h = max(h, 5)
             if self._is_large_jungle(trunk_x):
-                # 2x2 jungle trees are the tall variant, while ordinary
-                # jungle trees retain the requested 5-13 block range.
                 h += 4 + self._stable_hash(trunk_x, 827) % 5
         elif shape in {"acacia", "flat"}:
             h = max(h, 3)
@@ -513,11 +556,11 @@ class DecorationMixin(NoiseMixin):
         return h
 
     def _is_large_jungle(self, trunk_x: int) -> bool:
-        """About one third of jungle trees use the large 2x2 form."""
         return self._stable_hash(trunk_x, 823) % 100 < 34
 
-    def tree_block_at(self, tree_name: str, trunk_x: int, ground_y: int,
-                      x: int, y: int) -> str | None:
+    def tree_block_at(
+        self, tree_name: str, trunk_x: int, ground_y: int, x: int, y: int
+    ) -> str | None:
         config = self.tree_configs[tree_name]
         height = self._tree_height(config, trunk_x)
         dx = x - trunk_x
@@ -526,15 +569,11 @@ class DecorationMixin(NoiseMixin):
             block = self._acacia_block_at(config, trunk_x, height, dx, dy)
             if block is not None:
                 return block
-            # Acacia foliage is attached to each bent branch endpoint rather
-            # than to the root column.  Keep it out of the generic canopy
-            # radius path used by the other tree species.
+
             if (dx, dy) in self._acacia_background_leaf_set(trunk_x, height):
                 return config.leaves
             return None
         elif config.shape == "dark_oak":
-            # 2D representation of a 2x2 trunk; the northwest column rises
-            # one block above its three neighbours.
             if 1 <= dy <= height - 1 and dx in (0, 1):
                 return config.trunk
             if dy == height and dx == 0:
@@ -562,21 +601,14 @@ class DecorationMixin(NoiseMixin):
             return config.leaves
         return None
 
-    def _acacia_block_at(self, config: TreeConfig, trunk_x: int, height: int,
-                         dx: int, dy: int) -> str | None:
-        """Return an acacia trunk block from the deterministic geometry."""
+    def _acacia_block_at(
+        self, config: TreeConfig, trunk_x: int, height: int, dx: int, dy: int
+    ) -> str | None:
         if (dx, dy) in self._acacia_trunk_set(trunk_x, height):
             return config.trunk
         return None
 
     def _acacia_trunk_set(self, trunk_x: int, height: int) -> set[tuple[int, int]]:
-        """Build a continuous main stem with sparse asynchronous forks.
-
-        The main stem is vertical until the crown zone.  Forks start at
-        different rows and move one block per row, leaving the central air
-        gap between the two branches.  A no-fork variant bends only the top
-        one or two blocks.
-        """
         return self._acacia_geometry(trunk_x, height)[0]
 
     def _acacia_geometry(self, trunk_x: int, height: int):
@@ -609,9 +641,6 @@ class DecorationMixin(NoiseMixin):
             for dy in range(1, fork_y + 1):
                 trunks.add((0, dy))
 
-            # The forked form is binary: one main branch reaches the top and
-            # exactly one lateral branch peels away.  This avoids the old
-            # three-pronged silhouette while retaining short 1-2 block forks.
             main_x = 0
             for dy in range(fork_y + 1, height + 1):
                 trunks.add((main_x, dy))
@@ -627,9 +656,6 @@ class DecorationMixin(NoiseMixin):
                 side_x = x
             endpoints.append((side_x, side_start + side_len))
 
-        # Leaves are two rows high per endpoint: a narrower upper/background
-        # row and a wider lower/background row, with a matching foreground
-        # lower row.  Remove trunk cells so foliage can never truncate wood.
         background: set[tuple[int, int]] = set()
         foreground: set[tuple[int, int]] = set()
         for index, (cx, cy) in enumerate(endpoints):
@@ -637,9 +663,15 @@ class DecorationMixin(NoiseMixin):
             upper_half = (width - 1) // 2
             lower_width = width + 2
             lower_half = (lower_width - 1) // 2
-            background.update((cx + dx, cy + 1) for dx in range(-upper_half, upper_half + 1))
-            background.update((cx + dx, cy) for dx in range(-lower_half, lower_half + 1))
-            foreground.update((cx + dx, cy) for dx in range(-upper_half, upper_half + 1))
+            background.update(
+                (cx + dx, cy + 1) for dx in range(-upper_half, upper_half + 1)
+            )
+            background.update(
+                (cx + dx, cy) for dx in range(-lower_half, lower_half + 1)
+            )
+            foreground.update(
+                (cx + dx, cy) for dx in range(-upper_half, upper_half + 1)
+            )
         background.difference_update(trunks)
         foreground.difference_update(trunks)
         cache[key] = trunks, background, foreground
@@ -648,9 +680,14 @@ class DecorationMixin(NoiseMixin):
     def _acacia_background_leaf_set(self, trunk_x: int, height: int):
         return self._acacia_geometry(trunk_x, height)[1]
 
-    def _background_leaf_radius(self, config: TreeConfig, height: int, dy: int,
-                                tree_name: str | None = None,
-                                trunk_x: int | None = None) -> int | None:
+    def _background_leaf_radius(
+        self,
+        config: TreeConfig,
+        height: int,
+        dy: int,
+        tree_name: str | None = None,
+        trunk_x: int | None = None,
+    ) -> int | None:
         shape = config.shape
         if shape in {"oak", "birch", "blob"}:
             return {
@@ -695,9 +732,14 @@ class DecorationMixin(NoiseMixin):
             }.get(dy)
         return None
 
-    def _foreground_leaf_radius(self, config: TreeConfig, height: int, dy: int,
-                                tree_name: str | None = None,
-                                trunk_x: int | None = None) -> int | None:
+    def _foreground_leaf_radius(
+        self,
+        config: TreeConfig,
+        height: int,
+        dy: int,
+        tree_name: str | None = None,
+        trunk_x: int | None = None,
+    ) -> int | None:
         radius = self._background_leaf_radius(config, height, dy, tree_name, trunk_x)
         if radius is None or radius <= 0:
             return None

@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import logging
 import math
 import random
@@ -24,14 +25,18 @@ class ParticleManager:
     子类里；这里只负责接包、保存存活粒子、碰撞查询和纹理缓存。
     """
 
-    def __init__(self, client: 'Client'):
+    def __init__(self, client: "Client"):
         self.client = client
         self.particles: list[Particle] = []
         self.max_particles = 700
         self._lock = threading.RLock()
 
-        self._scaled_texture_cache: OrderedDict[tuple[pygame.Surface, int, int], pygame.Surface] = OrderedDict()
-        self._block_fragment_cache: OrderedDict[tuple[pygame.Surface, int, int, int], tuple[pygame.Surface, ...]] = OrderedDict()
+        self._scaled_texture_cache: OrderedDict[
+            tuple[pygame.Surface, int, int], pygame.Surface
+        ] = OrderedDict()
+        self._block_fragment_cache: OrderedDict[
+            tuple[pygame.Surface, int, int, int], tuple[pygame.Surface, ...]
+        ] = OrderedDict()
         self._max_scaled_cache = 512
         self._max_fragment_cache = 192
 
@@ -90,7 +95,9 @@ class ParticleManager:
             if overflow > 0:
                 del self.particles[:overflow]
 
-    def spawn_block_break(self, block: 'Block', location: 'Location', count: int = 18) -> None:
+    def spawn_block_break(
+        self, block: "Block", location: "Location", count: int = 18
+    ) -> None:
         """
         根据方块和格子位置生成破碎碎片。
 
@@ -145,7 +152,7 @@ class ParticleManager:
                     alive.append(particle)
             self.particles = alive
 
-    def draw(self, render: 'Render', z_filter: int | None = None) -> None:
+    def draw(self, render: "Render", z_filter: int | None = None) -> None:
         """绘制当前存活的粒子，可按前景/背景层筛选。"""
         with self._lock:
             if not self.particles:
@@ -198,7 +205,9 @@ class ParticleManager:
             return False
 
         for cell_x in range(start_cell + step, end_cell + step, step):
-            if self._collides_at(cell_x, particle.y - radius, particle.y + radius, particle.z):
+            if self._collides_at(
+                cell_x, particle.y - radius, particle.y + radius, particle.z
+            ):
                 if dx > 0:
                     particle.x = cell_x - radius - 0.001
                 else:
@@ -227,7 +236,9 @@ class ParticleManager:
             return False
 
         for cell_y in range(start_cell + step, end_cell + step, step):
-            if self._collides_at_y(particle.x - radius, particle.x + radius, cell_y, particle.z):
+            if self._collides_at_y(
+                particle.x - radius, particle.x + radius, cell_y, particle.z
+            ):
                 if dy > 0:
                     particle.y = cell_y - radius - 0.001
                 else:
@@ -243,11 +254,16 @@ class ParticleManager:
             try:
                 block = self.client.client_world.get_block(block_x, block_y, z)
                 getter = getattr(block, "get_collision_box", None)
-                shape = getter() if callable(getter) else getattr(block, "collision_box", ())
+                shape = (
+                    getter()
+                    if callable(getter)
+                    else getattr(block, "collision_box", ())
+                )
                 local_min_y = y_min - block_y
                 local_max_y = y_max - block_y
-                if any(box.max_y > local_min_y and box.min_y < local_max_y
-                       for box in shape):
+                if any(
+                    box.max_y > local_min_y and box.min_y < local_max_y for box in shape
+                ):
                     return True
             except (IndexError, AttributeError, TypeError, ValueError):
                 continue
@@ -259,9 +275,15 @@ class ParticleManager:
             try:
                 block = self.client.client_world.get_block(block_x, block_y, z)
                 getter = getattr(block, "get_collision_box", None)
-                shape = getter() if callable(getter) else getattr(block, "collision_box", ())
-                if any(box.max_x > x_min - block_x and box.min_x < x_max - block_x
-                       for box in shape):
+                shape = (
+                    getter()
+                    if callable(getter)
+                    else getattr(block, "collision_box", ())
+                )
+                if any(
+                    box.max_x > x_min - block_x and box.min_x < x_max - block_x
+                    for box in shape
+                ):
                     return True
             except (IndexError, AttributeError, TypeError, ValueError):
                 continue
@@ -272,7 +294,9 @@ class ParticleManager:
         try:
             block = self.client.client_world.get_block(x, y, z)
             getter = getattr(block, "get_collision_box", None)
-            shape = getter() if callable(getter) else getattr(block, "collision_box", ())
+            shape = (
+                getter() if callable(getter) else getattr(block, "collision_box", ())
+            )
             return bool(shape)
         except (IndexError, AttributeError, TypeError, ValueError):
             return False
@@ -284,18 +308,17 @@ class ParticleManager:
             return True
         return abs(particle.x - player.x) < 96 and abs(particle.y - player.y) < 64
 
-    def get_source_fragments(self, source, *, location=None) -> tuple[pygame.Surface, ...]:
-        """Cut any block/material/texture into reusable non-empty fragments."""
+    def get_source_fragments(
+        self, source, *, location=None
+    ) -> tuple[pygame.Surface, ...]:
         try:
             if isinstance(source, pygame.Surface):
                 texture = source
-            elif hasattr(source, 'block_id'):
+            elif hasattr(source, "block_id"):
                 if location is not None:
                     source.location = location
                 texture = source.get_texture(32)
             else:
-                # Inventory item textures are authored at 16px; 2x gives the
-                # same fragment resolution as a 32px block texture.
                 texture = source.get_texture(2.0)
         except Exception:
             texture = None
@@ -304,12 +327,14 @@ class ParticleManager:
 
         return self._get_texture_fragments(texture)
 
-    def _get_block_fragments(self, block: 'Block') -> tuple[pygame.Surface, ...]:
-        """Compatibility wrapper for older block-only particle callers."""
-        return self.get_source_fragments(block, location=getattr(block, 'location', None))
+    def _get_block_fragments(self, block: "Block") -> tuple[pygame.Surface, ...]:
+        return self.get_source_fragments(
+            block, location=getattr(block, "location", None)
+        )
 
-    def _get_texture_fragments(self, texture: pygame.Surface) -> tuple[pygame.Surface, ...]:
-        """Cut a texture into cached fragments, omitting transparent cells."""
+    def _get_texture_fragments(
+        self, texture: pygame.Surface
+    ) -> tuple[pygame.Surface, ...]:
 
         grid = 4
         key = (texture, texture.get_width(), texture.get_height(), grid)
@@ -337,7 +362,9 @@ class ParticleManager:
             self._block_fragment_cache.popitem(last=False)
         return result
 
-    def get_scaled_texture(self, texture: pygame.Surface, scale: float) -> pygame.Surface:
+    def get_scaled_texture(
+        self, texture: pygame.Surface, scale: float
+    ) -> pygame.Surface:
         """按原始贴图尺寸和缩放倍数获取粒子材质缓存。"""
         width = max(1, round(texture.get_width() * scale))
         height = max(1, round(texture.get_height() * scale))

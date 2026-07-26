@@ -1,11 +1,10 @@
+# Commented and arranged by ChatGPT
 import pygame
 
 from resources.client.GUI.gui import GUI
 
 
 class LoadingScreen(GUI):
-    """Small, non-interactive terrain loading overlay used while joining a save."""
-
     def __init__(self, render):
         super().__init__(render)
         self.priority = 1000
@@ -21,7 +20,9 @@ class LoadingScreen(GUI):
         title = client.resources_manager.get_translation_key("menu.loadingLevel")
         title_font = self.render.get_font(max(28, min(46, height // 14)))
         title_surface = title_font.render(title, True, (245, 245, 245))
-        screen.blit(title_surface, title_surface.get_rect(center=(width // 2, height // 2 - 48)))
+        screen.blit(
+            title_surface, title_surface.get_rect(center=(width // 2, height // 2 - 48))
+        )
 
         required = client.required_spawn_regions
         loaded = client.loaded_chunk_regions
@@ -29,15 +30,20 @@ class LoadingScreen(GUI):
         done = min(total, len(required.intersection(loaded)))
         progress = done / total
         bar_width = min(520, max(240, width - 120))
-        bar_rect = pygame.Rect((width - bar_width) // 2, height // 2 + 12, bar_width, 22)
+        bar_rect = pygame.Rect(
+            (width - bar_width) // 2, height // 2 + 12, bar_width, 22
+        )
         pygame.draw.rect(screen, (35, 35, 35), bar_rect)
-        fill = pygame.Rect(bar_rect.x + 2, bar_rect.y + 2,
-                           max(0, int((bar_width - 4) * progress)), bar_rect.height - 4)
+        fill = pygame.Rect(
+            bar_rect.x + 2,
+            bar_rect.y + 2,
+            max(0, int((bar_width - 4) * progress)),
+            bar_rect.height - 4,
+        )
         if fill.width:
             pygame.draw.rect(screen, (101, 173, 68), fill)
 
     def _draw_background(self, width: int, height: int) -> None:
-        """Use the exact same scaled dirt + shade treatment as MainMenu."""
         cache_key = (width, height)
         if self._background_cache is None or self._background_cache_key != cache_key:
             surface = self.render.create_surface((width, height), convert=True)
@@ -55,7 +61,5 @@ class LoadingScreen(GUI):
         self.render.blit(self._background_cache, (0, 0))
 
     def handle_events(self, events):
-        # Joining a world is intentionally not cancellable halfway through a
-        # network handshake; escape remains available once the normal pause menu
-        # is installed.
+
         return

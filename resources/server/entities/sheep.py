@@ -1,10 +1,16 @@
+# Commented and arranged by ChatGPT
 import random
 
 import pygame
 
 from resources.client.entity_skeleton import BodyPart, Pose
 from resources.server.blocks import AIR, DIRT
-from resources.server.entities.animal import Animal, QuadrupedSkeleton, crop_rotated_body, crop_x_side
+from resources.server.entities.animal import (
+    Animal,
+    QuadrupedSkeleton,
+    crop_rotated_body,
+    crop_x_side,
+)
 from resources.server.entities.item import Item
 from resources.server.entity_AI import SheepAI
 from resources.server.entity_registry import register_entity
@@ -44,11 +50,13 @@ class Sheep(Animal):
 
     def get_synced_data(self) -> dict:
         data = super().get_synced_data()
-        data.update({
-            "sheared": bool(self.sheared),
-            "wool_color": self.wool_color,
-            "eat_animation_ticks": int(self.eat_animation_ticks),
-        })
+        data.update(
+            {
+                "sheared": bool(self.sheared),
+                "wool_color": self.wool_color,
+                "eat_animation_ticks": int(self.eat_animation_ticks),
+            }
+        )
         return data
 
     def get_persistent_data(self) -> dict:
@@ -95,13 +103,15 @@ class Sheep(Animal):
         ):
             self.sheared = True
             for _ in range(random.randint(1, 3)):
-                self.world.spawn_entity(Item(
-                    self.x + self.width * 0.5,
-                    self.y + self.height * 0.5,
-                    self.world,
-                    ItemStack(WHITE_WOOL(), 1),
-                    self.z,
-                ))
+                self.world.spawn_entity(
+                    Item(
+                        self.x + self.width * 0.5,
+                        self.y + self.height * 0.5,
+                        self.world,
+                        ItemStack(WHITE_WOOL(), 1),
+                        self.z,
+                    )
+                )
             server = getattr(self.world, "server", None)
             if server is not None and not self.silent:
                 server.broadcast_sound(self.sounds["shear"], self.x, self.y, self.z)
@@ -124,45 +134,73 @@ class SheepSkeleton(QuadrupedSkeleton):
         super().__init__(entity, "entity.sheep.sheep", client=client)
         self.model_width = 1.25
         self.configure_quadruped(
-            body_uv=(28, 8), body_size=(8, 16, 6),
-            head_uv=(0, 0), head_size=(6, 6, 8),
-            leg_uv=(0, 16), leg_size=(4, 12, 4),
-            body_anchor=(0.08, 1.125), head_anchor=(1.07, 1.1125),
-            rear_leg_anchor=(0.105, 0.75), front_leg_anchor=(0.845, 0.75),
+            body_uv=(28, 8),
+            body_size=(8, 16, 6),
+            head_uv=(0, 0),
+            head_size=(6, 6, 8),
+            leg_uv=(0, 16),
+            leg_size=(4, 12, 4),
+            body_anchor=(0.08, 1.125),
+            head_anchor=(1.07, 1.1125),
+            rear_leg_anchor=(0.105, 0.75),
+            front_leg_anchor=(0.845, 0.75),
         )
-        fur_texture = self.client.resources_manager.get_texture_img("entity.sheep.sheep_fur")
+        fur_texture = self.client.resources_manager.get_texture_img(
+            "entity.sheep.sheep_fur"
+        )
         fur_body = crop_rotated_body(fur_texture, (28, 8), (8, 16, 6))
         fur_head = crop_x_side(fur_texture, (0, 0), (6, 6, 6))
         fur_leg = crop_x_side(fur_texture, (0, 16), (4, 6, 4))
-        # CubeDeformation changes geometry but not UVs; stretch the cropped
-        # pixels to the documented expanded silhouette.
+
         fur_body = pygame.transform.scale(fur_body, (20, 10))
         fur_head = pygame.transform.scale(fur_head, (7, 7))
         fur_leg = pygame.transform.scale(fur_leg, (5, 7))
-        # Fur anchors mirror the base leg anchors (far + near offset pairs).
+
         fur_far_back = (0.10625, 0.78)
         fur_far_front = (0.84625, 0.78)
         fur_near_back = (0.10625 + 0.03, 0.78 - 0.04)
         fur_near_front = (0.84625 - 0.03, 0.78 - 0.04)
-        self._base_anchors.update({
-            "fur_body": (-0.04, 1.30),
-            "fur_head": (0.78, 1.36),
-            "fur_far_back_leg": fur_far_back,
-            "fur_far_front_leg": fur_far_front,
-            "fur_near_back_leg": fur_near_back,
-            "fur_near_front_leg": fur_near_front,
-        })
+        self._base_anchors.update(
+            {
+                "fur_body": (-0.04, 1.30),
+                "fur_head": (0.78, 1.36),
+                "fur_far_back_leg": fur_far_back,
+                "fur_far_front_leg": fur_far_front,
+                "fur_near_back_leg": fur_near_back,
+                "fur_near_front_leg": fur_near_front,
+            }
+        )
         fur_pivot = (2.5, 0)
-        self.body.update({
-            # Far-side fur legs – behind body, same layer as base far legs
-            "fur_far_back_leg": BodyPart("fur_far_back_leg", fur_leg, fur_far_back, fur_pivot, layer=0),
-            "fur_far_front_leg": BodyPart("fur_far_front_leg", fur_leg, fur_far_front, fur_pivot, layer=0),
-            "fur_body": BodyPart("fur_body", fur_body, self._base_anchors["fur_body"], (0, 0), layer=1),
-            # Near-side fur legs – in front of body, same layer as base near legs
-            "fur_near_back_leg": BodyPart("fur_near_back_leg", fur_leg, fur_near_back, fur_pivot, layer=2),
-            "fur_near_front_leg": BodyPart("fur_near_front_leg", fur_leg, fur_near_front, fur_pivot, layer=2),
-            "fur_head": BodyPart("fur_head", fur_head, self._base_anchors["fur_head"], (3.5, 3.5), layer=3),
-        })
+        self.body.update(
+            {
+                "fur_far_back_leg": BodyPart(
+                    "fur_far_back_leg", fur_leg, fur_far_back, fur_pivot, layer=0
+                ),
+                "fur_far_front_leg": BodyPart(
+                    "fur_far_front_leg", fur_leg, fur_far_front, fur_pivot, layer=0
+                ),
+                "fur_body": BodyPart(
+                    "fur_body",
+                    fur_body,
+                    self._base_anchors["fur_body"],
+                    (0, 0),
+                    layer=1,
+                ),
+                "fur_near_back_leg": BodyPart(
+                    "fur_near_back_leg", fur_leg, fur_near_back, fur_pivot, layer=2
+                ),
+                "fur_near_front_leg": BodyPart(
+                    "fur_near_front_leg", fur_leg, fur_near_front, fur_pivot, layer=2
+                ),
+                "fur_head": BodyPart(
+                    "fur_head",
+                    fur_head,
+                    self._base_anchors["fur_head"],
+                    (3.5, 3.5),
+                    layer=3,
+                ),
+            }
+        )
         self._visual_center = (0.625, 0.65)
         self.conv_size()
 
@@ -185,8 +223,7 @@ class SheepSkeleton(QuadrupedSkeleton):
             "fur_near_front_leg": self._base_anchors["fur_near_front_leg"],
             "fur_head": (head_anchor[0], head_anchor[1]),
         }
-        # Diagonal pairs: far-back + near-front swing together (+swing),
-        #                 far-front + near-back swing together (-swing).
+
         angles = {
             "fur_far_back_leg": swing,
             "fur_far_front_leg": -swing,
@@ -196,10 +233,12 @@ class SheepSkeleton(QuadrupedSkeleton):
             "fur_head": 0.0,
         }
         for name, anchor in fur_anchors.items():
-            self.body[name].set_pose(Pose(
-                self.pose_anchor(name, anchor, flip),
-                self.body[name].target_pivot,
-                angles[name],
-                visible,
-                flip,
-            ))
+            self.body[name].set_pose(
+                Pose(
+                    self.pose_anchor(name, anchor, flip),
+                    self.body[name].target_pivot,
+                    angles[name],
+                    visible,
+                    flip,
+                )
+            )

@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import pygame
 
 from resources.client.GUI.button import Button
@@ -6,8 +7,6 @@ from resources.server.text import Text, TextColor
 
 
 class DeathScreen(GUI):
-    """Minecraft-style death overlay with explicit respawn/menu actions."""
-
     def __init__(self, render, death_message: dict | None = None, score: int = 0):
         super().__init__(render)
         self.priority = 1500
@@ -56,13 +55,17 @@ class DeathScreen(GUI):
         before, found, after = translated.partition(marker)
         segments = [{"text": before, "color": TextColor.WHITE, "bold": False}]
         if found:
-            segments.append({
-                "text": str(self.score),
-                "color": TextColor.YELLOW,
-                "bold": False,
-            })
+            segments.append(
+                {
+                    "text": str(self.score),
+                    "color": TextColor.YELLOW,
+                    "bold": False,
+                }
+            )
             if after:
-                segments.append({"text": after, "color": TextColor.WHITE, "bold": False})
+                segments.append(
+                    {"text": after, "color": TextColor.WHITE, "bold": False}
+                )
         else:
             segments[0]["text"] = translated
         return Text(segments)
@@ -112,7 +115,9 @@ class DeathScreen(GUI):
         self._draw_overlay(width, height)
         self._layout_buttons()
 
-        title = self.render.client.resources_manager.get_translation_key("deathScreen.title")
+        title = self.render.client.resources_manager.get_translation_key(
+            "deathScreen.title"
+        )
         title_size = max(34, min(58, height // 10))
         body_size = max(20, min(30, height // 22))
         score_size = max(18, min(26, height // 25))

@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import logging
 
 import pygame
@@ -14,14 +15,11 @@ from resources.server.biome import get_biome_by_id
 from resources.server.utils import client_method
 
 
-# Logical sounds implemented with assets already present in the base resource
-# pack. A pack can override any entry by defining the same ID in sounds.json.
 BUILTIN_SOUND_FALLBACKS = {
-    'item.hoe.till': {
-        'category': 'block',
-        'sounds': [
-            {'name': f'dig/gravel{index}', 'volume': 0.8}
-            for index in range(1, 5)
+    "item.hoe.till": {
+        "category": "block",
+        "sounds": [
+            {"name": f"dig/gravel{index}", "volume": 0.8} for index in range(1, 5)
         ],
     },
 }
@@ -31,8 +29,8 @@ class ResourcesManager:
     def __init__(self, client):
         self.client = client
         self.textures = {}
-        self.sounds = {}          # 存储解析后的音效信息
-        self.sound_objects = {}   # 缓存已加载的 pygame.mixer.Sound 对象
+        self.sounds = {}  # 存储解析后的音效信息
+        self.sound_objects = {}  # 缓存已加载的 pygame.mixer.Sound 对象
         self.stained_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_STAINED_CACHE = 512  # 染色缓存上限
         self._lang_map = {}
@@ -55,16 +53,18 @@ class ResourcesManager:
             target = self._lang_map
         lang_path = f"assets/minecraft/lang/{lang}.lang"
         try:
-            with open(lang_path, 'r', encoding='utf-8') as f:
+            with open(lang_path, "r", encoding="utf-8") as f:
                 for line in f:
                     try:
                         line = line.strip()
                         if not line or line.startswith("#") or "=" not in line:
                             continue
-                        key, value = line.split('=', 1)
+                        key, value = line.split("=", 1)
                         target[key] = value
                     except Exception as e:
-                        logging.error(f"Failed to load language '{lang}': {e} at line: {line}")
+                        logging.error(
+                            f"Failed to load language '{lang}': {e} at line: {line}"
+                        )
         except FileNotFoundError:
             logging.warning(f"Language file not found: '{lang_path}'")
 
@@ -117,7 +117,7 @@ class ResourcesManager:
 
             spec = text[j]
             if spec not in "sdfi":
-                result.append(text[i:j + 1])
+                result.append(text[i : j + 1])
                 i = j + 1
                 continue
 
@@ -140,7 +140,7 @@ class ResourcesManager:
 
         return "".join(result)
 
-    def get_texture_img(self, key: str, cft=False, gta = False, flip = False) -> Surface:
+    def get_texture_img(self, key: str, cft=False, gta=False, flip=False) -> Surface:
         """
         获取指定纹理的 Surface 对象。自带缓存，可直接调用
         :param flip: 是否镜像翻转贴图
@@ -163,7 +163,7 @@ class ResourcesManager:
                 return self.textures[ckey]["textures"][n]
 
         # 解析路径
-        parts = key.split('.')
+        parts = key.split(".")
         if len(parts) < 2:
             logging.warning(f"Invalid texture key format: '{key}'")
             return self.missing_texture
@@ -171,11 +171,11 @@ class ResourcesManager:
         # 第一个部分是类别（blocks, gui, items等）
         category = parts[0]
         # 剩余部分组成文件路径
-        file_path = '/'.join(parts[1:])
+        file_path = "/".join(parts[1:])
 
         # 构建完整路径：assets/minecraft/textures/{category}/{subpath}.png
-        full_path = f'assets/minecraft/textures/{category}/{file_path}.png'
-        meta_path = f'assets/minecraft/textures/{category}/{file_path}.png.mcmeta'
+        full_path = f"assets/minecraft/textures/{category}/{file_path}.png"
+        meta_path = f"assets/minecraft/textures/{category}/{file_path}.png.mcmeta"
 
         try:
             if not os.path.exists(full_path):
@@ -183,7 +183,7 @@ class ResourcesManager:
                 self.textures[ckey] = self.missing_texture
                 return self.missing_texture
             if os.path.exists(meta_path):
-                with open(meta_path, 'r', encoding='utf-8') as f:
+                with open(meta_path, "r", encoding="utf-8") as f:
                     meta: dict = json.load(f)
             else:
                 meta = {}
@@ -197,7 +197,9 @@ class ResourcesManager:
                 width = texture.get_size()[0]
                 height = texture.get_size()[1]
                 if height % width != 0:
-                    logging.warning(f"Texture height is not a multiple of width: {width}")
+                    logging.warning(
+                        f"Texture height is not a multiple of width: {width}"
+                    )
                     self.textures[ckey] = self.missing_texture
                     return self.missing_texture
                 strips = self.split_horizontal_strips(texture)
@@ -210,7 +212,6 @@ class ResourcesManager:
                 # 首次加载也计算当前帧（与缓存命中分支逻辑一致）
                 n = self._get_animation_frame_index(self.textures[ckey])
                 return strips[n]
-
 
             # 如果需要切除完全透明的边缘
             if cft:
@@ -231,12 +232,6 @@ class ResourcesManager:
             return self.missing_texture
 
     def get_texture_animation_key(self, key: str, cft=False, gta=False):
-        """Return the current frame key for an animated texture.
-
-        Texture cache entries are keyed by ``(key, cft, gta)``.  Looking them
-        up with the bare resource key made every animated block section appear
-        static, so it only changed when some unrelated cache key changed.
-        """
         self.get_texture_img(key, cft=cft, gta=gta)
         cache_key = (key, cft, gta)
         texture = self.textures.get(cache_key)
@@ -341,10 +336,14 @@ class ResourcesManager:
         """
         # 1. 解析目标颜色为 (R, G, B) 整数元组
         if isinstance(color, str):
-            hex_color = color.lstrip('#')
+            hex_color = color.lstrip("#")
             if len(hex_color) != 6:
                 raise ValueError("十六进制颜色格式错误，需要 6 位，如 '#91bd59'")
-            r, g, b = int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            r, g, b = (
+                int(hex_color[0:2], 16),
+                int(hex_color[2:4], 16),
+                int(hex_color[4:6], 16),
+            )
         elif isinstance(color, (tuple, list)) and len(color) == 3:
             r, g, b = color
         else:
@@ -356,28 +355,32 @@ class ResourcesManager:
 
         # 3. 从 Surface 中提取 RGB 与 Alpha 数据
         #    array3d 返回形状 (width, height, 3)，通道顺序为 RGB
-        rgb_array = pygame.surfarray.array3d(grayscale_surface)  # shape: (w, h, 3)
-        alpha = pygame.surfarray.array_alpha(grayscale_surface)  # shape: (w, h)
+        rgb_array = pygame.surfarray.array3d(grayscale_surface)
+        alpha = pygame.surfarray.array_alpha(grayscale_surface)
 
         # 4. 提取灰度值（灰度图中 R=G=B，直接使用红色通道即可）
-        gray = rgb_array[:, :, 0]  # shape: (w, h), dtype=uint8
+        gray = rgb_array[:, :, 0]
 
         # 5. 向量化染色：new_channel = gray * target_channel / 255
         #    使用 uint16 防止乘法溢出，结果转回 uint8
         gray_expanded = gray[:, :, np.newaxis].astype(np.uint16)  # (w, h, 1)
         target_color_expanded = target_color.astype(np.uint16)  # (3,)
-        colored = (gray_expanded * target_color_expanded // 255).astype(np.uint8)  # (w, h, 3)
+        colored = (gray_expanded * target_color_expanded // 255).astype(
+            np.uint8
+        )  # (w, h, 3)
 
         # 6. 合并 RGB 与 Alpha 通道为 (w, h, 4) 数组
-        rgba = np.dstack((colored, alpha))  # shape: (w, h, 4)
+        rgba = np.dstack((colored, alpha))
 
         # 7. 修正旋转问题：交换轴使形状变为 (h, w, 4)，然后创建 Surface
-        rgba_swapped = np.swapaxes(rgba, 0, 1)  # shape: (h, w, 4)
-        result = pygame.image.frombytes(rgba_swapped.tobytes(), (w, h), 'RGBA')
+        rgba_swapped = np.swapaxes(rgba, 0, 1)
+        result = pygame.image.frombytes(rgba_swapped.tobytes(), (w, h), "RGBA")
         return result
 
     @staticmethod
-    def biome_stain(grayscale_surface: pygame.Surface, location: Location, mode = "grass") -> pygame.Surface:
+    def biome_stain(
+        grayscale_surface: pygame.Surface, location: Location, mode="grass"
+    ) -> pygame.Surface:
         """
         生成该方块所在群系的染色后贴图
         :param grayscale_surface: 原灰度图
@@ -396,7 +399,7 @@ class ResourcesManager:
             r = grayscale_surface.copy()
         return r
 
-    def load_sounds_json(self, json_path: str = 'assets/minecraft/sounds.json'):
+    def load_sounds_json(self, json_path: str = "assets/minecraft/sounds.json"):
         """
         加载 sounds.json 并解析到 self.sounds 中。
         """
@@ -404,7 +407,7 @@ class ResourcesManager:
         if not os.path.exists(json_path):
             print(f"Warning: sounds.json not found at {json_path}")
         else:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
         for sound_id, info in BUILTIN_SOUND_FALLBACKS.items():
@@ -412,8 +415,8 @@ class ResourcesManager:
 
         for sound_id, info in data.items():
             self.sounds[sound_id] = {
-                'category': info.get('category', 'master'),
-                'sounds': info.get('sounds', [])
+                "category": info.get("category", "master"),
+                "sounds": info.get("sounds", []),
             }
 
     def play_sound(
@@ -440,7 +443,7 @@ class ResourcesManager:
             return None
 
         sound_data = self.sounds[sound_id]
-        sound_list = sound_data['sounds']
+        sound_list = sound_data["sounds"]
         if not sound_list:
             print(f"No sound files defined for ID '{sound_id}'")
             return None
@@ -454,12 +457,12 @@ class ResourcesManager:
             stream = False
             base_volume = volume
         elif isinstance(chosen, dict):
-            sound_path = chosen.get('name')
+            sound_path = chosen.get("name")
             if not sound_path:
                 print(f"Invalid sound entry for ID '{sound_id}': missing 'name'")
                 return
-            stream = chosen.get('stream', False)
-            base_volume = float(chosen.get('volume', 1.0)) * volume
+            stream = chosen.get("stream", False)
+            base_volume = float(chosen.get("volume", 1.0)) * volume
         else:
             print(f"Invalid sound entry type for ID '{sound_id}'")
             return
@@ -499,8 +502,6 @@ class ResourcesManager:
                         channel.set_volume(left, right)
                     return channel
                 else:
-                    # Set volume on the channel, not the shared Sound object;
-                    # the same effect may be playing at multiple distances.
                     channel = (
                         pygame.mixer.Channel(channel_id)
                         if channel_id is not None
@@ -535,17 +536,14 @@ class ResourcesManager:
 
     @staticmethod
     def has_transparent_pixels(surface: pygame.Surface) -> bool:
-        """
-        检查 Pygame Surface 是否包含任何透明或半透明像素（alpha < 255）。
+        """检查表面是否存在透明或半透明像素。
 
-        仅检测 per-pixel alpha（每个像素的 alpha 通道），不考虑颜色键（colorkey）透明。
-        若表面未开启 per-pixel alpha（无 SRCALPHA 标志），直接返回 False。
+        仅检测逐像素 alpha，不考虑颜色键透明；未启用 SRCALPHA 的表面直接
+        视为不透明。
 
-        Args:
-            surface: pygame.Surface 对象
-
-        Returns:
-            bool: 存在任何 alpha < 255 的像素返回 True，否则返回 False
+        :param surface: 待检查的 Pygame 表面。
+        :return: 存在 alpha 小于 255 的像素时返回 True。
+        :rtype: bool
         """
         # 快速判断：如果没有 per-pixel alpha 支持，则所有像素均为不透明
         if not (surface.get_flags() & pygame.SRCALPHA):
@@ -562,16 +560,17 @@ class ResourcesManager:
     @staticmethod
     def grayscale_to_alpha(surface):
         """
-        将带 alpha 的灰度 Surface 转换为纯黑半透明遮罩：
-        - RGB 全部设为 0（纯黑）
-        - Alpha 由灰度值决定：黑色(0) → 255 不透明，白色(255) → 0 完全透明
-        - 原有的 alpha 通道被忽略，完全由灰度重新计算
+                将带 alpha 的灰度 Surface 转换为纯黑半透明遮罩：
+                - RGB 全部设为 0（纯黑）
+                - Alpha 由灰度值决定：黑色(0) → 255 不透明，白色(255) → 0 完全透明
+                - 原有的 alpha 通道被忽略，完全由灰度重新计算
 
-        参数：
-            surface (pygame.Surface): 输入的 Surface，应为灰度图（R=G=B），且最好已有 alpha 通道。
+        :param surface: 输入的 Surface，应为灰度图（R=G=B），且最好已有 alpha 通道。
+        :type surface: pygame.Surface
 
-        返回：
-            pygame.Surface: 新的纯黑半透明 Surface。
+        :return: 新的纯黑半透明 Surface。
+        :rtype: pygame.Surface
+
         """
         # 确保 Surface 有 alpha 通道（若无则添加）
         if surface.get_alpha() is None:
@@ -595,7 +594,8 @@ class ResourcesManager:
 
         del pixels  # 解锁
         return result
-@client_method
-def transkey(key: str, *args, client = None):
-    return client.resources_manager.get_translation_key(key, *args)
 
+
+@client_method
+def transkey(key: str, *args, client=None):
+    return client.resources_manager.get_translation_key(key, *args)

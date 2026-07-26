@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,7 +14,7 @@ def normalize_id(value: str) -> str:
     namespace, path = value.split(":", 1)
     for legacy_prefix in ("generic.", "player.", "zombie.", "horse."):
         if namespace == "minecraft" and path.startswith(legacy_prefix):
-            path = path[len(legacy_prefix):]
+            path = path[len(legacy_prefix) :]
             break
     return f"{namespace}:{path}"
 
@@ -81,17 +82,25 @@ class AttributeModifier:
 
     @classmethod
     def from_dict(cls, data: Mapping) -> "AttributeModifier":
-        return cls(data["id"], data.get("amount", 0.0), data.get("operation", "add_value"))
+        return cls(
+            data["id"], data.get("amount", 0.0), data.get("operation", "add_value")
+        )
 
     def to_dict(self) -> dict:
         return {"id": self.id, "amount": self.amount, "operation": self.operation.value}
 
 
 class AttributeInstance:
-    def __init__(self, definition: AttributeDefinition, base_value: float | None = None,
-                 on_dirty: Callable[["AttributeInstance"], None] | None = None):
+    def __init__(
+        self,
+        definition: AttributeDefinition,
+        base_value: float | None = None,
+        on_dirty: Callable[["AttributeInstance"], None] | None = None,
+    ):
         self.definition = definition
-        self._base_value = definition.default if base_value is None else float(base_value)
+        self._base_value = (
+            definition.default if base_value is None else float(base_value)
+        )
         self._modifiers: dict[str, AttributeModifier] = {}
         self._permanent_ids: set[str] = set()
         self._modifier_sources: dict[str, str] = {}
@@ -114,7 +123,8 @@ class AttributeInstance:
     def value(self) -> float:
         if self._dirty:
             base_with_additions = self._base_value + sum(
-                modifier.amount for modifier in self._modifiers.values()
+                modifier.amount
+                for modifier in self._modifiers.values()
                 if modifier.operation is AttributeOperation.ADD_VALUE
             )
             result = base_with_additions + sum(
@@ -136,11 +146,19 @@ class AttributeInstance:
     def get_modifier(self, modifier_id: str) -> AttributeModifier | None:
         return self._modifiers.get(normalize_id(modifier_id))
 
-    def add_modifier(self, modifier: AttributeModifier, *, permanent: bool = False,
-                     source: str | None = None, replace: bool = False) -> None:
+    def add_modifier(
+        self,
+        modifier: AttributeModifier,
+        *,
+        permanent: bool = False,
+        source: str | None = None,
+        replace: bool = False,
+    ) -> None:
         modifier_id = modifier.id
         if modifier_id in self._modifiers and not replace:
-            raise ValueError(f"modifier {modifier_id!r} is already applied to {self.definition.id}")
+            raise ValueError(
+                f"modifier {modifier_id!r} is already applied to {self.definition.id}"
+            )
         self._modifiers[modifier_id] = modifier
         if permanent:
             self._permanent_ids.add(modifier_id)
@@ -176,7 +194,8 @@ class AttributeInstance:
         modifiers = self._modifiers.values()
         if permanent_only:
             modifiers = (
-                modifier for modifier_id, modifier in self._modifiers.items()
+                modifier
+                for modifier_id, modifier in self._modifiers.items()
                 if modifier_id in self._permanent_ids
             )
         return {
@@ -187,12 +206,19 @@ class AttributeInstance:
 
 
 class AttributeMap:
-    def __init__(self, base_values: Mapping[str, float] | None = None,
-                 on_dirty: Callable[[AttributeInstance], None] | None = None):
-        values = {normalize_id(key): value for key, value in (base_values or {}).items()}
+    def __init__(
+        self,
+        base_values: Mapping[str, float] | None = None,
+        on_dirty: Callable[[AttributeInstance], None] | None = None,
+    ):
+        values = {
+            normalize_id(key): value for key, value in (base_values or {}).items()
+        }
         self._on_dirty = on_dirty
         self._instances = {
-            definition.id: AttributeInstance(definition, values.get(definition.id), self._changed)
+            definition.id: AttributeInstance(
+                definition, values.get(definition.id), self._changed
+            )
             for definition in ATTRIBUTE_REGISTRY.values()
         }
         self._dirty_syncable: set[str] = set()
@@ -219,21 +245,27 @@ class AttributeMap:
     def set_base_value(self, attribute_id: str, value: float) -> None:
         self.get_instance(attribute_id).base_value = value
 
-    def add_modifier(self, attribute_id: str, modifier: AttributeModifier, **kwargs) -> None:
+    def add_modifier(
+        self, attribute_id: str, modifier: AttributeModifier, **kwargs
+    ) -> None:
         self.get_instance(attribute_id).add_modifier(modifier, **kwargs)
 
     def remove_modifier(self, attribute_id: str, modifier_id: str) -> bool:
         return self.get_instance(attribute_id).remove_modifier(modifier_id)
 
-    def replace_source(self, source: str,
-                       entries: Iterable[tuple[str, AttributeModifier]]) -> None:
+    def replace_source(
+        self, source: str, entries: Iterable[tuple[str, AttributeModifier]]
+    ) -> None:
         for instance in self._instances.values():
             instance.remove_source(source)
         for attribute_id, modifier in entries:
             self.add_modifier(attribute_id, modifier, source=source, replace=True)
 
     def to_persistent_data(self) -> list[dict]:
-        return [instance.to_dict(permanent_only=True) for instance in self._instances.values()]
+        return [
+            instance.to_dict(permanent_only=True)
+            for instance in self._instances.values()
+        ]
 
     def load_persistent_data(self, payload) -> None:
         if not isinstance(payload, list):
@@ -279,7 +311,9 @@ class AttributeMap:
                     instance.remove_modifier(modifier.id)
                 for modifier_data in entry.get("modifiers", ()):
                     if isinstance(modifier_data, Mapping):
-                        instance.add_modifier(AttributeModifier.from_dict(modifier_data))
+                        instance.add_modifier(
+                            AttributeModifier.from_dict(modifier_data)
+                        )
             except (KeyError, TypeError, ValueError):
                 continue
 
@@ -288,7 +322,6 @@ def _attribute(name, default, minimum, maximum, syncable=False, sentiment="posit
     return AttributeDefinition(name, default, minimum, maximum, syncable, sentiment)
 
 
-# Java Edition 1.21.4 registry plus the three attributes added in 1.21.6.
 _DEFINITIONS = (
     _attribute("armor", 0.0, 0.0, 30.0, True),
     _attribute("armor_toughness", 0.0, 0.0, 20.0, True),
@@ -330,9 +363,13 @@ _DEFINITIONS = (
 ATTRIBUTE_REGISTRY = {definition.id: definition for definition in _DEFINITIONS}
 
 SPRINTING_SPEED_MODIFIER = AttributeModifier(
-    "minecraft:sprinting", 0.3, AttributeOperation.ADD_MULTIPLIED_TOTAL,
+    "minecraft:sprinting",
+    0.3,
+    AttributeOperation.ADD_MULTIPLIED_TOTAL,
 )
 
 EATING_SPEED_MODIFIER = AttributeModifier(
-    "minecraft:eating", -0.8, AttributeOperation.ADD_MULTIPLIED_TOTAL,
+    "minecraft:eating",
+    -0.8,
+    AttributeOperation.ADD_MULTIPLIED_TOTAL,
 )

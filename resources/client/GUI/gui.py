@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 from abc import ABC, abstractmethod
 
 import pygame
@@ -7,7 +8,7 @@ class GUI(ABC):
     _texture_cache = {}
     _texture_path = "gui.sprites.hud.hotbar"
 
-    def __init__(self, render: 'Render'):
+    def __init__(self, render: "Render"):
         self.render = render
         self.priority = 0.0
 
@@ -22,16 +23,16 @@ class GUI(ABC):
         """
         if path is None:
             path = cls._texture_path
-        
+
         if path is None:
             return None
 
         cache_key = (path, size)
-        
+
         if cache_key in cls._texture_cache:
             return cls._texture_cache[cache_key]
 
-        original_texture = client.resources_manager.get_texture_img(path,True)
+        original_texture = client.resources_manager.get_texture_img(path, True)
 
         if original_texture is None:
             return None
@@ -42,7 +43,9 @@ class GUI(ABC):
         new_width = max(1, int(original_width * size))
         new_height = max(1, int(original_height * size))
 
-        scaled_texture = pygame.transform.scale(original_texture, (new_width, new_height))
+        scaled_texture = pygame.transform.scale(
+            original_texture, (new_width, new_height)
+        )
 
         cls._texture_cache[cache_key] = scaled_texture
 
@@ -64,6 +67,3 @@ class GUI(ABC):
 
     def on_close(self):
         pass
-
-
-

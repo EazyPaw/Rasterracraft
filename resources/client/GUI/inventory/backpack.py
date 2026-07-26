@@ -1,4 +1,5 @@
-# Explain by Deepseek v4 Pro
+# Commented and arranged by ChatGPT
+
 """
 背包（物品栏）GUI 模块
 =======================
@@ -32,6 +33,7 @@ from resources.server.utils import reverse_search_dict
 
 class Backpack(GUI):
     """背包 GUI 主类，继承自 GUI 基类"""
+
     _texture_path = "gui.container.inventory"  # 背包背景纹理路径
     crafting_columns = 2
     crafting_rows = 2
@@ -45,32 +47,37 @@ class Backpack(GUI):
         # 所有槽位的屏幕坐标列表，每次 draw() 时重新计算
         self.solt_pos = []
         # 鼠标悬停时的高亮边框纹理
-        self.selection_texture = self.get_texture(self.render.gui_scale, self.render.client
-                                                  , "gui.sprites.container.slot_highlight_back")
+        self.selection_texture = self.get_texture(
+            self.render.gui_scale,
+            self.render.client,
+            "gui.sprites.container.slot_highlight_back",
+        )
 
         self.priority = 10  # GUI 渲染优先级
         self.item_tooltip = ItemTooltip(self.render)
 
         # ---- 鼠标拖拽状态 ----
-        self.dragging_item = None     # 当前鼠标上拿着的物品（ItemStack 或 EmptyItemStack）
-        self.selecting_item = None    # 当前鼠标悬停的槽位中的物品引用
-        self.selecting_solt = None    # 当前鼠标悬停的槽位索引
-        self.drag_button = None       # 拖拽时按下的鼠标按键（1=左键, 3=右键）
-        self.drag_start_slot = None   # 拖拽起始槽位索引
-        self.drag_slots = []          # 拖拽经过的所有有效槽位列表
-        self.drag_moved = False       # 拖拽过程中是否发生了移动
-        self._drag_preview_slots = {} # 拖拽预览：槽位 → 已放入数量（用于撤销/重算）
-        self._drag_material = None    # 拖拽开始时的材料引用（用于撤销时比对材料）
+        self.dragging_item = None  # 当前鼠标上拿着的物品（ItemStack 或 EmptyItemStack）
+        self.selecting_item = None  # 当前鼠标悬停的槽位中的物品引用
+        self.selecting_solt = None  # 当前鼠标悬停的槽位索引
+        self.drag_button = None  # 拖拽时按下的鼠标按键（1=左键, 3=右键）
+        self.drag_start_slot = None  # 拖拽起始槽位索引
+        self.drag_slots = []  # 拖拽经过的所有有效槽位列表
+        self.drag_moved = False  # 拖拽过程中是否发生了移动
+        self._drag_preview_slots = {}  # 拖拽预览：槽位 → 已放入数量（用于撤销/重算）
+        self._drag_material = None  # 拖拽开始时的材料引用（用于撤销时比对材料）
 
         # ---- 布局参数 ----
-        self.slot_rows = 4   # 物品栏行数（含快捷栏）
-        self.slot_cols = 9   # 物品栏列数
+        self.slot_rows = 4  # 物品栏行数（含快捷栏）
+        self.slot_cols = 9  # 物品栏列数
         self.slot_size = 18  # 每格像素尺寸（缩放前基准值）
-        self.crafting_slots = [self._empty_stack() for _ in range(self.crafting_columns * self.crafting_rows)]
+        self.crafting_slots = [
+            self._empty_stack()
+            for _ in range(self.crafting_columns * self.crafting_rows)
+        ]
         self.crafting_result = None
         self.crafting_inputs = []
         self._pressed_keys = set()
-
 
     @property
     def inventory(self):
@@ -105,7 +112,6 @@ class Backpack(GUI):
         return isinstance(slot, tuple) and len(slot) == 2 and slot[0] == "crafting"
 
     def _slot_descriptor(self, slot):
-        """Translate a GUI slot into the generic server container protocol."""
         if isinstance(slot, int):
             return "inventory", slot
         if self._is_crafting_slot(slot):
@@ -117,27 +123,31 @@ class Backpack(GUI):
         if descriptor is None:
             return
         container_id, index = descriptor
-        self.render.client.sent_packet({
-            "__class__": "ContainerQuickMove",
-            "container": container_id,
-            "slot": index,
-            "screen": self.quick_move_screen,
-            "crafting_size": self.crafting_columns * self.crafting_rows,
-            "all_matching": bool(all_matching),
-        })
+        self.render.client.sent_packet(
+            {
+                "__class__": "ContainerQuickMove",
+                "container": container_id,
+                "slot": index,
+                "screen": self.quick_move_screen,
+                "crafting_size": self.crafting_columns * self.crafting_rows,
+                "all_matching": bool(all_matching),
+            }
+        )
 
     def _send_slot_swap(self, slot, target_container, target_slot):
         descriptor = self._slot_descriptor(slot)
         if descriptor is None:
             return
         container_id, index = descriptor
-        self.render.client.sent_packet({
-            "__class__": "ContainerSwap",
-            "container": container_id,
-            "slot": index,
-            "target_container": target_container,
-            "target_slot": target_slot,
-        })
+        self.render.client.sent_packet(
+            {
+                "__class__": "ContainerSwap",
+                "container": container_id,
+                "slot": index,
+                "target_container": target_container,
+                "target_slot": target_slot,
+            }
+        )
 
     def _get_slot_stack(self, slot):
         if self._is_crafting_slot(slot):
@@ -158,10 +168,12 @@ class Backpack(GUI):
         positions = []
         for row in range(self.crafting_rows):
             for col in range(self.crafting_columns):
-                positions.append((
-                    x + (self.crafting_offset[0] + col * self.slot_size) * scale,
-                    y + (self.crafting_offset[1] + row * self.slot_size) * scale,
-                ))
+                positions.append(
+                    (
+                        x + (self.crafting_offset[0] + col * self.slot_size) * scale,
+                        y + (self.crafting_offset[1] + row * self.slot_size) * scale,
+                    )
+                )
         output = (
             x + self.crafting_output_offset[0] * scale,
             y + self.crafting_output_offset[1] * scale,
@@ -169,7 +181,9 @@ class Backpack(GUI):
         return positions, output
 
     def _refresh_crafting(self):
-        match = find_recipe(self.crafting_slots, self.crafting_columns, self.crafting_rows)
+        match = find_recipe(
+            self.crafting_slots, self.crafting_columns, self.crafting_rows
+        )
         if match is None:
             self.crafting_result = None
             self.crafting_inputs = []
@@ -182,12 +196,14 @@ class Backpack(GUI):
         for index, (x, y) in enumerate(positions):
             if x <= pos[0] <= x + size and y <= pos[1] <= y + size:
                 return ("crafting", index)
-        if output[0] <= pos[0] <= output[0] + size and output[1] <= pos[1] <= output[1] + size:
+        if (
+            output[0] <= pos[0] <= output[0] + size
+            and output[1] <= pos[1] <= output[1] + size
+        ):
             return "output"
         return None
 
     def _slot_target_at_pos(self, pos):
-        """Return the inventory or crafting-input slot under the cursor."""
         crafting_slot = self._craft_slot_at_pos(pos)
         if crafting_slot is not None:
             return crafting_slot
@@ -195,17 +211,23 @@ class Backpack(GUI):
 
     def _handle_crafting_click(self, target, button):
         if target == "output":
-            self.render.client.sent_packet({
-                "__class__": "CraftingTake",
-                "width": self.crafting_columns,
-                "height": self.crafting_rows,
-            })
+            self.render.client.sent_packet(
+                {
+                    "__class__": "CraftingTake",
+                    "width": self.crafting_columns,
+                    "height": self.crafting_rows,
+                }
+            )
             return
 
         if self._is_crafting_slot(target):
-            self.render.client.sent_packet({
-                "__class__": "CraftingClick", "slot": target[1], "button": button,
-            })
+            self.render.client.sent_packet(
+                {
+                    "__class__": "CraftingClick",
+                    "slot": target[1],
+                    "button": button,
+                }
+            )
             return
         if button == 1:
             self._left_click_slot(target)
@@ -225,12 +247,23 @@ class Backpack(GUI):
         self.render.blit(icon, (x, y))
         stack.draw_durability_bar(self.render, pos[0], pos[1], size)
         if stack.amount > 1:
-            self.render.render_text(str(stack.amount), (pos[0] + size - self.render.gui_scale * 10, pos[1] + size - self.render.gui_scale * 11), (255, 255, 255), int(20 * self.render.gui_scale / 3.5), True)
+            self.render.render_text(
+                str(stack.amount),
+                (
+                    pos[0] + size - self.render.gui_scale * 10,
+                    pos[1] + size - self.render.gui_scale * 11,
+                ),
+                (255, 255, 255),
+                int(20 * self.render.gui_scale / 3.5),
+                True,
+            )
 
     def _draw_crafting(self):
         self._refresh_crafting()
         positions, output = self._craft_positions()
-        hovered_target = self._craft_slot_at_pos((self.render.mouse_x, self.render.mouse_y))
+        hovered_target = self._craft_slot_at_pos(
+            (self.render.mouse_x, self.render.mouse_y)
+        )
         for index, pos in enumerate(positions):
             target = ("crafting", index)
             if target in self.drag_slots or target == hovered_target:
@@ -305,10 +338,15 @@ class Backpack(GUI):
                 slot_x = slot_area_x + col * slot_pixel_size
                 if row == 3:
                     # 底部快捷栏与主存储区之间有 4px 间距
-                    slot_y = slot_area_y + row * slot_pixel_size + 4 * self.render.gui_scale
+                    slot_y = (
+                        slot_area_y + row * slot_pixel_size + 4 * self.render.gui_scale
+                    )
                 else:
                     slot_y = slot_area_y + row * slot_pixel_size
-                if slot_x <= mouse_x <= slot_x + slot_pixel_size and slot_y <= mouse_y <= slot_y + slot_pixel_size:
+                if (
+                    slot_x <= mouse_x <= slot_x + slot_pixel_size
+                    and slot_y <= mouse_y <= slot_y + slot_pixel_size
+                ):
                     # 槽位索引从底部向上递增（Minecraft 原版规范：底部快捷栏为 0-8）
                     slot = (self.slot_rows - 1 - row) * self.slot_cols + col
                     if slot < len(self.inventory):
@@ -383,7 +421,9 @@ class Backpack(GUI):
             self.dragging_item = self._empty_stack()
         elif self._can_stack(target, self.dragging_item):
             # 可堆叠：尽可能多地合并（受 max_stack_size 限制）
-            self._add_amount_to_slot(slot, self.dragging_item, self.dragging_item.amount)
+            self._add_amount_to_slot(
+                slot, self.dragging_item, self.dragging_item.amount
+            )
         else:
             # 不可堆叠：交换位置
             self._set_slot_stack(slot, self.dragging_item)
@@ -414,12 +454,14 @@ class Backpack(GUI):
         """
         descriptor = self._slot_descriptor(slot)
         if descriptor is not None:
-            self.render.client.sent_packet({
-                "__class__": "ContainerClick",
-                "container": descriptor[0],
-                "slot": descriptor[1],
-                "button": 1,
-            })
+            self.render.client.sent_packet(
+                {
+                    "__class__": "ContainerClick",
+                    "container": descriptor[0],
+                    "slot": descriptor[1],
+                    "button": 1,
+                }
+            )
             return
         target = self._get_slot_stack(slot)
         if self._is_empty(self.dragging_item):
@@ -438,12 +480,14 @@ class Backpack(GUI):
         """
         descriptor = self._slot_descriptor(slot)
         if descriptor is not None:
-            self.render.client.sent_packet({
-                "__class__": "ContainerClick",
-                "container": descriptor[0],
-                "slot": descriptor[1],
-                "button": 3,
-            })
+            self.render.client.sent_packet(
+                {
+                    "__class__": "ContainerClick",
+                    "container": descriptor[0],
+                    "slot": descriptor[1],
+                    "button": 3,
+                }
+            )
             return
         target = self._get_slot_stack(slot)
         if self._is_empty(self.dragging_item):
@@ -467,7 +511,11 @@ class Backpack(GUI):
         self.drag_slots = []
         self.drag_moved = False
         self._drag_preview_slots = {}  # 重置预览记录
-        self._drag_material = self.dragging_item.material if not self._is_empty(self.dragging_item) else None
+        self._drag_material = (
+            self.dragging_item.material
+            if not self._is_empty(self.dragging_item)
+            else None
+        )
         if slot is not None and self._can_add_to_slot(slot):
             self.drag_slots.append(slot)
             # 注意：此时不调用 _apply_drag_preview()，
@@ -486,7 +534,11 @@ class Backpack(GUI):
             return
         if slot not in self.drag_slots:
             # 计算当前可供分配的总物品数（光标余数 + 已在预览槽位中的物品）
-            cursor_amount = self.dragging_item.amount if not self._is_empty(self.dragging_item) else 0
+            cursor_amount = (
+                self.dragging_item.amount
+                if not self._is_empty(self.dragging_item)
+                else 0
+            )
             preview_total = sum(self._drag_preview_slots.values())
             total_available = cursor_amount + preview_total
 
@@ -497,8 +549,6 @@ class Backpack(GUI):
                     self.drag_slots.append(slot)
                     self.drag_moved = True  # 标记发生了移动（区别于原地点击）
                     # 实时应用预览：将物品立即放入拖拽路径上的所有槽位
-                    # The server performs the distribution atomically when the
-                    # mouse button is released.
 
     def _finish_drag(self):
         """
@@ -506,21 +556,27 @@ class Backpack(GUI):
         此处仅做状态清理，物品保持不动。
         """
         inventory_slots = [slot for slot in self.drag_slots if isinstance(slot, int)]
-        crafting_slots = [slot[1] for slot in self.drag_slots if self._is_crafting_slot(slot)]
+        crafting_slots = [
+            slot[1] for slot in self.drag_slots if self._is_crafting_slot(slot)
+        ]
         if inventory_slots:
-            self.render.client.sent_packet({
-                "__class__": "ContainerDrag",
-                "container": "inventory",
-                "slots": inventory_slots,
-                "button": self.drag_button,
-            })
+            self.render.client.sent_packet(
+                {
+                    "__class__": "ContainerDrag",
+                    "container": "inventory",
+                    "slots": inventory_slots,
+                    "button": self.drag_button,
+                }
+            )
         if crafting_slots:
-            self.render.client.sent_packet({
-                "__class__": "ContainerDrag",
-                "container": "crafting",
-                "slots": crafting_slots,
-                "button": self.drag_button,
-            })
+            self.render.client.sent_packet(
+                {
+                    "__class__": "ContainerDrag",
+                    "container": "crafting",
+                    "slots": crafting_slots,
+                    "button": self.drag_button,
+                }
+            )
         self._drag_material = None
         self._reset_drag()
 
@@ -538,7 +594,9 @@ class Backpack(GUI):
         self._undo_drag_preview()
 
         # 保存分发前的总量（用于计算最终余数）
-        total_before = self.dragging_item.amount if not self._is_empty(self.dragging_item) else 0
+        total_before = (
+            self.dragging_item.amount if not self._is_empty(self.dragging_item) else 0
+        )
 
         if self.drag_button == 1:
             # 左键拖拽：均匀分配整组物品到所有槽位
@@ -548,14 +606,19 @@ class Backpack(GUI):
 
             for slot in self.drag_slots:
                 if per_slot > 0 and self._can_add_to_slot(slot):
-                    actual = self._add_amount_to_slot(slot, self.dragging_item, per_slot)
+                    actual = self._add_amount_to_slot(
+                        slot, self.dragging_item, per_slot
+                    )
                     if actual > 0:
                         self._drag_preview_slots[slot] = actual
 
             # 余数留在光标上（整除为0时光标显示0，但不设为 EmptyItemStack，玩家可继续拖拽）
             placed_total = sum(self._drag_preview_slots.values())
             cursor_remainder = total_before - placed_total
-            if self._is_empty(self.dragging_item) or self.dragging_item.amount != cursor_remainder:
+            if (
+                self._is_empty(self.dragging_item)
+                or self.dragging_item.amount != cursor_remainder
+            ):
                 self.dragging_item = ItemStack(self._drag_material, cursor_remainder)
         elif self.drag_button == 3:
             # 右键拖拽：每个槽位各放入 1 个
@@ -565,8 +628,9 @@ class Backpack(GUI):
                 if self._can_add_to_slot(slot):
                     actual = self._add_amount_to_slot(slot, self.dragging_item, 1)
                     if actual > 0:
-                        self._drag_preview_slots[slot] = \
+                        self._drag_preview_slots[slot] = (
                             self._drag_preview_slots.get(slot, 0) + actual
+                        )
             # 右键拖拽：光标物品为0时也保留，不设为 EmptyItemStack
             if self._is_empty(self.dragging_item):
                 self.dragging_item = ItemStack(self._drag_material, 0)
@@ -615,12 +679,14 @@ class Backpack(GUI):
         """
         if self._is_empty(self.dragging_item):
             return
-        self.render.client.sent_packet({
-            "__class__": "ContainerDrop",
-            "container": "inventory",
-            "cursor": True,
-            "amount": 1 if single else None,
-        })
+        self.render.client.sent_packet(
+            {
+                "__class__": "ContainerDrop",
+                "container": "inventory",
+                "cursor": True,
+                "amount": 1 if single else None,
+            }
+        )
 
     def _drop_slot_item(self, slot, single=False):
         """
@@ -634,13 +700,15 @@ class Backpack(GUI):
         target = self._get_slot_stack(slot)
         if self._is_empty(target):
             return
-        self.render.client.sent_packet({
-            "__class__": "ContainerDrop",
-            "container": descriptor[0],
-            "cursor": False,
-            "slot": descriptor[1],
-            "amount": 1 if single else None,
-        })
+        self.render.client.sent_packet(
+            {
+                "__class__": "ContainerDrop",
+                "container": descriptor[0],
+                "cursor": False,
+                "slot": descriptor[1],
+                "amount": 1 if single else None,
+            }
+        )
 
     def _handle_click_outside(self, button):
         """
@@ -652,7 +720,6 @@ class Backpack(GUI):
             self._drop_cursor_item(single=False)
         elif button == 3:
             self._drop_cursor_item(single=True)
-
 
     def draw(self):
         """
@@ -689,28 +756,48 @@ class Backpack(GUI):
                 slot_x = slot_area_x + col * slot_pixel_size
                 if row == 3:
                     # 底部快捷栏（Row 3）与上方存储区之间有 4px 间距
-                    slot_y = slot_area_y + row * slot_pixel_size + 4 * self.render.gui_scale
+                    slot_y = (
+                        slot_area_y + row * slot_pixel_size + 4 * self.render.gui_scale
+                    )
                 else:
                     slot_y = slot_area_y + row * slot_pixel_size
                 self.solt_pos.append((slot_x, slot_y))
 
                 # ---- 第2a步：拖拽高亮 + 鼠标悬停检测 ----
                 slot_index = (self.slot_rows - 1 - row) * self.slot_cols + col
-                is_drag_slot = self.drag_button is not None and slot_index in self.drag_slots
-                is_hovered = slot_x <= self.render.mouse_x <= slot_x + slot_pixel_size \
-                         and slot_y <= self.render.mouse_y <= slot_y + slot_pixel_size
+                is_drag_slot = (
+                    self.drag_button is not None and slot_index in self.drag_slots
+                )
+                is_hovered = (
+                    slot_x <= self.render.mouse_x <= slot_x + slot_pixel_size
+                    and slot_y <= self.render.mouse_y <= slot_y + slot_pixel_size
+                )
 
                 # 拖拽路径上的槽位始终高亮（Minecraft 原版实时反馈）
                 if is_drag_slot:
-                    self.render.blit(self.selection_texture, (slot_x + self.render.gui_scale, slot_y + self.render.gui_scale))
+                    self.render.blit(
+                        self.selection_texture,
+                        (
+                            slot_x + self.render.gui_scale,
+                            slot_y + self.render.gui_scale,
+                        ),
+                    )
 
                 # 鼠标悬停检测（与拖拽高亮独立，用于 Q 键丢弃等场景）
                 if is_hovered:
                     if not is_drag_slot:
                         # 非拖拽槽位才绘制悬停高亮（避免重复绘制）
-                        self.render.blit(self.selection_texture, (slot_x + self.render.gui_scale, slot_y + self.render.gui_scale))
+                        self.render.blit(
+                            self.selection_texture,
+                            (
+                                slot_x + self.render.gui_scale,
+                                slot_y + self.render.gui_scale,
+                            ),
+                        )
                     self.selecting_solt = slot_index
-                    self.selecting_item = self.render.client.client_player.inventory[self.selecting_solt]
+                    self.selecting_item = self.render.client.client_player.inventory[
+                        self.selecting_solt
+                    ]
 
                 # ---- 第2b步：绘制槽位中的物品 ----
                 if slot_index < len(self.render.client.client_player.inventory):
@@ -719,34 +806,59 @@ class Backpack(GUI):
                     if item.is_empty():
                         continue
                     # 获取带阴影的物品纹理（缩放倍率 0.7×gui_scale）
-                    texture_item = item.get_texture(self.render.gui_scale * 0.7, shadow=True)
+                    texture_item = item.get_texture(
+                        self.render.gui_scale * 0.7, shadow=True
+                    )
 
                     if texture_item is not None:
                         # 物品图标在槽位内居中
-                        item_x = slot_x + (slot_pixel_size - texture_item.get_width()) / 2
-                        item_y = slot_y + (slot_pixel_size - texture_item.get_height()) / 2
+                        item_x = (
+                            slot_x + (slot_pixel_size - texture_item.get_width()) / 2
+                        )
+                        item_y = (
+                            slot_y + (slot_pixel_size - texture_item.get_height()) / 2
+                        )
                         self.render.blit(texture_item, (item_x, item_y))
                         item.draw_durability_bar(
-                            self.render, slot_x, slot_y, slot_pixel_size,
+                            self.render,
+                            slot_x,
+                            slot_y,
+                            slot_pixel_size,
                         )
 
                         # 绘制物品数量（数量 > 1 时显示在右下角）
-                        if hasattr(item, 'amount') and item.amount > 1:
+                        if hasattr(item, "amount") and item.amount > 1:
                             font_size = int(20 * self.render.gui_scale / 3.5)
                             digit_count = len(str(abs(item.amount)))
-                            text_x = slot_x + slot_pixel_size - self.render.gui_scale * (3 + digit_count * 3)
-                            text_y = slot_y + slot_pixel_size - self.render.gui_scale * 5 - 6
-                            self.render.render_text(str(item.amount), (text_x, text_y), (255, 255, 255), font_size, True)
+                            text_x = (
+                                slot_x
+                                + slot_pixel_size
+                                - self.render.gui_scale * (3 + digit_count * 3)
+                            )
+                            text_y = (
+                                slot_y + slot_pixel_size - self.render.gui_scale * 5 - 6
+                            )
+                            self.render.render_text(
+                                str(item.amount),
+                                (text_x, text_y),
+                                (255, 255, 255),
+                                font_size,
+                                True,
+                            )
 
         # ---- 第3步：绘制悬停说明与鼠标上的拖拽物品 ----
         self._draw_crafting()
-        if self._is_empty(self.dragging_item) and not self._is_empty(self.selecting_item):
+        if self._is_empty(self.dragging_item) and not self._is_empty(
+            self.selecting_item
+        ):
             self.item_tooltip.draw(
                 self.selecting_item,
                 (self.render.mouse_x, self.render.mouse_y),
             )
         if self.dragging_item and not self.dragging_item.is_empty():
-            texture_item = self.dragging_item.get_texture(self.render.gui_scale * 0.7, shadow=True)
+            texture_item = self.dragging_item.get_texture(
+                self.render.gui_scale * 0.7, shadow=True
+            )
             if texture_item is not None:
                 # 物品图标居中跟随鼠标
                 drag_x = self.render.mouse_x - texture_item.get_width() // 2
@@ -761,8 +873,16 @@ class Backpack(GUI):
                 )
                 # 拖拽物品数量显示在右下角
                 if self.dragging_item.amount > 1:
-                    self.render.render_text(str(self.dragging_item.amount), (self.render.mouse_x + texture_item.get_width() // 4, self.render.mouse_y + texture_item.get_height() // 4)
-                                            , (255, 255, 255), int(20 * self.render.gui_scale / 3.5), True)
+                    self.render.render_text(
+                        str(self.dragging_item.amount),
+                        (
+                            self.render.mouse_x + texture_item.get_width() // 4,
+                            self.render.mouse_y + texture_item.get_height() // 4,
+                        ),
+                        (255, 255, 255),
+                        int(20 * self.render.gui_scale / 3.5),
+                        True,
+                    )
 
     def handle_events(self, events):
         """
@@ -788,11 +908,13 @@ class Backpack(GUI):
                     if mods is None:
                         mods = pygame.key.get_mods()
                     if event.button == 1 and mods & pygame.KMOD_SHIFT:
-                        self.render.client.sent_packet({
-                            "__class__": "CraftingQuickTake",
-                            "width": self.crafting_columns,
-                            "height": self.crafting_rows,
-                        })
+                        self.render.client.sent_packet(
+                            {
+                                "__class__": "CraftingQuickTake",
+                                "width": self.crafting_columns,
+                                "height": self.crafting_rows,
+                            }
+                        )
                     else:
                         self._handle_crafting_click(slot, event.button)
                     events.remove(event)
@@ -800,17 +922,9 @@ class Backpack(GUI):
                 mods = getattr(event, "mod", None)
                 if mods is None:
                     mods = pygame.key.get_mods()
-                if (
-                    event.button == 1
-                    and slot is not None
-                    and mods & pygame.KMOD_SHIFT
-                ):
-                    # A normal Shift-click does nothing while the cursor holds
-                    # an item.  That preserves the cursor through click one so
-                    # pygame's second-click marker can trigger Java's batch move.
-                    if (
-                        getattr(event, "clicks", 1) >= 2
-                        and not self._is_empty(self.dragging_item)
+                if event.button == 1 and slot is not None and mods & pygame.KMOD_SHIFT:
+                    if getattr(event, "clicks", 1) >= 2 and not self._is_empty(
+                        self.dragging_item
                     ):
                         self._send_quick_move(slot, all_matching=True)
                     elif self._is_empty(self.dragging_item):
@@ -867,18 +981,21 @@ class Backpack(GUI):
             # ---- 键盘事件 ----
             elif event.type == pygame.KEYDOWN:
                 self._pressed_keys.add(event.key)
-                # ESC closes the currently open container instead of opening
-                # the pause menu through the global game-event handler.
+
                 if event.key == pygame.K_ESCAPE:
                     open_containers = [
-                        gui for gui in self.render.drawing_GUIs
+                        gui
+                        for gui in self.render.drawing_GUIs
                         if isinstance(gui, Backpack)
                     ]
                     if open_containers and open_containers[-1] is self:
                         self.render.close_gui(self)
                         events.remove(event)
                 # 打开/关闭背包快捷键
-                elif event.key in reverse_search_dict(self.render.client.key_map, self.render.client.client_player.game_mode.open_inventory):
+                elif event.key in reverse_search_dict(
+                    self.render.client.key_map,
+                    self.render.client.client_player.game_mode.open_inventory,
+                ):
                     self.render.client.client_player.game_mode.open_inventory()
                     events.remove(event)
                 elif pygame.K_1 <= event.key <= pygame.K_9:
@@ -889,13 +1006,19 @@ class Backpack(GUI):
                         "survival",
                     )
                     if game_mode == "creative" and pygame.K_c in self._pressed_keys:
-                        self.render.client.sent_packet({
-                            "__class__": "SaveHotbar", "preset": preset,
-                        })
+                        self.render.client.sent_packet(
+                            {
+                                "__class__": "SaveHotbar",
+                                "preset": preset,
+                            }
+                        )
                     elif game_mode == "creative" and pygame.K_x in self._pressed_keys:
-                        self.render.client.sent_packet({
-                            "__class__": "LoadHotbar", "preset": preset,
-                        })
+                        self.render.client.sent_packet(
+                            {
+                                "__class__": "LoadHotbar",
+                                "preset": preset,
+                            }
+                        )
                     else:
                         slot = self._slot_target_at_pos(
                             (self.render.mouse_x, self.render.mouse_y)
@@ -912,7 +1035,6 @@ class Backpack(GUI):
                     events.remove(event)
                 # Q键丢弃物品
                 elif event.key == pygame.K_q:
-                    # Java: Q drops one item, Ctrl+Q drops the entire stack.
                     mods = getattr(event, "mod", None)
                     if mods is None:
                         mods = pygame.key.get_mods()
@@ -929,7 +1051,6 @@ class Backpack(GUI):
                             self._drop_slot_item(slot, single=single)
                     events.remove(event)
                 elif event.key in (pygame.K_c, pygame.K_x):
-                    # Creative save/load activators are completed by 1-9.
                     events.remove(event)
             elif event.type == pygame.KEYUP:
                 self._pressed_keys.discard(event.key)

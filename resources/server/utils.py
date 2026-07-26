@@ -1,5 +1,5 @@
-# some practical utils
-# maybe from web or GitHub or AI assistant or written by myself :)
+# Commented and arranged by ChatGPT
+
 
 import functools
 import inspect
@@ -50,20 +50,20 @@ def client_method(func):
         texture = Block.get_texture(16, client=some_other_client)
     """
     sig = inspect.signature(func)
-    client_param = sig.parameters.get('client')
+    client_param = sig.parameters.get("client")
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        if client_param is not None and 'client' not in kwargs:
+        if client_param is not None and "client" not in kwargs:
             # 检查 client 是否已通过位置参数传入
             try:
                 bound = sig.bind_partial(*args, **kwargs)
             except TypeError:
                 bound = None
-            if bound is None or 'client' not in bound.arguments:
+            if bound is None or "client" not in bound.arguments:
                 client = get_client()
                 if client is not None:
-                    kwargs['client'] = client
+                    kwargs["client"] = client
                 elif client_param.default is inspect.Parameter.empty:
                     raise RuntimeError(
                         f"@client_method 方法 '{func.__name__}' 需要客户端实例，"
@@ -120,20 +120,20 @@ def server_method(func):
         obj.do_something(server=some_other_server)
     """
     sig = inspect.signature(func)
-    server_param = sig.parameters.get('server')
+    server_param = sig.parameters.get("server")
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        if server_param is not None and 'server' not in kwargs:
+        if server_param is not None and "server" not in kwargs:
             # 检查 server 是否已通过位置参数传入
             try:
                 bound = sig.bind_partial(*args, **kwargs)
             except TypeError:
                 bound = None
-            if bound is None or 'server' not in bound.arguments:
+            if bound is None or "server" not in bound.arguments:
                 server = get_server()
                 if server is not None:
-                    kwargs['server'] = server
+                    kwargs["server"] = server
                 elif server_param.default is inspect.Parameter.empty:
                     raise RuntimeError(
                         f"@server_method 方法 '{func.__name__}' 需要服务端实例，"
@@ -147,13 +147,14 @@ def server_method(func):
 
 def recv_exact(sock, n):
     """从 socket 中精确接收 n 个字节"""
-    data = b''
+    data = b""
     while len(data) < n:
         chunk = sock.recv(n - len(data))
         if not chunk:  # 连接关闭
             raise ConnectionError("Disconnected")
         data += chunk
     return data
+
 
 def reverse_search_dict(dict_obj: dict, value):
     """
@@ -167,6 +168,7 @@ def reverse_search_dict(dict_obj: dict, value):
         if val == value:
             result.append(key)
     return result
+
 
 def is_safe_value(value, seen=None):
     """
@@ -202,11 +204,12 @@ def is_safe_value(value, seen=None):
     # 其他任何类型均视为不安全
     return False
 
+
 def hex_to_rgb(hex_color):
     """
     将十六进制颜色转换为RGB格式
     """
-    hex_color = hex_color.lstrip('#')  # 去除#号
+    hex_color = hex_color.lstrip("#")  # 去除#号
     b = int(hex_color[4:6], 16)
     g = int(hex_color[2:4], 16)
     r = int(hex_color[0:2], 16)

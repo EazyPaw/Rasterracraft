@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """Minecraft 风格的横向滑动条组件。
 
 提供可拖拽的滑动条，支持鼠标拖拽、键盘微调、自定义格式化显示。
@@ -21,10 +22,12 @@ class Slider:
 
     # ---- 默认尺寸与纹理键 ----
     DEFAULT_SIZE = (300, 40)
-    NORMAL_TEXTURE = "gui.sprites.widget.slider"                # 轨道 - 普通
+    NORMAL_TEXTURE = "gui.sprites.widget.slider"  # 轨道 - 普通
     HIGHLIGHTED_TEXTURE = "gui.sprites.widget.slider_highlighted"  # 轨道 - 悬停
-    HANDLE_TEXTURE = "gui.sprites.widget.slider_handle"          # 滑块 - 普通
-    HANDLE_HIGHLIGHTED_TEXTURE = "gui.sprites.widget.slider_handle_highlighted"  # 滑块 - 悬停/聚焦
+    HANDLE_TEXTURE = "gui.sprites.widget.slider_handle"  # 滑块 - 普通
+    HANDLE_HIGHLIGHTED_TEXTURE = (
+        "gui.sprites.widget.slider_handle_highlighted"  # 滑块 - 悬停/聚焦
+    )
 
     def __init__(
         self,
@@ -44,22 +47,23 @@ class Slider:
         text_color: tuple[int, int, int] = (255, 255, 255),
         disabled_text_color: tuple[int, int, int] = (160, 160, 160),
     ):
-        """
-        参数:
-            label: 滑动条标签文本
-            min_value: 最小值
-            max_value: 最大值
-            value: 初始值
-            step: 步长（每次微调的增量），<=0 时无步长限制
-            size: 组件尺寸 (宽, 高)
-            enabled: 是否启用交互
-            visible: 是否可见
-            formatter: 自定义数值格式化函数，接收 value 返回字符串
-            display: 自定义显示文本（支持 {label}、{value}、{value_text}、{percent} 占位符）
-            on_change: 数值变化回调，接收新值
-            font_size: 标签字体大小（None 则自动计算）
-            text_color: 标签文字颜色
-            disabled_text_color: 禁用状态下的标签文字颜色
+        """初始化横向滑动条。
+
+        :param label: 滑动条标签。
+        :param min_value: 最小值。
+        :param max_value: 最大值。
+        :param value: 初始值。
+        :param step: 每次微调的增量；小于等于 0 时不限制步长。
+        :param size: 组件尺寸，格式为“宽、高”。
+        :param enabled: 是否允许交互。
+        :param visible: 是否绘制组件。
+        :param formatter: 接收数值并返回显示文本的格式化函数。
+        :param display: 显示模板或回调；模板支持 label、value、value_text
+            与 percent 占位符。
+        :param on_change: 数值变更回调，参数为新数值。
+        :param font_size: 标签字体大小；None 表示自动计算。
+        :param text_color: 标签文字颜色。
+        :param disabled_text_color: 禁用状态的标签文字颜色。
         """
         self.label = label
         self.min_value = min_value
@@ -77,9 +81,9 @@ class Slider:
 
         # ---- 状态 ----
         self.rect = pygame.Rect(0, 0, *size)
-        self.hovered = False      # 鼠标是否悬停在组件上
-        self.focused = False      # 是否已聚焦（点击后获得，点击外部失去）
-        self.dragging = False     # 是否正在拖拽滑块
+        self.hovered = False  # 鼠标是否悬停在组件上
+        self.focused = False  # 是否已聚焦（点击后获得，点击外部失去）
+        self.dragging = False  # 是否正在拖拽滑块
         self.value = self._snap(self._clamp(value))
 
     # ===================== 布局 =====================
@@ -105,9 +109,9 @@ class Slider:
     def set_value(self, value: float, *, notify: bool = True):
         """设置新值并触发回调。
 
-        参数:
-            value: 新值
-            notify: 是否触发 on_change 回调
+        :param value: 新值
+        :param notify: 是否触发 on_change 回调
+
         """
         new_value = self._snap(self._clamp(value))
         if new_value == self.value:
@@ -209,7 +213,9 @@ class Slider:
             self.rect.centery - text_h / 2,
         )
         color = self.text_color if self.enabled else self.disabled_text_color
-        render.render_text(text, text_pos, color, size, shadow=True, shadow_strength=0.1)
+        render.render_text(
+            text, text_pos, color, size, shadow=True, shadow_strength=0.1
+        )
 
     # ===================== 显示文本 =====================
 
@@ -264,9 +270,9 @@ class Slider:
     def _set_value_from_mouse(self, mouse_x: int):
         """根据鼠标 X 坐标计算并设置对应值。"""
         handle_w = self._handle_width()
-        usable = max(1, self.rect.width - handle_w)            # 滑块可移动的有效宽度
-        local = mouse_x - self.rect.x - handle_w / 2             # 鼠标相对于滑块中心的位置
-        pct = max(0.0, min(1.0, local / usable))                 # 转换为百分比
+        usable = max(1, self.rect.width - handle_w)  # 滑块可移动的有效宽度
+        local = mouse_x - self.rect.x - handle_w / 2  # 鼠标相对于滑块中心的位置
+        pct = max(0.0, min(1.0, local / usable))  # 转换为百分比
         self.set_value(self.min_value + pct * (self.max_value - self.min_value))
 
     # ===================== 滑块几何 =====================
@@ -294,6 +300,8 @@ class Slider:
         """按步长对齐数值（step <= 0 时不处理）。"""
         if self.step <= 0:
             return value
-        snapped = self.min_value + round((value - self.min_value) / self.step) * self.step
+        snapped = (
+            self.min_value + round((value - self.min_value) / self.step) * self.step
+        )
         snapped = self._clamp(snapped)
         return round(snapped, 10)

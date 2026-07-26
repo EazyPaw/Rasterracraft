@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import math as _math
 import random as _random
 
@@ -18,9 +19,6 @@ from resources.server.world_class import World
 
 
 class Player(Entity):
-    # Mining remains server-timed, but action packets and the 20 TPS loop can
-    # drift briefly under latency.  Slow actions (especially underwater)
-    # should not lose all accumulated progress because of one short gap.
     BREAK_KEEPALIVE_GRACE_TICKS = 10
     BREAK_MIN_PROGRESS_TOLERANCE = 0.04
     BREAK_MAX_PROGRESS_TOLERANCE = 0.12
@@ -30,11 +28,13 @@ class Player(Entity):
     NATURAL_REGEN_FOOD_LEVEL = 18
     NATURAL_REGEN_TICKS = 80
     STARVATION_TICKS = 80
-    # This project stores the visually highest player-inventory row at 27..35
-    # and the visually lowest row at 9..17.  Keep all GUI ordering here so
-    # future Inventory-backed containers can reuse the same transfer engine.
-    MAIN_TOP_LEFT_ORDER = tuple(range(27, 36)) + tuple(range(18, 27)) + tuple(range(9, 18))
-    MAIN_BOTTOM_RIGHT_ORDER = tuple(range(17, 8, -1)) + tuple(range(26, 17, -1)) + tuple(range(35, 26, -1))
+
+    MAIN_TOP_LEFT_ORDER = (
+        tuple(range(27, 36)) + tuple(range(18, 27)) + tuple(range(9, 18))
+    )
+    MAIN_BOTTOM_RIGHT_ORDER = (
+        tuple(range(17, 8, -1)) + tuple(range(26, 17, -1)) + tuple(range(35, 26, -1))
+    )
     HOTBAR_LEFT_ORDER = tuple(range(9))
     HOTBAR_RIGHT_ORDER = tuple(range(8, -1, -1))
     PLAYER_JAVA_RECEIVE_ORDER = HOTBAR_RIGHT_ORDER + MAIN_BOTTOM_RIGHT_ORDER
@@ -46,13 +46,12 @@ class Player(Entity):
         "death": "game.player.die",
     }
 
-    def __init__(self, x, y, world, gamemode = None):
+    def __init__(self, x, y, world, gamemode=None):
         super().__init__(x, y, world)
         self.world: World = world
         self.entity_id = "player"
         self.loading_regions = []
-        # Regions whose payload has been atomically installed by the client.
-        # ``loading_regions`` only means that the server sent the packet.
+
         self.client_loaded_regions: set[int] = set()
         self.initial_load_complete_sent = False
         self.name = "Player_" + self.uuid.hex[:8]
@@ -84,14 +83,11 @@ class Player(Entity):
         self.crafting_grid = Inventory(9)
         self.cursor_stack = EmptyItemStack()
         self.saved_hotbars = [Inventory(9) for _ in range(9)]
-        # Future block/entity containers register here only while the server
-        # has authorized them as open for this player.
+
         self.open_inventory_containers: dict[str, Inventory] = {}
         self._initialize_inventory()
         self.selected_slot = 0
-        # The miner predicts progress locally.  The 20 TPS server keeps an
-        # independent verifier timeline and broadcasts it to observers; a
-        # premature finish request is rejected with an authoritative block.
+
         self.breaking_target: tuple[int, int, int, str] | None = None
         self.break_progress = 0.0
         self._breaking_tool_key = None
@@ -107,10 +103,7 @@ class Player(Entity):
         self.exhaustion = 0.0
         self.food_tick_timer = 0
         self.fall_distance = 0.0
-        # A client may already have PlayerMove packets queued when the server
-        # teleports it.  Do not let one of those stale packets overwrite the
-        # authoritative destination before the client has received the
-        # Teleport packet.
+
         self._teleport_id = 0
         self._pending_teleport_id: int | None = None
         # 疾跑粒子节流：避免每帧都生成粒子造成刷屏
@@ -119,11 +112,16 @@ class Player(Entity):
         self.spawn_point = 0
 
     def _initialize_inventory(self) -> None:
-        """Create the same starter inventory as the client for new worlds."""
         from resources.server.materials import (
-            APPLE, BREAD, FLINT_AND_STEEL, GLOWSTONE, SAND, WATER,
+            APPLE,
+            BREAD,
+            FLINT_AND_STEEL,
+            GLOWSTONE,
+            SAND,
+            WATER,
             get_material_by_id,
         )
+
         if getattr(self.gamemode, "name_id", "survival") == "creative":
             for i in range(4):
                 self.inventory[i] = ItemStack(GLOWSTONE(), 64)
@@ -138,7 +136,6 @@ class Player(Entity):
             self.inventory[1] = ItemStack(BREAD(), 2)
 
     def give_item_stack(self, stack: ItemStack, *, sync: bool = True) -> int:
-        """Give as much of ``stack`` as fits; return the number accepted."""
         before = max(0, int(stack.amount))
         self.inventory.add_item(stack)
         added = before - max(0, int(stack.amount))
@@ -146,12 +143,16 @@ class Player(Entity):
             self.sync_inventory()
         return added
 
-    def give_item(self, material, amount: int = 1, nbt=None, *, sync: bool = True) -> int:
-        """Public server-side item grant hook used by commands and gameplay."""
+    def give_item(
+        self, material, amount: int = 1, nbt=None, *, sync: bool = True
+    ) -> int:
         if isinstance(material, str):
             from resources.server.materials import get_material_by_id
+
             material = get_material_by_id(material)
-        return self.give_item_stack(ItemStack(material, max(0, int(amount)), nbt), sync=sync)
+        return self.give_item_stack(
+            ItemStack(material, max(0, int(amount)), nbt), sync=sync
+        )
 
     def get_equipped_item(self, slot: str) -> ItemStack:
         slot = str(slot).lower().replace("_", "")
@@ -161,8 +162,9 @@ class Player(Entity):
             raise ValueError(f"unknown equipment slot: {slot}")
         return self.equipment[slot]
 
-    def set_equipped_item(self, slot: str, stack: ItemStack, *, sync: bool = True) -> None:
-        """Server-side equipment hook for armor, offhand items, and future UI."""
+    def set_equipped_item(
+        self, slot: str, stack: ItemStack, *, sync: bool = True
+    ) -> None:
         slot = str(slot).lower().replace("_", "")
         if slot == "mainhand":
             self.inventory[self.selected_slot] = stack
@@ -195,7 +197,6 @@ class Player(Entity):
         self.world.server.send_client_socket(self, self.inventory_packet(), "Forward")
 
     def apply_item_event(self, stack: ItemStack, event: str, *args) -> bool:
-        """Dispatch a successful action to the item which owns its wear rule."""
         if stack is None or stack.is_empty():
             return False
         material = stack.material
@@ -207,7 +208,6 @@ class Player(Entity):
         return True
 
     def can_reach_block(self, x: int, y: int, z: int) -> bool:
-        """Return whether a block action is valid from the server position."""
         if self.health <= 0 or z not in (0, 1):
             return False
         if getattr(self.gamemode, "name_id", "survival") == "spectator":
@@ -240,7 +240,9 @@ class Player(Entity):
         for observer in tuple(self.world.server.players):
             if observer is self or observer.world is not self.world:
                 continue
-            if observer.is_loading_position(int(self.x), int(self.y), getattr(self, 'z', 0)):
+            if observer.is_loading_position(
+                int(self.x), int(self.y), getattr(self, "z", 0)
+            ):
                 self.world.server.send_client_socket(observer, self, "EntityUpdate")
 
     def clear_breaking(self, *, notify: bool = True) -> None:
@@ -252,28 +254,32 @@ class Player(Entity):
             self._send_break_progress(old_target, 0.0, False)
 
     def request_breaking(self, x: int, y: int, z: int) -> bool:
-        """Accept one keepalive for a server-authoritative mining action."""
         if self.eating:
             self.clear_eating()
         world = self.world
         if not (0 <= y < world.attribute.MAX_BUILD_HEIGHT and z in (0, 1)):
             self.clear_breaking()
             return False
-        if x // 16 not in self.client_loaded_regions or not world.is_chunk_loaded(x // 16):
+        if x // 16 not in self.client_loaded_regions or not world.is_chunk_loaded(
+            x // 16
+        ):
             self.clear_breaking()
             return False
         if not self.can_reach_block(x, y, z):
             self.clear_breaking()
             return False
         block = world.get_block(x, y, z)
-        if not getattr(block, "breakable", False) or getattr(block, "block_id", "air") == "air":
+        if (
+            not getattr(block, "breakable", False)
+            or getattr(block, "block_id", "air") == "air"
+        ):
             self.clear_breaking()
             return False
 
         held = self.inventory[self.selected_slot]
         tool_key = (
-            getattr(held.material, 'name_id', 'air'),
-            repr(getattr(held, 'nbt', {})),
+            getattr(held.material, "name_id", "air"),
+            repr(getattr(held, "nbt", {})),
         )
         target = (x, y, z, str(block.block_id))
         if target != self.breaking_target or tool_key != self._breaking_tool_key:
@@ -297,7 +303,7 @@ class Player(Entity):
             speed = max(0.0, float(getattr(held, "mining_speed", 1.0)))
             speed += self.get_attribute_value("mining_efficiency")
         speed *= self.get_attribute_value("block_break_speed")
-        # Do not trust the client's in-fluid/on-ground flags for mining speed.
+
         inside_block = bool(self._check_collision_at(self.x, self.y))
         if not inside_block:
             if self._get_fluid_interaction()[0]:
@@ -312,9 +318,11 @@ class Player(Entity):
         if target is None:
             return
         current_tick = int(getattr(self.world.server, "server_ticks", 0))
-        # A bounded grace period absorbs socket/server thread scheduling
-        # jitter. Progress is still advanced only by this authoritative loop.
-        if current_tick - self._last_break_action_tick > self.BREAK_KEEPALIVE_GRACE_TICKS:
+
+        if (
+            current_tick - self._last_break_action_tick
+            > self.BREAK_KEEPALIVE_GRACE_TICKS
+        ):
             self.clear_breaking()
             return
         x, y, z, block_id = target
@@ -331,7 +339,6 @@ class Player(Entity):
         self._send_break_progress(target, self.break_progress, True)
 
     def finish_breaking(self, x: int, y: int, z: int) -> bool:
-        """Verify a predicted client break and either accept or correct it."""
         world = self.world
         if (
             not (0 <= y < world.attribute.MAX_BUILD_HEIGHT)
@@ -345,20 +352,18 @@ class Player(Entity):
         block = world.get_block(x, y, z)
         held_stack = self.inventory[self.selected_slot]
         current_tool_key = (
-            getattr(held_stack.material, 'name_id', 'air'),
-            repr(getattr(held_stack, 'nbt', {})),
+            getattr(held_stack.material, "name_id", "air"),
+            repr(getattr(held_stack, "nbt", {})),
         )
         valid_target = (
             target is not None
             and target[:3] == (x, y, z)
-            and getattr(block, 'block_id', 'air') == target[3]
-            and getattr(block, 'breakable', False)
+            and getattr(block, "block_id", "air") == target[3]
+            and getattr(block, "breakable", False)
             and self.can_reach_block(x, y, z)
             and current_tool_key == self._breaking_tool_key
         )
-        # Permit a small bounded difference between client and server clocks.
-        # The percentage floor matters for slow underwater mining, while the
-        # per-tick allowance keeps quick blocks from gaining a large shortcut.
+
         destroy_delta = self._destroy_delta(block) if valid_target else 0.0
         progress_tolerance = min(
             self.BREAK_MAX_PROGRESS_TOLERANCE,
@@ -373,11 +378,17 @@ class Player(Entity):
         )
         if not enough_progress:
             self.clear_breaking()
-            world.server.send_client_socket(self, {
-                '__class__': 'BlockBreakCorrection',
-                'x': x, 'y': y, 'z': z,
-                'block_data': block.to_dict(),
-            }, 'Forward')
+            world.server.send_client_socket(
+                self,
+                {
+                    "__class__": "BlockBreakCorrection",
+                    "x": x,
+                    "y": y,
+                    "z": z,
+                    "block_data": block.to_dict(),
+                },
+                "Forward",
+            )
             return False
 
         tool = held_stack.material
@@ -397,13 +408,17 @@ class Player(Entity):
         server = getattr(self.world, "server", None)
         if server is None:
             return
-        server.send_client_socket(self, {
-            "__class__": "Experience",
-            "experience": max(0, int(self.experience)),
-            "experience_level": max(0, int(self.experience_level)),
-            "experience_total": max(0, int(self.experience_total)),
-            "score": max(0, int(self.score)),
-        }, "Forward")
+        server.send_client_socket(
+            self,
+            {
+                "__class__": "Experience",
+                "experience": max(0, int(self.experience)),
+                "experience_level": max(0, int(self.experience_level)),
+                "experience_total": max(0, int(self.experience_total)),
+                "score": max(0, int(self.score)),
+            },
+            "Forward",
+        )
 
     def _play_level_up_sound(self) -> None:
         current_tick = int(getattr(self.world.server, "server_ticks", 0))
@@ -420,7 +435,6 @@ class Player(Entity):
         )
 
     def add_experience(self, amount: int) -> int:
-        """Add points authoritatively and return the number of gained levels."""
         amount = max(0, int(amount))
         if amount <= 0:
             return 0
@@ -437,7 +451,6 @@ class Player(Entity):
         return self.experience_level - old_level
 
     def normalize_experience_state(self) -> None:
-        """Repair legacy saves whose current-level points exceed one level."""
         self.experience = max(0, int(self.experience))
         self.experience_level = max(0, int(self.experience_level))
         while self.experience >= self.experience_to_next_level():
@@ -452,7 +465,6 @@ class Player(Entity):
         self.score = max(0, int(getattr(self, "score", self.experience_total)))
 
     def drop_experience_on_death(self, *, sync: bool = True) -> int:
-        """Drop the supported vanilla death reward, then clear level progress."""
         amount = min(max(0, int(self.experience_level)) * 7, 100)
         spawner = getattr(self.world, "spawn_experience", None)
         if amount > 0 and callable(spawner):
@@ -473,22 +485,25 @@ class Player(Entity):
         if self.breaking_target is not None:
             self.clear_breaking()
         held = self.inventory[self.selected_slot]
-        material_id = getattr(held.material, 'name_id', 'air')
+        material_id = getattr(held.material, "name_id", "air")
         food = held.material
         if held.is_empty() or not isinstance(food, Food) or not food.can_consume(self):
             self.clear_eating()
             return False
-        if self._eating_slot != self.selected_slot or self._eating_material_id != material_id:
+        if (
+            self._eating_slot != self.selected_slot
+            or self._eating_material_id != material_id
+        ):
             self.clear_eating()
             self.eating = True
             self._eating_slot = self.selected_slot
             self._eating_material_id = material_id
             self._eat_progress = 0
-            self.replace_attribute_modifiers("state:eating", (
-                ("movement_speed", EATING_SPEED_MODIFIER),
-            ))
+            self.replace_attribute_modifiers(
+                "state:eating", (("movement_speed", EATING_SPEED_MODIFIER),)
+            )
             self._broadcast_action_state()
-        self._last_eat_action_tick = int(getattr(self.world.server, 'server_ticks', 0))
+        self._last_eat_action_tick = int(getattr(self.world.server, "server_ticks", 0))
         return True
 
     def can_consume_food(self, food: Food) -> bool:
@@ -499,7 +514,6 @@ class Player(Entity):
         return bool(food.always_edible or self.food_level < self.MAX_FOOD_LEVEL)
 
     def consume_food(self, food: Food) -> None:
-        """Apply one completed food use using Bedrock hunger values."""
         nutrition = max(0, int(food.food_value))
         saturation_gain = nutrition * max(0.0, float(food.saturation_modifier)) * 2.0
         self.food_level = min(self.MAX_FOOD_LEVEL, self.food_level + nutrition)
@@ -507,10 +521,11 @@ class Player(Entity):
             float(self.food_level),
             max(0.0, self.saturation) + saturation_gain,
         )
-        # Bedrock grants one additional heart once when food is completed
-        # while natural regeneration is available.  It is paid for through
-        # the same 6 exhaustion per health point as timed regeneration.
-        if self.food_level >= self.NATURAL_REGEN_FOOD_LEVEL and self.health < self.max_health:
+
+        if (
+            self.food_level >= self.NATURAL_REGEN_FOOD_LEVEL
+            and self.health < self.max_health
+        ):
             healed = min(2.0, float(self.max_health) - float(self.health))
             self.health += healed
             self.add_exhaustion(6.0 * healed)
@@ -531,26 +546,31 @@ class Player(Entity):
         forward = 0.27 * direction
         down = -0.06
         return (
-            self.x + self.width * 0.5 + forward * _math.cos(angle) - down * _math.sin(angle),
+            self.x
+            + self.width * 0.5
+            + forward * _math.cos(angle)
+            - down * _math.sin(angle),
             self.y + 1.55 + forward * _math.sin(angle) + down * _math.cos(angle),
-            int(getattr(self, 'z', 0)),
+            int(getattr(self, "z", 0)),
         )
 
     def _spawn_eating_particles(self, material_id: str) -> None:
         mouth_x, mouth_y, z = self._mouth_position()
         direction = 1.0 if int(self.facing) == 1 else -1.0
-        self.world.spawn_particle(ITEM(
-            mouth_x,
-            mouth_y,
-            z,
-            count=3,
-            motion=(-0.018 * direction, -0.035),
-            data={
-                'item_id': material_id,
-                'position_spread': (0.04, 0.025),
-                'motion_spread': (0.025, 0.018),
-            },
-        ))
+        self.world.spawn_particle(
+            ITEM(
+                mouth_x,
+                mouth_y,
+                z,
+                count=3,
+                motion=(-0.018 * direction, -0.035),
+                data={
+                    "item_id": material_id,
+                    "position_spread": (0.04, 0.025),
+                    "motion_spread": (0.025, 0.018),
+                },
+            )
+        )
 
     def _play_eating_sound(self, sound_id: str) -> None:
         mouth_x, mouth_y, z = self._mouth_position()
@@ -559,12 +579,12 @@ class Player(Entity):
     def tick_eating(self) -> None:
         if not self.eating:
             return
-        current_tick = int(getattr(self.world.server, 'server_ticks', 0))
+        current_tick = int(getattr(self.world.server, "server_ticks", 0))
         if current_tick - self._last_eat_action_tick > 2:
             self.clear_eating()
             return
         held = self.inventory[self.selected_slot]
-        material_id = getattr(held.material, 'name_id', 'air')
+        material_id = getattr(held.material, "name_id", "air")
         food = held.material
         if (
             self.selected_slot != self._eating_slot
@@ -578,19 +598,19 @@ class Player(Entity):
         self._eat_progress += 1
         if self._eat_progress % 4 == 0:
             self._spawn_eating_particles(material_id)
-            self._play_eating_sound('random.eat')
+            self._play_eating_sound("random.eat")
         if self._eat_progress < food.consume_duration_ticks:
             return
         food.on_consume(self)
         held.reduce_amount(1)
         if self.food_level >= self.MAX_FOOD_LEVEL:
-            self._play_eating_sound('random.burp')
+            self._play_eating_sound("random.burp")
         self.sync_inventory()
         self.clear_eating()
 
-    def record_server_movement(self, previous_y: float, was_on_ground: bool,
-                               horizontal_distance: float) -> None:
-        """Update server-owned fall and exhaustion state after an accepted move."""
+    def record_server_movement(
+        self, previous_y: float, was_on_ground: bool, horizontal_distance: float
+    ) -> None:
         distance = max(0.0, float(horizontal_distance))
         if self.in_fluid:
             swim_distance = _math.hypot(distance, float(self.y) - float(previous_y))
@@ -615,12 +635,11 @@ class Player(Entity):
             landing_distance = self.fall_distance
             position_corrected = self.on_landed(landing_distance)
             if position_corrected:
-                # The acknowledgement gate prevents already queued client
-                # movement from restoring the now-embedded position.
                 self.teleport_to(self.x, self.y)
-            if (
-                getattr(self.gamemode, "name_id", "survival") == "survival"
-                and landing_distance > self.get_attribute_value("safe_fall_distance")
+            if getattr(
+                self.gamemode, "name_id", "survival"
+            ) == "survival" and landing_distance > self.get_attribute_value(
+                "safe_fall_distance"
             ):
                 safe_distance = self.get_attribute_value("safe_fall_distance")
                 fall_damage = int(
@@ -638,8 +657,7 @@ class Player(Entity):
             return
 
         state_changed = False
-        # Vanilla caps queued exhaustion at 40 and performs at most one
-        # four-point drain per game tick.
+
         if self.exhaustion >= self.EXHAUSTION_THRESHOLD:
             self.exhaustion -= self.EXHAUSTION_THRESHOLD
             if self.saturation > 0:
@@ -651,7 +669,10 @@ class Player(Entity):
         if self.food_level <= 6:
             self.sprinting = False
 
-        if self.food_level >= self.NATURAL_REGEN_FOOD_LEVEL and self.health < self.max_health:
+        if (
+            self.food_level >= self.NATURAL_REGEN_FOOD_LEVEL
+            and self.health < self.max_health
+        ):
             self.food_tick_timer += 1
             if self.food_tick_timer >= self.NATURAL_REGEN_TICKS:
                 healed = min(1.0, float(self.max_health) - float(self.health))
@@ -670,7 +691,10 @@ class Player(Entity):
             self.sync_inventory()
 
     def add_exhaustion(self, amount: float) -> None:
-        if getattr(self.gamemode, "name_id", "survival") != "survival" or self.health <= 0:
+        if (
+            getattr(self.gamemode, "name_id", "survival") != "survival"
+            or self.health <= 0
+        ):
             return
         try:
             amount = float(amount)
@@ -680,7 +704,6 @@ class Player(Entity):
             self.exhaustion = min(40.0, self.exhaustion + amount)
 
     def tick_server(self) -> None:
-        """Advance state which must never be supplied by a client packet."""
         self.tick_damage_state()
         if self.attack_cooldown_ticks > 0:
             self.attack_cooldown_ticks -= 1
@@ -698,39 +721,57 @@ class Player(Entity):
             if self.get_inventory_container(container_id) is None:
                 server = getattr(self.world, "server", None)
                 if server is not None:
-                    server.send_client_socket(self, {
-                        "__class__": "FurnaceClosed",
-                        "container": container_id,
-                    }, "Forward")
+                    server.send_client_socket(
+                        self,
+                        {
+                            "__class__": "FurnaceClosed",
+                            "container": container_id,
+                        },
+                        "Forward",
+                    )
         self._sync_modified_attributes()
 
     def _sync_modified_attributes(self) -> None:
-        """Flush server-owned syncable attribute changes to tracking clients."""
         self.refresh_attribute_modifiers()
         if not self.attributes.take_dirty_syncable():
             return
         server = getattr(self.world, "server", None)
         if server is None or not hasattr(server, "send_client_socket"):
             return
-        server.send_client_socket(self, {
-            "__class__": "AttributeUpdate",
-            "uuid": str(self.uuid),
-            "attributes": self.attributes.sync_snapshot(),
-            "max_health": float(self.max_health),
-        }, "Forward")
+        server.send_client_socket(
+            self,
+            {
+                "__class__": "AttributeUpdate",
+                "uuid": str(self.uuid),
+                "attributes": self.attributes.sync_snapshot(),
+                "max_health": float(self.max_health),
+            },
+            "Forward",
+        )
         for observer in tuple(getattr(server, "players", ())):
             if observer is self or observer.world is not self.world:
                 continue
-            if observer.is_loading_position(int(self.x), int(self.y), getattr(self, "z", 0)):
+            if observer.is_loading_position(
+                int(self.x), int(self.y), getattr(self, "z", 0)
+            ):
                 server.send_client_socket(observer, self, "EntityUpdate")
 
     def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
         mode = getattr(self.gamemode, "name_id", "survival")
-        return mode not in {"creative", "spectator"} and super().can_take_damage(damage_type)
+        return mode not in {"creative", "spectator"} and super().can_take_damage(
+            damage_type
+        )
 
-    def attack(self, target, damage_type: type[DamageType] | None = None,
-               amount: float | None = None, knockback=None) -> float:
-        current_tick = int(getattr(getattr(self.world, "server", None), "server_ticks", 0))
+    def attack(
+        self,
+        target,
+        damage_type: type[DamageType] | None = None,
+        amount: float | None = None,
+        knockback=None,
+    ) -> float:
+        current_tick = int(
+            getattr(getattr(self.world, "server", None), "server_ticks", 0)
+        )
         if self._last_attribute_attack_tick is not None:
             self.attack_strength_ticker = max(
                 self.attack_strength_ticker,
@@ -749,18 +790,18 @@ class Player(Entity):
         return actual_damage
 
     def get_attack_strength_scale(self, partial_tick: float = 0.0) -> float:
-        """Return Java's 0..1 attack recharge strength from attack_speed."""
         attack_speed = self.get_attribute_value("attack_speed")
         if attack_speed <= 0.0:
             return 0.0
         recharge_ticks = 20.0 / attack_speed
-        return max(0.0, min(1.0, (self.attack_strength_ticker + partial_tick) / recharge_ticks))
+        return max(
+            0.0, min(1.0, (self.attack_strength_ticker + partial_tick) / recharge_ticks)
+        )
 
     def get_attack_damage(self, target=None) -> float:
         return super().get_attack_damage(target)
 
     def refresh_attribute_modifiers(self) -> None:
-        """Install modifiers from the authoritative selected server stack."""
         super().refresh_attribute_modifiers()
         try:
             selected = max(0, min(len(self.inventory) - 1, int(self.selected_slot)))
@@ -787,22 +828,28 @@ class Player(Entity):
         self.attributes.replace_source("equipment", entries)
         self._equipment_attribute_signature = signature
 
-    def get_hurt_sound(self, damage_type: type[DamageType], actual_damage: float) -> str | None:
+    def get_hurt_sound(
+        self, damage_type: type[DamageType], actual_damage: float
+    ) -> str | None:
         if self.health <= 0:
             return None
         if damage_type is FALL:
             return self.get_sound("fall_big" if actual_damage >= 5 else "fall_small")
         return self.get_sound("hurt")
 
-    def on_damage_applied(self, actual_damage: float, raw_damage: float,
-                          damage_type: type[DamageType], source) -> None:
+    def on_damage_applied(
+        self,
+        actual_damage: float,
+        raw_damage: float,
+        damage_type: type[DamageType],
+        source,
+    ) -> None:
         super().on_damage_applied(actual_damage, raw_damage, damage_type, source)
         self.add_exhaustion(getattr(damage_type, "exhaustion", 0.0))
         server = getattr(self.world, "server", None)
         if server is None:
             return
-        # Ignore queued pre-hit PlayerMove health until the client has received
-        # and begun reporting the authoritative result.
+
         self._server_health_lock_until = server.server_ticks + self.hurt_time
         packet = {
             "__class__": "PlayerHurt",
@@ -826,14 +873,15 @@ class Player(Entity):
         for other in tuple(server.players):
             if other is self or other.world is not self.world:
                 continue
-            if other.is_loading_position(int(self.x), int(self.y), getattr(self, "z", 0)):
+            if other.is_loading_position(
+                int(self.x), int(self.y), getattr(self, "z", 0)
+            ):
                 server.send_client_socket(other, self, "EntityUpdate")
 
     def _click_inventory(self, slot: int, button: int) -> None:
         self._click_container(self.inventory, slot, button)
 
     def get_inventory_container(self, container_id: str):
-        """Resolve a server-owned slot collection by stable protocol id."""
         container_id = str(container_id)
         built_in = {
             "inventory": self.inventory,
@@ -850,7 +898,9 @@ class Player(Entity):
             or location.world is not self.world
             or self.world.get_block(location) is not owner
             or not self.can_reach_block(
-                int(location.x), int(location.y), int(location.z),
+                int(location.x),
+                int(location.y),
+                int(location.z),
             )
         ):
             self.open_inventory_containers.pop(container_id, None)
@@ -860,9 +910,9 @@ class Player(Entity):
             return None
         return container
 
-    def register_inventory_container(self, container_id: str,
-                                     container: Inventory) -> None:
-        """Expose one already-authorized Inventory to generic slot actions."""
+    def register_inventory_container(
+        self, container_id: str, container: Inventory
+    ) -> None:
         container_id = str(container_id)
         if container_id in {"inventory", "crafting", "equipment"}:
             raise ValueError(f"reserved container id: {container_id}")
@@ -910,31 +960,31 @@ class Player(Entity):
         container[slot if isinstance(container, dict) else int(slot)] = stack
 
     def container_click(self, container_id: str, slot, button: int) -> None:
-        """Apply a normal click to any server-owned Inventory container."""
         container = self.get_inventory_container(container_id)
         if isinstance(container, Inventory):
             self._click_container(container, int(slot), int(button))
         self.sync_inventory()
 
     def container_drag(self, container_id: str, slots, button: int) -> None:
-        """Distribute the cursor stack over any Inventory-backed container."""
         container = self.get_inventory_container(container_id)
         if isinstance(container, Inventory):
             self._drag_container(container, slots, int(button))
         self.sync_inventory()
 
-    def container_swap(self, source_container_id: str, source_slot,
-                       target_container_id: str, target_slot) -> None:
-        """Swap two authoritative slots (number keys and offhand key)."""
+    def container_swap(
+        self,
+        source_container_id: str,
+        source_slot,
+        target_container_id: str,
+        target_slot,
+    ) -> None:
         source_container_id = str(source_container_id)
         target_container_id = str(target_container_id)
         allowed_target = (
             target_container_id == "inventory"
             and str(target_slot).lstrip("-").isdigit()
             and 0 <= int(target_slot) < 9
-        ) or (
-            target_container_id == "equipment" and target_slot == "offhand"
-        )
+        ) or (target_container_id == "equipment" and target_slot == "offhand")
         source = self.get_inventory_container(source_container_id)
         if not isinstance(source, Inventory) or not allowed_target:
             self.sync_inventory()
@@ -968,9 +1018,13 @@ class Player(Entity):
         self._equipment_attribute_signature = None
         self.sync_inventory()
 
-    def _quick_move_route(self, source_container_id: str, source_slot: int,
-                          screen: str, crafting_size: int):
-        """Return the authoritative destination and ordered target slots."""
+    def _quick_move_route(
+        self,
+        source_container_id: str,
+        source_slot: int,
+        screen: str,
+        crafting_size: int,
+    ):
         if screen.startswith("container:"):
             external_id = screen.removeprefix("container:")
             external = self.open_inventory_containers.get(external_id)
@@ -991,11 +1045,15 @@ class Player(Entity):
             return self.inventory, self.HOTBAR_LEFT_ORDER
         return None, ()
 
-    def container_quick_move(self, source_container_id: str, source_slot,
-                             *, screen: str = "inventory",
-                             crafting_size: int = 4,
-                             all_matching: bool = False) -> None:
-        """Perform Java-style Shift movement using server-owned ordering."""
+    def container_quick_move(
+        self,
+        source_container_id: str,
+        source_slot,
+        *,
+        screen: str = "inventory",
+        crafting_size: int = 4,
+        all_matching: bool = False,
+    ) -> None:
         source_container_id = str(source_container_id)
         screen = str(screen)
         source = self.get_inventory_container(source_container_id)
@@ -1017,7 +1075,10 @@ class Player(Entity):
             return
 
         destination, target_slots = self._quick_move_route(
-            source_container_id, source_slot, screen, crafting_size,
+            source_container_id,
+            source_slot,
+            screen,
+            crafting_size,
         )
         if not isinstance(destination, Inventory):
             self.sync_inventory()
@@ -1046,7 +1107,9 @@ class Player(Entity):
                 ):
                     continue
                 moved = source.transfer_stack_to(
-                    slot, destination, target_slots,
+                    slot,
+                    destination,
+                    target_slots,
                 )
                 self._container_taken(source, slot, moved)
         else:
@@ -1081,9 +1144,8 @@ class Player(Entity):
             self._container_changed(container)
             return
         if not self._container_can_place(container, slot, cursor):
-            if (
-                not target.is_empty()
-                and target.is_stackable_with(cursor, require_full_fit=False)
+            if not target.is_empty() and target.is_stackable_with(
+                cursor, require_full_fit=False
             ):
                 amount = min(
                     target.amount if button == 1 else 1,
@@ -1102,7 +1164,10 @@ class Player(Entity):
             container[slot] = ItemStack(cursor.material, amount, cursor.nbt)
             cursor.amount -= amount
         elif target.material == cursor.material and target.nbt == cursor.nbt:
-            amount = min(cursor.amount if button == 1 else 1, target.max_stack_size - target.amount)
+            amount = min(
+                cursor.amount if button == 1 else 1,
+                target.max_stack_size - target.amount,
+            )
             target.amount += max(0, amount)
             cursor.amount -= max(0, amount)
         else:
@@ -1123,10 +1188,15 @@ class Player(Entity):
 
     def crafting_take(self, width: int = 2, height: int = 2) -> None:
         from resources.server.crafting import find_recipe
-        if width not in (2, 3) or height not in (2, 3) or width * height > len(self.crafting_grid):
+
+        if (
+            width not in (2, 3)
+            or height not in (2, 3)
+            or width * height > len(self.crafting_grid)
+        ):
             self.sync_inventory()
             return
-        match = find_recipe(list(self.crafting_grid)[:width * height], width, height)
+        match = find_recipe(list(self.crafting_grid)[: width * height], width, height)
         if match is None:
             self.sync_inventory()
             return
@@ -1149,14 +1219,20 @@ class Player(Entity):
         self.sync_inventory()
 
     def crafting_quick_take(self, width: int = 2, height: int = 2) -> None:
-        """Craft repeatedly while complete results fit in the player inventory."""
         from resources.server.crafting import find_recipe
-        if width not in (2, 3) or height not in (2, 3) or width * height > len(self.crafting_grid):
+
+        if (
+            width not in (2, 3)
+            or height not in (2, 3)
+            or width * height > len(self.crafting_grid)
+        ):
             self.sync_inventory()
             return
         slots = self.PLAYER_JAVA_RECEIVE_ORDER
         while True:
-            match = find_recipe(list(self.crafting_grid)[:width * height], width, height)
+            match = find_recipe(
+                list(self.crafting_grid)[: width * height], width, height
+            )
             if match is None:
                 break
             result, inputs = match
@@ -1216,10 +1292,19 @@ class Player(Entity):
             return
         target = container[slot]
         if target.is_empty():
-            moved = min(amount, self.cursor_stack.amount, self.cursor_stack.max_stack_size)
-            container[slot] = ItemStack(self.cursor_stack.material, moved, self.cursor_stack.nbt)
-        elif target.material == self.cursor_stack.material and target.nbt == self.cursor_stack.nbt:
-            moved = min(amount, self.cursor_stack.amount, target.max_stack_size - target.amount)
+            moved = min(
+                amount, self.cursor_stack.amount, self.cursor_stack.max_stack_size
+            )
+            container[slot] = ItemStack(
+                self.cursor_stack.material, moved, self.cursor_stack.nbt
+            )
+        elif (
+            target.material == self.cursor_stack.material
+            and target.nbt == self.cursor_stack.nbt
+        ):
+            moved = min(
+                amount, self.cursor_stack.amount, target.max_stack_size - target.amount
+            )
             target.amount += max(0, moved)
         else:
             return
@@ -1228,8 +1313,14 @@ class Player(Entity):
             self.cursor_stack = EmptyItemStack()
         self._container_changed(container)
 
-    def drop_container(self, container_id: str = "inventory", slot=None,
-                       *, cursor: bool = False, amount: int | None = None) -> None:
+    def drop_container(
+        self,
+        container_id: str = "inventory",
+        slot=None,
+        *,
+        cursor: bool = False,
+        amount: int | None = None,
+    ) -> None:
         container = None if cursor else self.get_inventory_container(container_id)
         if not cursor and not isinstance(container, Inventory):
             self.sync_inventory()
@@ -1247,7 +1338,9 @@ class Player(Entity):
         if amount is not None and int(amount) <= 0:
             self.sync_inventory()
             return
-        amount = stack.amount if amount is None else max(1, min(int(amount), stack.amount))
+        amount = (
+            stack.amount if amount is None else max(1, min(int(amount), stack.amount))
+        )
         dropped = Inventory.copy_stack(stack, amount)
         stack.amount -= amount
         if stack.amount <= 0:
@@ -1261,43 +1354,54 @@ class Player(Entity):
         self.drop_item_stack(dropped, pickup_delay=40)
         self.sync_inventory()
 
-    def drop_inventory(self, cursor: bool = True, slot: int | None = None,
-                       amount: int | None = None) -> None:
-        """Backward-compatible wrapper for older clients and gameplay code."""
+    def drop_inventory(
+        self, cursor: bool = True, slot: int | None = None, amount: int | None = None
+    ) -> None:
         self.drop_container(
-            "inventory", slot, cursor=cursor, amount=amount,
+            "inventory",
+            slot,
+            cursor=cursor,
+            amount=amount,
         )
 
     def save_hotbar(self, preset: int) -> None:
-        """Save the current creative hotbar into one of nine persistent presets."""
         try:
             preset = int(preset)
         except (TypeError, ValueError):
             return
-        if getattr(self.gamemode, "name_id", "survival") != "creative" or not 0 <= preset < 9:
+        if (
+            getattr(self.gamemode, "name_id", "survival") != "creative"
+            or not 0 <= preset < 9
+        ):
             self.sync_inventory()
             return
         for slot in range(9):
-            self.saved_hotbars[preset][slot] = Inventory.copy_stack(self.inventory[slot])
+            self.saved_hotbars[preset][slot] = Inventory.copy_stack(
+                self.inventory[slot]
+            )
         self.sync_inventory()
 
     def load_hotbar(self, preset: int) -> None:
-        """Load one saved hotbar, replacing all nine creative hotbar slots."""
         try:
             preset = int(preset)
         except (TypeError, ValueError):
             return
-        if getattr(self.gamemode, "name_id", "survival") != "creative" or not 0 <= preset < 9:
+        if (
+            getattr(self.gamemode, "name_id", "survival") != "creative"
+            or not 0 <= preset < 9
+        ):
             self.sync_inventory()
             return
         for slot in range(9):
-            self.inventory[slot] = Inventory.copy_stack(self.saved_hotbars[preset][slot])
+            self.inventory[slot] = Inventory.copy_stack(
+                self.saved_hotbars[preset][slot]
+            )
         self.sync_inventory()
 
     def count_item_stack(self, item_stack: ItemStack) -> int:
-        """Return the total matching amount across the player's inventory."""
         return sum(
-            stack.amount for stack in self.inventory
+            stack.amount
+            for stack in self.inventory
             if not stack.is_empty()
             and stack.material == item_stack.material
             and stack.nbt == item_stack.nbt
@@ -1306,8 +1410,9 @@ class Player(Entity):
     def has_item_stack(self, item_stack: ItemStack, amount: int = 1) -> bool:
         return amount >= 0 and self.count_item_stack(item_stack) >= amount
 
-    def remove_item_stack(self, item_stack: ItemStack, amount: int = 1, *, sync: bool = True) -> bool:
-        """Atomically consume ``amount`` matching items, if available."""
+    def remove_item_stack(
+        self, item_stack: ItemStack, amount: int = 1, *, sync: bool = True
+    ) -> bool:
         try:
             amount = int(amount)
         except (TypeError, ValueError):
@@ -1319,7 +1424,11 @@ class Player(Entity):
             if remaining <= 0:
                 break
             slot = self.inventory[index]
-            if slot.is_empty() or slot.material != item_stack.material or slot.nbt != item_stack.nbt:
+            if (
+                slot.is_empty()
+                or slot.material != item_stack.material
+                or slot.nbt != item_stack.nbt
+            ):
                 continue
             removed = min(remaining, slot.amount)
             slot.amount -= removed
@@ -1331,7 +1440,6 @@ class Player(Entity):
         return True
 
     def discard_inventory_item(self, slot: int, amount: int) -> bool:
-        """Drop a specified number of items from one inventory slot."""
         try:
             slot, amount = int(slot), int(amount)
         except (TypeError, ValueError):
@@ -1346,7 +1454,10 @@ class Player(Entity):
 
     def on_moving(self):
         rx = int(self.x // 16)
-        for x in range(rx - self.world.server.view_distance, rx + self.world.server.view_distance + 1):
+        for x in range(
+            rx - self.world.server.view_distance,
+            rx + self.world.server.view_distance + 1,
+        ):
             if x not in self.loading_regions and x in self.world.regions:
                 self.world.server.send_client_socket(self, self.world.regions[x])
         if self.sprinting:
@@ -1409,19 +1520,23 @@ class Player(Entity):
             offset_y = _random.uniform(0.0, 0.1)
 
             # 水平速度：向身后 + 随机扰动
-            vel_x = behind_dir * _random.uniform(0.02, 0.08) + _random.uniform(-0.03, 0.03)
+            vel_x = behind_dir * _random.uniform(0.02, 0.08) + _random.uniform(
+                -0.03, 0.03
+            )
             vel_y = _random.uniform(0.01, 0.06)  # 轻微上扬
 
-            self.world.spawn_particle(SPRINT_STEP(
-                base_x + offset_x,
-                foot_y + offset_y,
-                0,
-                count=1,
-                motion=(vel_x, vel_y),
-                data={"block_id": block_below.block_id},
-            ))
+            self.world.spawn_particle(
+                SPRINT_STEP(
+                    base_x + offset_x,
+                    foot_y + offset_y,
+                    0,
+                    count=1,
+                    motion=(vel_x, vel_y),
+                    data={"block_id": block_below.block_id},
+                )
+            )
 
-    def teleport_to(self, x, y, world = None):
+    def teleport_to(self, x, y, world=None):
         self.x = x
         self.y = y
         if world:
@@ -1437,7 +1552,6 @@ class Player(Entity):
         self.world.server.send_client_socket(self, self, "Teleport")
 
     def confirm_teleport(self, teleport_id) -> bool:
-        """Accept a client acknowledgement for the most recent teleport."""
         try:
             teleport_id = int(teleport_id)
         except (TypeError, ValueError):
@@ -1451,7 +1565,7 @@ class Player(Entity):
     def is_awaiting_teleport_confirmation(self) -> bool:
         return self._pending_teleport_id is not None
 
-    def is_loading_position(self, x_loc: int | Location, y = None, z = None) -> bool:
+    def is_loading_position(self, x_loc: int | Location, y=None, z=None) -> bool:
         """
         检测某个位置是否被改玩家加载
         :param x_loc: 可传入 x 坐标或 Location

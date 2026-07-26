@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import math
 import random
 import time
@@ -15,8 +16,6 @@ from resources.server.utils import client_method
 
 @register_entity
 class Zombie(Entity):
-    """Server-authoritative zombie; behavior is supplied by :class:`ZombieAI`."""
-
     entity_id = "zombie"
     translation_key = "entity.Zombie.name"
     sounds = {
@@ -34,17 +33,14 @@ class Zombie(Entity):
         self.height = 1.95
         self.max_health = 20.0
         self.health = self.max_health
-        # ``get_move_acceleration`` now scales from this attribute, so changing
-        # move_speed at runtime changes actual horizontal movement immediately.
+
         self.move_speed = 0.1
         self.movement_acceleration = 0.05
         self.interact_range = 1.5
         self.attack_damage = 3.0
         rotten_flesh = random.randint(0, 2)
         self.drops = (
-            [ItemStack(ROTTEN_FLESH(), rotten_flesh)]
-            if rotten_flesh > 0
-            else []
+            [ItemStack(ROTTEN_FLESH(), rotten_flesh)] if rotten_flesh > 0 else []
         )
         self.ai = ZombieAI(self)
 
@@ -53,8 +49,6 @@ class Zombie(Entity):
 
 
 class ZombieSkeleton(PlayerSkeleton):
-    """Zombie renderer kept beside Zombie, matching falling_block.py."""
-
     @client_method
     def __init__(self, entity, client=None):
         EntitySkeleton.__init__(self, client, "entity.zombie.zombie", entity)
@@ -86,7 +80,6 @@ class ZombieSkeleton(PlayerSkeleton):
         self.conv_size()
 
     def _build_zombie_body(self):
-        """Build the legacy 64x32 zombie layout used by the bundled asset."""
         self._part_textures = {
             self.RIGHT: {
                 "head": self._skin((0, 8, 8, 8)),
@@ -108,14 +101,26 @@ class ZombieSkeleton(PlayerSkeleton):
         textures = self._part_textures[self.RIGHT]
         empty = pygame.Surface((1, 1), pygame.SRCALPHA)
         self.body = {
-            "back_arm": BodyPart("back_arm", textures["back_arm"], (0.50, 1.50), (2, 0), layer=0),
-            "back_leg": BodyPart("back_leg", textures["back_leg"], (0.50, 0.75), (2, 0), layer=1),
+            "back_arm": BodyPart(
+                "back_arm", textures["back_arm"], (0.50, 1.50), (2, 0), layer=0
+            ),
+            "back_leg": BodyPart(
+                "back_leg", textures["back_leg"], (0.50, 0.75), (2, 0), layer=1
+            ),
             "body": BodyPart("body", textures["body"], (0.50, 1.50), (2, 0), layer=2),
-            "front_leg": BodyPart("front_leg", textures["front_leg"], (0.50, 0.75), (2, 0), layer=3),
-            "front_arm": BodyPart("front_arm", textures["front_arm"], (0.50, 1.50), (2, 0), layer=4),
-            "held_item": BodyPart("held_item", empty, (0.50, 1.05), (0.5, 0.5), layer=3, show=False),
+            "front_leg": BodyPart(
+                "front_leg", textures["front_leg"], (0.50, 0.75), (2, 0), layer=3
+            ),
+            "front_arm": BodyPart(
+                "front_arm", textures["front_arm"], (0.50, 1.50), (2, 0), layer=4
+            ),
+            "held_item": BodyPart(
+                "held_item", empty, (0.50, 1.05), (0.5, 0.5), layer=3, show=False
+            ),
             "head": BodyPart("head", textures["head"], (0.50, 1.50), (4, 8), layer=5),
-            "head_overlay": BodyPart("head_overlay", empty, (0.50, 1.50), (4, 8), layer=6, show=False),
+            "head_overlay": BodyPart(
+                "head_overlay", empty, (0.50, 1.50), (4, 8), layer=6, show=False
+            ),
         }
 
     def _update_facing(self):
@@ -132,12 +137,19 @@ class ZombieSkeleton(PlayerSkeleton):
     def _calc_walk_angles(self, direction: int) -> dict:
         angles = super()._calc_walk_angles(direction)
         if getattr(self.entity, "aggressive", False):
-            attack_ticks = max(0, int(getattr(self.entity, "attack_animation_ticks", 0)))
+            attack_ticks = max(
+                0, int(getattr(self.entity, "attack_animation_ticks", 0))
+            )
             attack_pulse = (
                 math.sin((8 - min(attack_ticks, 8)) / 8 * math.pi)
-                if attack_ticks else 0.0
+                if attack_ticks
+                else 0.0
             )
             shamble = math.sin(self.walk_time * 0.75) * 7.0
-            angles["front_arm_angle"] = direction * (82.0 + shamble - attack_pulse * 18.0)
-            angles["back_arm_angle"] = direction * (76.0 - shamble - attack_pulse * 12.0)
+            angles["front_arm_angle"] = direction * (
+                82.0 + shamble - attack_pulse * 18.0
+            )
+            angles["back_arm_angle"] = direction * (
+                76.0 - shamble - attack_pulse * 12.0
+            )
         return angles

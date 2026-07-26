@@ -1,10 +1,4 @@
-"""Reusable entity AI primitives.
-
-The game keeps entity physics in :mod:`resources.server.entity`, while this
-module owns the Minecraft-style goal/selector layer.  Concrete mobs only
-need to expose attributes such as ``move_speed`` and ``interact_range`` and
-implement their damage method.
-"""
+# Commented and arranged by ChatGPT
 
 import math
 import random
@@ -20,8 +14,6 @@ class GoalFlag(Enum):
 
 
 class Goal:
-    """One interruptible unit of entity behaviour."""
-
     flags: frozenset[GoalFlag] = frozenset()
     tick_every_tick = True
     interruptible = True
@@ -58,8 +50,6 @@ class _WrappedGoal:
 
 
 class GoalSelector:
-    """Select goals by priority while enforcing controller flag conflicts."""
-
     def __init__(self):
         self._goals: list[_WrappedGoal] = []
         self._next_order = 0
@@ -85,7 +75,8 @@ class GoalSelector:
                 if candidate.running or not candidate.goal.can_use():
                     continue
                 conflicts = [
-                    running for running in self._goals
+                    running
+                    for running in self._goals
                     if running.running
                     and running.goal.flags.intersection(candidate.goal.flags)
                 ]
@@ -105,8 +96,6 @@ class GoalSelector:
 
 
 class MoveControl:
-    """Horizontal controller driven by the entity's movement attributes."""
-
     def __init__(self, ai: "EntityAI"):
         self.ai = ai
         self.wanted_x: float | None = None
@@ -139,11 +128,10 @@ class MoveControl:
         if not self.ai.can_move(direction):
             self.ai.on_blocked(direction)
             return
-        entity.motion.x += entity.get_move_acceleration() * self.speed_modifier * direction
+        entity.motion.x += (
+            entity.get_move_acceleration() * self.speed_modifier * direction
+        )
 
-        # Request a jump only when the horizontal path is genuinely blocked
-        # and the common movement layer cannot step onto that obstacle.  Low
-        # slabs/snow/custom shapes are crossed directly via max_step_height.
         probe_dx = direction * max(abs(entity.motion.x), 0.16)
         _, blocked = entity._sweep_x(probe_dx)
         if entity.on_ground and blocked and not entity.can_step_up(probe_dx):
@@ -207,8 +195,6 @@ class JumpControl:
 
 
 class EntityAI:
-    """Base AI with target/action selectors and shared movement controls."""
-
     recalculate_interval = 2
 
     def __init__(self, entity):
@@ -222,17 +208,16 @@ class EntityAI:
         self.register_goals()
 
     def register_goals(self) -> None:
-        """Subclasses register target and action goals here."""
+        pass
 
     def can_move(self, direction: int) -> bool:
-        """Return whether the controller may accelerate in ``direction``."""
         return True
 
     def on_blocked(self, direction: int) -> None:
-        """Controller callback used by goals that need to choose a new path."""
+        pass
 
     def on_hurt(self, source) -> None:
-        """Optional damage notification for panic/retaliation behaviours."""
+        pass
 
     def tick(self) -> None:
         if getattr(self.entity, "no_ai", False):
@@ -374,7 +359,9 @@ class LookAtPlayerGoal(Goal):
         nearby = [player for player in players if self.ai.can_look_at(player)]
         if not nearby:
             return False
-        self.target = min(nearby, key=lambda player: self.ai.distance_squared_to(player))
+        self.target = min(
+            nearby, key=lambda player: self.ai.distance_squared_to(player)
+        )
         self.remaining_ticks = random.randint(40, 80)
         return True
 
@@ -419,8 +406,6 @@ class RandomLookAroundGoal(Goal):
 
 
 class PanicGoal(Goal):
-    """Run away briefly after receiving damage."""
-
     flags = frozenset({GoalFlag.MOVE})
 
     def can_use(self) -> bool:
@@ -443,8 +428,6 @@ class PanicGoal(Goal):
 
 
 class TemptGoal(Goal):
-    """Follow the nearest player holding a configured food item."""
-
     flags = frozenset({GoalFlag.MOVE, GoalFlag.LOOK})
 
     def __init__(self, ai: "PassiveMobAI"):
@@ -453,8 +436,7 @@ class TemptGoal(Goal):
 
     def _nearest(self):
         candidates = [
-            player for player in self.ai.iter_players()
-            if self.ai.is_tempting(player)
+            player for player in self.ai.iter_players() if self.ai.is_tempting(player)
         ]
         if not candidates:
             return None
@@ -485,8 +467,6 @@ class TemptGoal(Goal):
 
 
 class BreedGoal(Goal):
-    """Bring two in-love adults together; the entity owns offspring state."""
-
     flags = frozenset({GoalFlag.MOVE, GoalFlag.LOOK})
 
     def __init__(self, ai: "PassiveMobAI"):
@@ -541,7 +521,10 @@ class FollowParentGoal(Goal):
         if not getattr(self.entity, "is_baby", False) or not callable(finder):
             return False
         self.parent = finder(8.0)
-        return self.parent is not None and self.ai.distance_squared_to(self.parent) > 2.0 * 2.0
+        return (
+            self.parent is not None
+            and self.ai.distance_squared_to(self.parent) > 2.0 * 2.0
+        )
 
     def can_continue(self) -> bool:
         distance = self.ai.distance_squared_to(self.parent)
@@ -559,8 +542,6 @@ class FollowParentGoal(Goal):
 
 
 class EatGrassGoal(Goal):
-    """Forty-tick sheep grazing action with a synced head animation."""
-
     flags = frozenset({GoalFlag.MOVE, GoalFlag.LOOK})
 
     def __init__(self, ai: "PassiveMobAI"):
@@ -592,8 +573,6 @@ class EatGrassGoal(Goal):
 
 
 class PassiveMobAI(EntityAI):
-    """Shared non-hostile animal behaviour and terrain safety policy."""
-
     def __init__(self, entity):
         self.panic_ticks = 0
         self.panic_direction = random.choice((-1, 1))
@@ -612,7 +591,8 @@ class PassiveMobAI(EntityAI):
     def iter_players(self):
         players = getattr(getattr(self.entity.world, "server", None), "players", ())
         return (
-            player for player in players
+            player
+            for player in players
             if getattr(player, "world", None) is self.entity.world
             and int(getattr(player, "z", 0)) == int(getattr(self.entity, "z", 0))
             and getattr(player, "health", 0) > 0
@@ -644,7 +624,9 @@ class PassiveMobAI(EntityAI):
         tempt_range = max(0.0, float(getattr(self.entity, "tempt_range", 10.0)))
         if self.distance_squared_to(player) > tempt_range * tempt_range:
             return False
-        return self._held_item_id(player) in set(getattr(self.entity, "tempt_items", ()))
+        return self._held_item_id(player) in set(
+            getattr(self.entity, "tempt_items", ())
+        )
 
     def on_hurt(self, source) -> None:
         self.panic_ticks = random.randint(80, 140)
@@ -661,7 +643,9 @@ class PassiveMobAI(EntityAI):
             return True
         world = entity.world
         z = int(getattr(entity, "z", 0))
-        probe_x = entity.x + entity.width * 0.5 + direction * (entity.width * 0.5 + 0.28)
+        probe_x = (
+            entity.x + entity.width * 0.5 + direction * (entity.width * 0.5 + 0.28)
+        )
         body_y = math.floor(entity.y + min(entity.height * 0.35, 0.45))
         try:
             body_block = world.get_block(math.floor(probe_x), body_y, z)
@@ -671,7 +655,11 @@ class PassiveMobAI(EntityAI):
             for drop in range(0, 4):
                 support = world.get_block(math.floor(probe_x), floor_y - drop, z)
                 getter = getattr(support, "get_collision_box", None)
-                shape = getter() if callable(getter) else getattr(support, "collision_box", None)
+                shape = (
+                    getter()
+                    if callable(getter)
+                    else getattr(support, "collision_box", None)
+                )
                 if shape:
                     return True
         except (AttributeError, IndexError, TypeError, ValueError):
@@ -679,8 +667,7 @@ class PassiveMobAI(EntityAI):
         return False
 
     def on_blocked(self, direction: int) -> None:
-        # A blocked stroll will expire naturally; panic reverses so an animal
-        # does not keep pressing into a cliff edge for its whole panic window.
+
         if self.panic_ticks > 0:
             self.panic_direction = -direction
 
@@ -704,8 +691,6 @@ class SheepAI(PassiveMobAI):
 
 
 class HostileMobAI(EntityAI):
-    """Common AI implementation for mobs that actively attack players."""
-
     def register_goals(self) -> None:
         self.target_selector.add(2, NearestPlayerTargetGoal(self))
         self.goal_selector.add(0, FloatGoal(self))
@@ -731,7 +716,9 @@ class HostileMobAI(EntityAI):
         mode = getattr(getattr(player, "gamemode", None), "name_id", "survival")
         if mode in {"creative", "spectator"}:
             return False
-        distance = float(getattr(self.entity, "follow_range", 35.0)) + float(extra_range)
+        distance = float(getattr(self.entity, "follow_range", 35.0)) + float(
+            extra_range
+        )
         return self.distance_squared_to(player) <= distance * distance
 
     def can_look_at(self, player) -> bool:
@@ -773,10 +760,6 @@ class HostileMobAI(EntityAI):
 
 
 class ZombieAI(HostileMobAI):
-    """The default hostile goal set used by zombies."""
-
     def register_goals(self) -> None:
-        # Keep this override as the extension point for zombie-specific goals
-        # (sunlight avoidance, reinforcement calls, equipment, ...), while
-        # retaining the shared hostile target/attack/idle behaviour today.
+
         super().register_goals()

@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import pygame
 
 from resources.server.material_class import DamageableItem, Material, BlockItem, Food
@@ -8,21 +9,13 @@ from resources.server.utils import client_method
 _material_registry: dict[str, dict[str, type[Material]]] = {}
 
 
-def register_material(cls=None, /, *, aliases: tuple[str, ...] = (), name_spaced_key='minecraft'):
-    """Decorator – register *cls* (and optional aliases) in ``_material_registry``.
-
-    Usage::
-
-        @register_material
-        class APPLE(Material):
-            name_id = "apple"
-
-        @register_material(aliases=("seeds",))
-        class WHEAT_SEEDS(Material):
-            name_id = "wheat_seeds"
-    """
+def register_material(
+    cls=None, /, *, aliases: tuple[str, ...] = (), name_spaced_key="minecraft"
+):
     if cls is None:
-        return lambda c: register_material(c, aliases=aliases, name_spaced_key=name_spaced_key)
+        return lambda c: register_material(
+            c, aliases=aliases, name_spaced_key=name_spaced_key
+        )
     namespace = _material_registry.setdefault(name_spaced_key, {})
     namespace[cls.name_id] = cls
     for alias in aliases:
@@ -36,17 +29,20 @@ class DIRT(BlockItem):
     name = "tile.dirt.name"
     target_block_id = "dirt"
 
+
 @register_material
 class AIR(BlockItem):
     name_id = "air"
     name = "tile.air.name"
     target_block_id = "air"
 
+
 @register_material
 class GLOWSTONE(BlockItem):
     name_id = "glowstone"
     name = "tile.lightgem.name"
     target_block_id = "glowstone"
+
 
 @register_material
 class SAND(BlockItem):
@@ -62,17 +58,20 @@ class COBBLESTONE(BlockItem):
     target_block_id = "cobblestone"
     Tags = (ItemTag.COBBLESTONE,)
 
+
 @register_material
 class WATER(BlockItem):
     name_id = "water"
     name = "tile.water.name"
     target_block_id = "water"
 
+
 @register_material
 class LAVA(BlockItem):
     name_id = "lava"
     name = "tile.lava.name"
     target_block_id = "lava"
+
 
 @register_material
 class APPLE(Food):
@@ -232,13 +231,12 @@ class EGG(Material):
 
 
 class CropPlantingMaterial(Material):
-    """An item that plants a crop while keeping block imports lazy."""
-
     crop_block_id = None
 
     @classmethod
     def create_crop(cls):
         from resources.server.blocks import get_block_by_id
+
         return get_block_by_id(cls.crop_block_id)
 
 
@@ -402,12 +400,12 @@ class Tool(DamageableItem):
         )
 
     @client_method
-    def get_anchor(self, client = None):
+    def get_anchor(self, client=None):
         """
         用于获取渲染时客户端的手持点位，第三个值为缩放倍率，第四个参数为旋转度数（角度制）
         :return:
         """
-        return {'anchor':(0.7,0.7),'offset':(0, 0),'scale':0.8,'rotation':-135}
+        return {"anchor": (0.7, 0.7), "offset": (0, 0), "scale": 0.8, "rotation": -135}
 
 
 @register_material
@@ -453,11 +451,13 @@ class DIAMOND_PICKAXE(WOODEN_PICKAXE):
     attack_damage_modifier = 4.0
     max_damage = 1561
 
+
 @register_material
 class TORCH(BlockItem):
     name_id = "torch"
     name = "tile.torch.name"
     target_block_id = "torch"
+
 
 @register_material
 class WOODEN_HOE(Tool):
@@ -472,15 +472,13 @@ class WOODEN_HOE(Tool):
         return self.damage_stack(stack, 1, holder)
 
 
-class SNOWBALL(Material):
-    ...
+class SNOWBALL(Material): ...
 
 
 _block_item_types: dict[str, type[BlockItem]] = {}
 
 
 def get_block_item(block):
-    """Return a stackable inventory material for a mined block instance."""
     block_id = getattr(block, "block_id", "air")
     if block_id == "air":
         return AIR()
@@ -489,32 +487,30 @@ def get_block_item(block):
         item_type = type(
             f"{block_id.title().replace('_', '')}Item",
             (BlockItem,),
-            {"name_id": block_id, "name": getattr(block, "name", block_id),
-             "target_block_id": block_id},
+            {
+                "name_id": block_id,
+                "name": getattr(block, "name", block_id),
+                "target_block_id": block_id,
+            },
         )
         _block_item_types[block_id] = item_type
     return item_type()
 
 
 def get_material_by_id(material_id: str):
-    """Resolve a wire-format material id, including generated block items.
-
-    Material subclasses decorated with :func:`register_material` are looked up
-    automatically — no hand-maintained dictionary is needed.
-    """
     material_id = str(material_id)
-    if ':' in material_id:
-        namespace, key = material_id.split(':', 1)
+    if ":" in material_id:
+        namespace, key = material_id.split(":", 1)
     else:
-        namespace, key = 'minecraft', material_id
+        namespace, key = "minecraft", material_id
     material_type = _material_registry.get(namespace, {}).get(key)
     if material_type is not None:
         return material_type()
     from resources.server import blocks
+
     if blocks.has_block_id(key):
         return get_block_item(blocks.get_block_by_id(key))
-    # Recipes may use plural forms (e.g. "oak_planks") while block IDs
-    # are singular ("oak_plank").  Try stripping a trailing 's'.
-    if key.endswith('s') and blocks.has_block_id(key[:-1]):
+
+    if key.endswith("s") and blocks.has_block_id(key[:-1]):
         return get_block_item(blocks.get_block_by_id(key[:-1]))
     return AIR()

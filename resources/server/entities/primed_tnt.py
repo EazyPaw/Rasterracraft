@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import random
 
 import pygame
@@ -13,13 +14,12 @@ from resources.server.utils import client_method
 
 @register_entity(summonable=False)
 class PrimedTNT(Entity):
-    """A moving TNT fuse whose countdown and explosion live on the server."""
-
     entity_id = "primed_tnt"
     translation_key = "entity.PrimedTnt.name"
 
-    def __init__(self, x: float, y: float, z: int, world, *, fuse: int = 80,
-                 owner=None):
+    def __init__(
+        self, x: float, y: float, z: int, world, *, fuse: int = 80, owner=None
+    ):
         super().__init__(float(x), float(y), world)
         self.entity_id = "primed_tnt"
         self.z = int(z)
@@ -110,20 +110,20 @@ class PrimedTNT(Entity):
             return
 
         if self.fuse % 2 == 0:
-            self.world.spawn_particle(SMOKE(
-                self.x + self.width * 0.5,
-                self.y + self.height + 0.08,
-                self.z,
-                count=1,
-                motion=(0.0, 0.015),
-                data={"motion_spread": [0.008, 0.006]},
-            ))
+            self.world.spawn_particle(
+                SMOKE(
+                    self.x + self.width * 0.5,
+                    self.y + self.height + 0.08,
+                    self.z,
+                    count=1,
+                    motion=(0.0, 0.015),
+                    data={"motion_spread": [0.008, 0.006]},
+                )
+            )
         self.move_update()
 
 
 class PrimedTNTSkeleton(EntitySkeleton):
-    """Flashing, pulsing TNT renderer kept beside its server entity."""
-
     @client_method
     def __init__(self, entity, client=None):
         super().__init__(client, "blocks.tnt_side", entity)
@@ -141,7 +141,6 @@ class PrimedTNTSkeleton(EntitySkeleton):
         if texture is None:
             return
 
-        # The last half second swells rapidly, matching TNT's warning pulse.
         pulse = 0.0
         if fuse < 10:
             pulse = (1.0 - fuse / 10.0) ** 4 * 0.30
@@ -151,16 +150,20 @@ class PrimedTNTSkeleton(EntitySkeleton):
         else:
             texture = texture.copy()
 
-        # Alternate every two game ticks with a bright overlay.
         if (fuse // 2) % 2 == 0:
             texture.fill((105, 105, 105, 0), special_flags=pygame.BLEND_RGB_ADD)
         tint = render.get_world_light_tint(self.entity.x + 0.5, self.entity.y + 0.5)
         texture = render.get_tinted_surface(texture, tint)
-        sx, sy = render.trans_world_location((
-            self.entity.x + self.entity.width * 0.5,
-            self.entity.y + self.entity.height * 0.5,
-        ))
-        render.blit(texture, (
-            round(sx - texture.get_width() * 0.5),
-            round(sy - texture.get_height() * 0.5),
-        ))
+        sx, sy = render.trans_world_location(
+            (
+                self.entity.x + self.entity.width * 0.5,
+                self.entity.y + self.entity.height * 0.5,
+            )
+        )
+        render.blit(
+            texture,
+            (
+                round(sx - texture.get_width() * 0.5),
+                round(sy - texture.get_height() * 0.5),
+            ),
+        )

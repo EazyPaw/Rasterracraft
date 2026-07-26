@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "1"
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 
 try:
     import colorlog
@@ -31,23 +31,27 @@ if __name__ == "__main__":
     # 配置日志：子进程模式下 colorlog 可能未安装，降级为标准 logging
     if HAS_COLORLOG:
         handler = colorlog.StreamHandler()
-        handler.setFormatter(colorlog.ColoredFormatter(
-            '%(log_color)s[%(asctime)s %(levelname)s] - %(message)s',
-            datefmt='%H:%M:%S',
-            log_colors={
-                'DEBUG': 'light_black',
-                'INFO': 'white',
-                'WARNING': 'yellow',
-                'ERROR': 'light_red',
-                'CRITICAL': 'red,bg_white',
-            }
-        ))
+        handler.setFormatter(
+            colorlog.ColoredFormatter(
+                "%(log_color)s[%(asctime)s %(levelname)s] - %(message)s",
+                datefmt="%H:%M:%S",
+                log_colors={
+                    "DEBUG": "light_black",
+                    "INFO": "white",
+                    "WARNING": "yellow",
+                    "ERROR": "light_red",
+                    "CRITICAL": "red,bg_white",
+                },
+            )
+        )
     else:
         handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(logging.Formatter(
-            '[%(asctime)s %(levelname)s] - %(message)s',
-            datefmt='%H:%M:%S',
-        ))
+        handler.setFormatter(
+            logging.Formatter(
+                "[%(asctime)s %(levelname)s] - %(message)s",
+                datefmt="%H:%M:%S",
+            )
+        )
 
     logger = logging.getLogger()
     logger.addHandler(handler)

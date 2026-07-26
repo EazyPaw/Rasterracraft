@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import math
 
 
@@ -14,11 +15,13 @@ class Location:
     def __str__(self):
         return f"world={self.world.id_name}, x={self.x}, y={self.y}, z={self.z}"
 
-def decide_x_or_loc(x_loc: int | Location, y: int | None = None, z: int | None  = None):
+
+def decide_x_or_loc(x_loc: int | Location, y: int | None = None, z: int | None = None):
     if isinstance(x_loc, Location):
         return x_loc.x, x_loc.y, x_loc.z
     else:
         return x_loc, y, z
+
 
 class Vector:
     def __init__(self, x, y):

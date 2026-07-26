@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import random
 
 from resources.server.entities.collectible import CollectibleEntity
@@ -82,11 +83,9 @@ class Item(CollectibleEntity):
             self.pick_up(player)
 
     def escape_solid_block(self) -> bool:
-        """Push a trapped drop toward the nearest free side without teleporting."""
         return super().escape_solid_block()
 
     def can_merge_with(self, other) -> bool:
-        """Return whether ``other`` can contribute to this item stack."""
         return (
             isinstance(other, Item)
             and other is not self
@@ -95,19 +94,11 @@ class Item(CollectibleEntity):
             and self.z == other.z
             and not self.item.is_empty()
             and not other.item.is_empty()
-            and self.item.is_stackable_with(
-                other.item, require_full_fit=False
-            )
+            and self.item.is_stackable_with(other.item, require_full_fit=False)
             and self.item.amount < self.item.max_stack_size
         )
 
     def merge_nearby_items(self) -> None:
-        """Merge matching nearby drops, capped by the material stack limit.
-
-        Offsets and copy rendering are client concerns; the server owns the
-        single authoritative stack.  The younger age is retained so merging
-        never shortens the remaining lifetime of either drop.
-        """
         entities = tuple(getattr(self.world, "entities", {}).values())
         for other in entities:
             if not self.can_merge_with(other):
@@ -139,11 +130,10 @@ class Item(CollectibleEntity):
         return True
 
     def get_hurt_sound(self, damage_type, actual_damage: float) -> None:
-        """Dropped items take damage silently."""
         return None
 
     def update(self):
         super().update()
 
+
 # 负责物品渲染的类在 client_entity.py 中的 ItemEntityRenderer
-        

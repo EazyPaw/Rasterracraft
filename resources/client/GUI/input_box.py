@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 """Minecraft 风格的单行文本输入框组件。
 
 支持光标操作、文本选择、占位符、剪贴板粘贴，以及窗口大小自适应。
@@ -23,7 +24,7 @@ class InputBox:
 
     # ---- 默认尺寸与纹理键 ----
     DEFAULT_SIZE = (300, 40)
-    NORMAL_TEXTURE = "gui.sprites.widget.text_field"                # 普通状态
+    NORMAL_TEXTURE = "gui.sprites.widget.text_field"  # 普通状态
     HIGHLIGHTED_TEXTURE = "gui.sprites.widget.text_field_highlighted"  # 聚焦/悬停状态
 
     def __init__(
@@ -47,25 +48,25 @@ class InputBox:
         on_change: Callable[[str], None] | None = None,
         on_submit: Callable[[str], None] | None = None,
     ):
-        """
-        参数:
-            text: 初始文本内容
-            placeholder: 占位符文本（输入框为空时显示）
-            label: 标签文本（显示在输入框上方，为空则不显示）
-            size: 组件尺寸 (宽, 高)
-            enabled: 是否启用交互
-            visible: 是否可见
-            max_length: 最大字符数限制（None 为不限制）
-            font_size: 正文字体大小（0 = 自动根据高度计算）
-            placeholder_font_size: 占位符字体大小（None = 与正文相同）
-            label_font_size: 标签字体大小（None = 与正文相同）
-            text_color: 正文颜色
-            placeholder_color: 占位符颜色
-            label_color: 标签颜色
-            disabled_text_color: 禁用状态下的文字颜色
-            padding: 文本区域水平内边距（0 = 自动根据宽度计算）
-            on_change: 文本变化回调，接收新文本
-            on_submit: 回车提交回调，接收当前文本
+        """初始化单行输入框。
+
+        :param text: 初始文本。
+        :param placeholder: 输入框为空时显示的占位文本。
+        :param label: 输入框上方的标签文本。
+        :param size: 组件尺寸，格式为“宽、高”。
+        :param enabled: 是否允许交互。
+        :param visible: 是否绘制组件。
+        :param max_length: 最大字符数；None 表示不限。
+        :param font_size: 正文字体大小；0 表示自动计算。
+        :param placeholder_font_size: 占位符字体大小；None 时沿用正文字号。
+        :param label_font_size: 标签字体大小；None 时沿用正文字号。
+        :param text_color: 正文颜色。
+        :param placeholder_color: 占位符颜色。
+        :param label_color: 标签颜色。
+        :param disabled_text_color: 禁用状态的文字颜色。
+        :param padding: 水平内边距；0 表示自动计算。
+        :param on_change: 文本变更回调，参数为新文本。
+        :param on_submit: 提交回调，参数为当前文本。
         """
         self.placeholder = placeholder
         self.label = label
@@ -74,7 +75,7 @@ class InputBox:
         self.visible = visible
         self.max_length = max_length
         if self.max_length is not None:
-            text = text[:self.max_length]
+            text = text[: self.max_length]
         self.text = text
 
         # 字体与样式（0 / None 表示自动根据 rect 大小计算）
@@ -92,10 +93,10 @@ class InputBox:
 
         # ---- 状态 ----
         self.rect = pygame.Rect(0, 0, *size)
-        self.focused = False      # 是否已聚焦
-        self.hovered = False      # 鼠标是否悬停在组件上
+        self.focused = False  # 是否已聚焦
+        self.hovered = False  # 鼠标是否悬停在组件上
         self.cursor_pos = len(text)
-        self._text_scroll = 0     # 水平滚动偏移（像素）
+        self._text_scroll = 0  # 水平滚动偏移（像素）
         self._last_cursor_toggle = 0
         self._cursor_visible = True
         self._metrics_font: pygame.font.Font | None = None
@@ -134,12 +135,12 @@ class InputBox:
     def set_text(self, text: str, *, notify: bool = True):
         """设置文本内容并触发回调。
 
-        参数:
-            text: 新文本
-            notify: 是否触发 on_change 回调
+        :param text: 新文本
+        :param notify: 是否触发 on_change 回调
+
         """
         if self.max_length is not None:
-            text = text[:self.max_length]
+            text = text[: self.max_length]
         self.text = text
         self.cursor_pos = len(self.text)
         if notify and self.on_change is not None:
@@ -224,7 +225,11 @@ class InputBox:
 
     def _draw_box(self, render):
         """绘制输入框背景（聚焦或悬停时高亮）。"""
-        texture_key = self.HIGHLIGHTED_TEXTURE if self.focused or self.hovered else self.NORMAL_TEXTURE
+        texture_key = (
+            self.HIGHLIGHTED_TEXTURE
+            if self.focused or self.hovered
+            else self.NORMAL_TEXTURE
+        )
         texture = render.client.resources_manager.get_texture_img(texture_key)
         if texture is not None:
             texture = render.scale_surface(texture, self.rect.size)
@@ -286,7 +291,9 @@ class InputBox:
         inner = self._inner_rect()
         font_size = self._eff_font_size()
         font = render.get_font(font_size)
-        cursor_x = inner.x + font.size(self.text[:self.cursor_pos])[0] - self._text_scroll
+        cursor_x = (
+            inner.x + font.size(self.text[: self.cursor_pos])[0] - self._text_scroll
+        )
         cursor_x = max(inner.x, min(inner.right - 1, cursor_x))
         request = getattr(render, "request_text_input", None)
         if callable(request):
@@ -295,7 +302,9 @@ class InputBox:
             return
         cursor_top = inner.y + max(2, inner.height // 6)
         cursor_bottom = inner.bottom - max(2, inner.height // 6)
-        render.draw_line((255, 255, 255), (cursor_x, cursor_top), (cursor_x, cursor_bottom), 2)
+        render.draw_line(
+            (255, 255, 255), (cursor_x, cursor_top), (cursor_x, cursor_bottom), 2
+        )
 
     # ===================== 键盘处理 =====================
 
@@ -313,13 +322,17 @@ class InputBox:
             return True
         if event.key == pygame.K_BACKSPACE:
             if self.cursor_pos > 0:
-                self.text = self.text[:self.cursor_pos - 1] + self.text[self.cursor_pos:]
+                self.text = (
+                    self.text[: self.cursor_pos - 1] + self.text[self.cursor_pos :]
+                )
                 self.cursor_pos -= 1
                 self._notify_change()
             return True
         if event.key == pygame.K_DELETE:
             if self.cursor_pos < len(self.text):
-                self.text = self.text[:self.cursor_pos] + self.text[self.cursor_pos + 1:]
+                self.text = (
+                    self.text[: self.cursor_pos] + self.text[self.cursor_pos + 1 :]
+                )
                 self._notify_change()
             return True
         if event.key == pygame.K_LEFT:
@@ -356,7 +369,7 @@ class InputBox:
             if remaining <= 0:
                 return
             text = text[:remaining]
-        self.text = self.text[:self.cursor_pos] + text + self.text[self.cursor_pos:]
+        self.text = self.text[: self.cursor_pos] + text + self.text[self.cursor_pos :]
         self.cursor_pos += len(text)
         self._notify_change()
 
@@ -378,7 +391,7 @@ class InputBox:
 
     def _update_scroll(self, font: pygame.font.Font, max_width: int):
         """更新水平滚动偏移，使光标始终可见。"""
-        cursor_px = font.size(self.text[:self.cursor_pos])[0]
+        cursor_px = font.size(self.text[: self.cursor_pos])[0]
         if cursor_px - self._text_scroll < 0:
             self._text_scroll = cursor_px
         if cursor_px - self._text_scroll > max_width - 4:

@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import random
 
 from resources.client.entity_skeleton import BodyPart, Pose
@@ -5,7 +6,13 @@ from resources.server.entities.animal import Animal, QuadrupedSkeleton, crop_x_s
 from resources.server.entity_AI import CowAI
 from resources.server.entity_registry import register_entity
 from resources.server.item_class import ItemStack
-from resources.server.materials import BUCKET, COOKED_BEEF, LEATHER, MILK_BUCKET, RAW_BEEF
+from resources.server.materials import (
+    BUCKET,
+    COOKED_BEEF,
+    LEATHER,
+    MILK_BUCKET,
+    RAW_BEEF,
+)
 from resources.server.utils import client_method
 
 
@@ -76,23 +83,37 @@ class CowSkeleton(QuadrupedSkeleton):
         super().__init__(entity, "entity.cow.cow", client=client)
         self.model_width = 1.35
         self.configure_quadruped(
-            body_uv=(18, 4), body_size=(12, 18, 10),
-            head_uv=(0, 0), head_size=(8, 8, 6),
-            leg_uv=(0, 16), leg_size=(4, 12, 4),
-            body_anchor=(0.10, 1.375), head_anchor=(1.2875, 1.13),
-            rear_leg_anchor=(0.325, 0.75), front_leg_anchor=(0.975, 0.75),
+            body_uv=(18, 4),
+            body_size=(12, 18, 10),
+            head_uv=(0, 0),
+            head_size=(8, 8, 6),
+            leg_uv=(0, 16),
+            leg_size=(4, 12, 4),
+            body_anchor=(0.10, 1.375),
+            head_anchor=(1.2875, 1.13),
+            rear_leg_anchor=(0.325, 0.75),
+            front_leg_anchor=(0.975, 0.75),
         )
         horn = crop_x_side(self.texture, (22, 0), (1, 3, 1))
         udder = crop_x_side(self.texture, (52, 0), (4, 6, 1))
         self._base_anchors.update({"horn": (1.28125, 1.3225), "udder": (0.38, 0.83)})
-        self.body["horn"] = BodyPart("horn", horn, self._base_anchors["horn"], (0.5, 3), layer=3)
-        self.body["udder"] = BodyPart("udder", udder, self._base_anchors["udder"], (0, 0), layer=1)
+        self.body["horn"] = BodyPart(
+            "horn", horn, self._base_anchors["horn"], (0.5, 3), layer=3
+        )
+        self.body["udder"] = BodyPart(
+            "udder", udder, self._base_anchors["udder"], (0, 0), layer=1
+        )
         self._visual_center = (0.675, 0.7)
         self.conv_size()
 
     def apply_extra_pose(self, flip: bool, swing: float) -> None:
         for name in ("horn", "udder"):
-            self.body[name].set_pose(Pose(
-                self.pose_anchor(name, self._base_anchors[name], flip),
-                self.body[name].target_pivot, 0.0, True, flip,
-            ))
+            self.body[name].set_pose(
+                Pose(
+                    self.pose_anchor(name, self._base_anchors[name], flip),
+                    self.body[name].target_pivot,
+                    0.0,
+                    True,
+                    flip,
+                )
+            )

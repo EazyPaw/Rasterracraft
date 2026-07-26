@@ -1,3 +1,4 @@
+# Commented and arranged by ChatGPT
 import time
 from typing import TYPE_CHECKING
 
@@ -10,13 +11,13 @@ if TYPE_CHECKING:
 class GameManager:
     """游戏管理器，负责处理游戏主循环、输入处理和玩家状态同步"""
 
-    def __init__(self, client: 'Client'):
+    def __init__(self, client: "Client"):
         self.client = client
         self.running = True
         self.last_pressed_time = {}
         self.last_space_time = 0.0
         self.event_queue = []
-        self.ing_mouse_lock = 0 # 鼠标锁，大于0时鼠标的操作不会影响游戏内动作（大于零时的数值即占用鼠标的GUI个数）
+        self.ing_mouse_lock = 0  # 鼠标锁，大于0时鼠标的操作不会影响游戏内动作（大于零时的数值即占用鼠标的GUI个数）
         # GUI 关闭时，物理上仍按住的键不能立即“穿透”回游戏。
         # 等所有键鼠释放后才恢复游戏输入，适用于聊天、背包等所有 GUI。
         self._wait_for_input_release = False
@@ -80,9 +81,7 @@ class GameManager:
         self.handle_events()
         self.handle_key_pressed()
         player = self.client.client_player
-        # Event handling can leave the current world.  That transition is the
-        # only missing-player case we need to tolerate; gameplay AttributeError
-        # exceptions must not be swallowed and retried every frame.
+
         if player is None:
             return
         self.sync_player_camera()
@@ -91,9 +90,7 @@ class GameManager:
         self.client.particle_manager.update()
         self.client.client_world.tick_fluid_sounds()
 
-    def client_tick(self):
-        ...
-
+    def client_tick(self): ...
 
     def handle_key_pressed(self):
         """处理键盘输入"""
@@ -102,7 +99,8 @@ class GameManager:
         keys = pygame.key.get_pressed()
         mouse_button = pygame.mouse.get_pressed()
         for key, action in self.client.hold_key_map.items():
-            if type(key) == str: continue
+            if type(key) == str:
+                continue
             if keys[key]:
                 action()
                 self.last_pressed_time[key] = time.perf_counter()
@@ -124,10 +122,15 @@ class GameManager:
                     player.game_mode.left_click_on_entity(player.choosing_entity)
                     self.client.hold_mouse_buttons[0] = True
                     player.skeleton.trigger_swing()
-                elif player.choosing_block is not None and (loc := player.choosing_block.location) is not None:
+                elif (
+                    player.choosing_block is not None
+                    and (loc := player.choosing_block.location) is not None
+                ):
                     x = loc.x
                     y = loc.y
-                    self.client.hold_key_map["mouse_left"](self.client.client_world.get_block(x, y, 0))
+                    self.client.hold_key_map["mouse_left"](
+                        self.client.client_world.get_block(x, y, 0)
+                    )
                     self.client.hold_mouse_buttons[0] = True
                     player.skeleton.trigger_swing()
             else:
@@ -137,15 +140,19 @@ class GameManager:
                     player.game_mode.right_click_on_entity(player.choosing_entity)
                     self.client.hold_mouse_buttons[2] = True
                     player.skeleton.trigger_swing()
-                elif player.choosing_block is not None and (loc := player.choosing_block.location) is not None:
+                elif (
+                    player.choosing_block is not None
+                    and (loc := player.choosing_block.location) is not None
+                ):
                     x = loc.x
                     y = loc.y
-                    self.client.hold_key_map["mouse_right"](self.client.client_world.get_block(x, y, 0))
+                    self.client.hold_key_map["mouse_right"](
+                        self.client.client_world.get_block(x, y, 0)
+                    )
                     self.client.hold_mouse_buttons[2] = True
                     player.skeleton.trigger_swing()
             else:
                 self.client.hold_mouse_buttons[2] = False
-
 
     def sync_player_camera(self):
         """同步玩家位置到相机。
@@ -155,11 +162,11 @@ class GameManager:
         if player is None:
             return
         # 视觉模型中心 Y = 玩家脚底 + 视觉高度的一半
-        visual_mid_y = player.y + player.skeleton.size * player.skeleton.AUTHORED_HEIGHT_BLOCKS / 2
+        visual_mid_y = (
+            player.y + player.skeleton.size * player.skeleton.AUTHORED_HEIGHT_BLOCKS / 2
+        )
         self.client.render.camera.move_to(
-            player.x + player.width / 2 - 0.5,
-            visual_mid_y + 0.5,
-            1 / self.client.rate
+            player.x + player.width / 2 - 0.5, visual_mid_y + 0.5, 1 / self.client.rate
         )
 
     def handle_events(self):
@@ -187,7 +194,9 @@ class GameManager:
                     now = time.perf_counter()
                     last = self.last_pressed_time.get(pygame.K_SPACE, 0)
                     if now - last < 0.2 and self.client.client_player.flyable:
-                        self.client.client_player.flying = not self.client.client_player.flying
+                        self.client.client_player.flying = (
+                            not self.client.client_player.flying
+                        )
                     self.last_pressed_time[pygame.K_SPACE] = now
                 if event.key in self.client.key_map:
                     self.client.key_map[event.key]()
@@ -217,5 +226,3 @@ class GameManager:
     def stop(self):
         """停止游戏循环"""
         self.running = False
-
-
