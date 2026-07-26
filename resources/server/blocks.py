@@ -17,6 +17,7 @@ from resources.server.materials import (
 )
 from resources.server.tags import BlockTag
 from resources.server.utils import client_method
+from resources.server.inventory import Inventory
 
 
 class AIR(Block):
@@ -624,6 +625,365 @@ class CRAFTING_TABLE(Block):
     hardness = 2.5
     preferred_tool = 'axe'
 
+
+class FurnaceInventory(Inventory):
+    def __init__(self, furnace):
+        super().__init__(3)
+        self.furnace = furnace
+
+    def can_place(self, slot, stack) -> bool:
+        from resources.server.smelting import find_smelting_recipe, is_fuel
+        slot = int(slot)
+        if stack is None or stack.is_empty():
+            return True
+        if slot == 0:
+            recipe = find_smelting_recipe(stack)
+            return recipe is not None and recipe.create_result() is not None
+        if slot == 1:
+            return is_fuel(stack)
+        return False
+
+    def on_changed(self) -> None:
+        self.furnace.on_inventory_changed()
+
+    def on_take(self, slot: int, amount: int, player=None) -> None:
+        if int(slot) == 2 and amount > 0:
+            self.furnace.on_output_taken(int(amount), player)
+
+
+class FURNACE(Block):
+    block_id = "furnace"
+    name = "tile.furnace.name"
+    _texture_path = "blocks.furnace_front_off"
+    break_sound = "dig.stone"
+    hardness = 3.5
+    blast_resistance = 3.5
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    lit = False
+    _state_texture_cache = {}
+
+    def __init__(self, nbt=None):
+        self.inventory = FurnaceInventory(self)
+        self.burn_time = 0
+        self.burn_time_total = 0
+        self.cook_time = 0
+        self.cook_time_total = 200
+        self.stored_experience = 0.0
+        self.stored_output_items = 0
+        self._viewers = set()
+        super().__init__()
+        if nbt:
+            self.write_nbt(nbt)
+
+    @property
+    def container_id(self) -> str:
+        if self.location is None:
+            return "furnace:unplaced"
+        return "furnace:{},{},{}".format(
+            int(self.location.x), int(self.location.y), int(self.location.z),
+        )
+
+    def parse_nbt(self) -> dict:
+        from resources.server.inventory import serialize_inventory
+        return {
+            "items": serialize_inventory(self.inventory),
+            "burn_time": max(0, int(self.burn_time)),
+            "burn_time_total": max(0, int(self.burn_time_total)),
+            "cook_time": max(0, int(self.cook_time)),
+            "cook_time_total": max(1, int(self.cook_time_total)),
+            "stored_experience": max(0.0, float(self.stored_experience)),
+            "stored_output_items": max(0, int(self.stored_output_items)),
+            "lit": bool(self.lit),
+        }
+
+    def write_nbt(self, nbt):
+        import ast
+        from resources.server.inventory import restore_inventory
+
+        if isinstance(nbt, str):
+            nbt = ast.literal_eval(nbt)
+        if not isinstance(nbt, dict):
+            return
+        restore_inventory(self.inventory, nbt.get("items", []))
+        for key in ("burn_time", "burn_time_total", "cook_time",
+                    "cook_time_total", "stored_output_items"):
+            try:
+                value = int(nbt.get(key, getattr(self, key)))
+            except (TypeError, ValueError):
+                continue
+            setattr(self, key, max(1, value) if key == "cook_time_total" else max(0, value))
+        try:
+            self.stored_experience = max(
+                0.0, float(nbt.get("stored_experience", self.stored_experience)),
+            )
+        except (TypeError, ValueError):
+            pass
+        self.lit = bool(nbt.get("lit", self.burn_time > 0))
+
+    def get_texture_path(self) -> str:
+        return (
+            "blocks.furnace_front_on"
+            if self.lit
+            else "blocks.furnace_front_off"
+        )
+
+    @client_method
+    def get_texture(self, size, client):
+        size = max(1, int(round(size)))
+        path = self.get_texture_path()
+        original = client.resources_manager.get_texture_img(path)
+        if original is None:
+            return None
+        key = (path, size, original)
+        texture = self._state_texture_cache.get(key)
+        if texture is None:
+            texture = pygame.transform.scale(original, (size, size))
+            self._state_texture_cache[key] = texture
+            if len(self._state_texture_cache) > 16:
+                self._state_texture_cache.pop(next(iter(self._state_texture_cache)))
+        if self.has_transparent_pixels is None:
+            self.has_transparent_pixels = (
+                client.resources_manager.has_transparent_pixels(original)
+            )
+        return texture
+
+    def get_light_state(self) -> tuple[bool, int, int]:
+        return bool(self.solid), int(self.light_attenuation), 13 if self.lit else 0
+
+    def on_load(self) -> None:
+        if self.location is not None:
+            register = getattr(self.location.world, "register_ticking_block", None)
+            if callable(register):
+                register(self)
+
+    def on_unload(self) -> None:
+        if self.location is not None:
+            unregister = getattr(self.location.world, "unregister_ticking_block", None)
+            if callable(unregister):
+                unregister(self)
+        self.close_all_viewers()
+
+    def _state_packet(self, packet_class="FurnaceUpdate") -> dict:
+        from resources.server.inventory import serialize_inventory
+        packet = {
+            "__class__": packet_class,
+            "container": self.container_id,
+            "slots": serialize_inventory(self.inventory),
+            "burn_time": max(0, int(self.burn_time)),
+            "burn_time_total": max(0, int(self.burn_time_total)),
+            "cook_time": max(0, int(self.cook_time)),
+            "cook_time_total": max(1, int(self.cook_time_total)),
+            "lit": bool(self.lit),
+        }
+        if self.location is not None:
+            packet["x"] = int(self.location.x)
+            packet["y"] = int(self.location.y)
+            packet["z"] = int(self.location.z)
+        return packet
+
+    def sync_viewers(self, packet_class="FurnaceUpdate") -> None:
+        if self.location is None:
+            return
+        server = getattr(self.location.world, "server", None)
+        if server is None:
+            return
+        packet = self._state_packet(packet_class)
+        for player in tuple(self._viewers):
+            if player.get_inventory_container(self.container_id) is not self.inventory:
+                self._viewers.discard(player)
+                continue
+            server.send_client_socket(player, packet, "Forward")
+
+    def open_for(self, player) -> None:
+        for container_id, container in tuple(player.open_inventory_containers.items()):
+            owner = getattr(container, "furnace", None)
+            if owner is not None and owner is not self:
+                owner.close_for(player)
+        player.register_inventory_container(self.container_id, self.inventory)
+        self._viewers.add(player)
+        server = getattr(self.location.world, "server", None)
+        if server is not None:
+            server.send_client_socket(
+                player, self._state_packet("FurnaceOpen"), "Forward",
+            )
+
+    def close_for(self, player) -> None:
+        if player.open_inventory_containers.get(self.container_id) is self.inventory:
+            player.unregister_inventory_container(self.container_id)
+        self._viewers.discard(player)
+
+    def close_all_viewers(self) -> None:
+        for player in tuple(self._viewers):
+            self.close_for(player)
+            server = getattr(getattr(self.location, "world", None), "server", None)
+            if server is not None:
+                server.send_client_socket(
+                    player,
+                    {"__class__": "FurnaceClosed", "container": self.container_id},
+                    "Forward",
+                )
+
+    def on_right_click(self, player) -> bool:
+        self.open_for(player)
+        return True
+
+    def _mark_contents_dirty(self) -> None:
+        if self.location is None:
+            return
+        world = self.location.world
+        world.mark_chunk_dirty(int(self.location.x) // 16)
+        world.invalidate_chunk_packet(int(self.location.x) // 16)
+
+    def on_inventory_changed(self) -> None:
+        self._mark_contents_dirty()
+        self.sync_viewers()
+
+    def _set_lit(self, lit: bool) -> None:
+        lit = bool(lit)
+        if self.lit == lit:
+            return
+        self.lit = lit
+        if self.location is not None:
+            world = self.location.world
+            world.schedule_light_recalculation(int(self.location.x) // 16)
+        self.notify_state_changed()
+
+    def _can_smelt(self, recipe) -> bool:
+        if recipe is None:
+            return False
+        result = recipe.create_result()
+        if result is None:
+            return False
+        output = self.inventory[2]
+        if output.is_empty():
+            return True
+        return (
+            output.is_stackable_with(result, require_full_fit=False)
+            and output.amount + result.amount <= output.max_stack_size
+        )
+
+    def _consume_fuel(self) -> int:
+        from resources.server.item_class import EmptyItemStack, ItemStack
+        from resources.server.materials import get_material_by_id
+        from resources.server.smelting import get_fuel_burn_time
+
+        fuel = self.inventory[1]
+        burn_time = get_fuel_burn_time(fuel)
+        if burn_time <= 0:
+            return 0
+        fuel_id = fuel.material.name_id
+        fuel.reduce_amount(1)
+        if fuel.is_empty():
+            if fuel_id == "lava_bucket":
+                self.inventory[1] = ItemStack(get_material_by_id("bucket"), 1)
+            else:
+                self.inventory[1] = EmptyItemStack()
+        self.burn_time = burn_time
+        self.burn_time_total = burn_time
+        return burn_time
+
+    def _finish_smelt(self, recipe) -> None:
+        from resources.server.item_class import EmptyItemStack
+
+        result = recipe.create_result()
+        if result is None:
+            return
+        source = self.inventory[0]
+        output = self.inventory[2]
+        source.reduce_amount(1)
+        if source.is_empty():
+            self.inventory[0] = EmptyItemStack()
+        if output.is_empty():
+            self.inventory[2] = result
+        else:
+            output.amount += result.amount
+        self.stored_experience += float(recipe.experience) * result.amount
+        self.stored_output_items += result.amount
+
+    def tick_server(self) -> None:
+        from resources.server.smelting import find_smelting_recipe
+
+        old_state = (
+            self.burn_time, self.burn_time_total, self.cook_time,
+            self.cook_time_total, self.lit,
+        )
+        if self.burn_time > 0:
+            self.burn_time -= 1
+
+        recipe = find_smelting_recipe(self.inventory[0])
+        can_smelt = self._can_smelt(recipe)
+        if recipe is not None:
+            self.cook_time_total = recipe.cooking_time
+
+        if self.burn_time <= 0 and can_smelt:
+            self._consume_fuel()
+
+        if self.burn_time > 0 and can_smelt:
+            self.cook_time += 1
+            if self.cook_time >= self.cook_time_total:
+                self.cook_time = 0
+                self._finish_smelt(recipe)
+        else:
+            self.cook_time = max(0, self.cook_time - 2)
+
+        self._set_lit(self.burn_time > 0)
+        new_state = (
+            self.burn_time, self.burn_time_total, self.cook_time,
+            self.cook_time_total, self.lit,
+        )
+        if old_state != new_state:
+            self._mark_contents_dirty()
+            self.sync_viewers()
+
+    @staticmethod
+    def _rounded_experience(value: float) -> int:
+        base = int(value)
+        return base + (1 if random.random() < value - base else 0)
+
+    def on_output_taken(self, amount: int, player=None) -> None:
+        amount = min(max(0, int(amount)), self.stored_output_items)
+        if amount <= 0 or self.stored_output_items <= 0:
+            return
+        share = self.stored_experience * amount / self.stored_output_items
+        self.stored_experience = max(0.0, self.stored_experience - share)
+        self.stored_output_items -= amount
+        experience = self._rounded_experience(share)
+        if experience > 0 and player is not None:
+            player.add_experience(experience)
+        self._mark_contents_dirty()
+
+    def on_break(self):
+        if self.location is None:
+            return
+        from resources.server.entities.item import Item
+        from resources.server.item_class import EmptyItemStack
+
+        world = self.location.world
+        for index in range(len(self.inventory)):
+            stack = self.inventory[index]
+            if stack.is_empty():
+                continue
+            world.spawn_entity(Item(
+                self.location.x + 0.5,
+                self.location.y + 0.45,
+                world,
+                stack,
+                int(self.location.z),
+            ))
+            self.inventory[index] = EmptyItemStack()
+        experience = self._rounded_experience(self.stored_experience)
+        if experience > 0:
+            world.spawn_experience(
+                self.location.x + 0.5,
+                self.location.y + 0.5,
+                int(self.location.z),
+                experience,
+            )
+        self.stored_experience = 0.0
+        self.stored_output_items = 0
+        self.close_all_viewers()
+
 class GLOWSTONE(Block):
     block_id = 'glowstone'
     name = 'tile.lightgem.name'
@@ -633,6 +993,17 @@ class GLOWSTONE(Block):
     break_sound = 'dig.glass'
     hardness = 0.3
     preferred_tool = 'pickaxe'
+
+class GLASS(Block):
+    block_id = "glass"
+    name = "tile.glass.name"
+    _texture_path = "blocks.glass"
+    break_sound = "dig.glass"
+    hardness = 0.3
+    light_attenuation = 1
+    suffocating = False
+    redstone_conducting = False
+    drops = ()
 
 class POPPY(Plant):
     block_id = 'poppy'
@@ -1341,3 +1712,11 @@ def get_block_by_id(block_id: str) -> Block:
         return cls()
     logging.error(f"Unknown block ID: {block_id}")
     return DIRT()
+
+
+def has_block_id(block_id: str) -> bool:
+    """Return whether a stable block id is registered without logging."""
+    global _BLOCK_REGISTRY
+    if _BLOCK_REGISTRY is None:
+        _BLOCK_REGISTRY = _build_block_id_cache()
+    return str(block_id) in _BLOCK_REGISTRY

@@ -386,8 +386,9 @@ class Server:
         for world in self.worlds.values():
             world.world_time = (world.world_time + 1) % 24000
             world.tick_weather()
+            world.tick_block_entities()
             world.tick_random_blocks()
-        finish_section("random_ticks")
+        finish_section("block_ticks")
         if self.server_ticks % 5 == 0:
             for player in self.players:
                 self.send_client_socket(

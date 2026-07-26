@@ -1,6 +1,7 @@
 import pygame
 
-from resources.server.material_class import Material, BlockItem, Food
+from resources.server.material_class import DamageableItem, Material, BlockItem, Food
+from resources.server.tags import ItemTag
 from resources.server.utils import client_method
 
 
@@ -59,6 +60,7 @@ class COBBLESTONE(BlockItem):
     name_id = "cobblestone"
     name = "tile.stonebrick.name"
     target_block_id = "cobblestone"
+    Tags = (ItemTag.COBBLESTONE,)
 
 @register_material
 class WATER(BlockItem):
@@ -158,6 +160,43 @@ class COOKED_PORKCHOP(Food):
     _texture_path = "items.porkchop_cooked"
     food_value = 8
     saturation_modifier = 0.8
+
+
+@register_material
+class BAKED_POTATO(Food):
+    name_id = "baked_potato"
+    name = "item.bakedPotato.name"
+    _texture_path = "items.potato_baked"
+    food_value = 5
+    saturation_modifier = 0.6
+
+
+@register_material
+class COAL(Material):
+    name_id = "coal"
+    name = "item.coal.name"
+    _texture_path = "items.coal"
+
+
+@register_material
+class CHARCOAL(Material):
+    name_id = "charcoal"
+    name = "item.charcoal.name"
+    _texture_path = "items.charcoal"
+
+
+@register_material
+class IRON_INGOT(Material):
+    name_id = "iron_ingot"
+    name = "item.ingotIron.name"
+    _texture_path = "items.iron_ingot"
+
+
+@register_material
+class GOLD_INGOT(Material):
+    name_id = "gold_ingot"
+    name = "item.ingotGold.name"
+    _texture_path = "items.gold_ingot"
 
 
 @register_material
@@ -262,11 +301,11 @@ class POISONOUS_POTATO(Food):
 
 
 @register_material
-class CARROT_ON_A_STICK(Material):
+class CARROT_ON_A_STICK(DamageableItem):
     name_id = "carrot_on_a_stick"
     name = "item.carrotOnAStick.name"
     _texture_path = "items.carrot_on_a_stick"
-    max_stack_size = 1
+    max_damage = 25
 
 
 @register_material
@@ -286,11 +325,19 @@ class MILK_BUCKET(Material):
 
 
 @register_material
-class SHEARS(Material):
+class SHEARS(DamageableItem):
     name_id = "shears"
     name = "item.shears.name"
     _texture_path = "items.shears"
-    max_stack_size = 1
+    max_damage = 238
+
+    def on_mined_block(self, stack, holder, block) -> bool:
+        if getattr(block, "block_id", "") == "fire":
+            return False
+        return self.damage_stack(stack, 1, holder)
+
+    def on_successful_entity_interaction(self, stack, holder, target) -> bool:
+        return self.damage_stack(stack, 1, holder)
 
 
 @register_material
@@ -308,20 +355,32 @@ class STICK(Material):
 
 
 @register_material
-class FLINT_AND_STEEL(Material):
+class FLINT_AND_STEEL(DamageableItem):
     name_id = "flint_and_steel"
     name = "item.flintAndSteel.name"
     _texture_path = "items.flint_and_steel"
-    max_stack_size = 1
+    max_damage = 64
     ignites_blocks = True
 
+    def on_successful_block_use(self, stack, holder, block) -> bool:
+        return self.damage_stack(stack, 1, holder)
 
-class Tool(Material):
+
+class Tool(DamageableItem):
     tool_type = None
     tier = "wood"
     mining_speed = 1.0
     attack_damage_modifier = 0.0
     attack_speed_modifier = -3.0
+    max_damage = 59
+
+    def on_mined_block(self, stack, holder, block) -> bool:
+        if float(getattr(block, "hardness", 0.0)) == 0.0:
+            return False
+        return self.damage_stack(stack, 1, holder)
+
+    def on_post_hurt_enemy(self, stack, holder, target) -> bool:
+        return self.damage_stack(stack, 2, holder)
 
     @classmethod
     def get_default_attribute_modifiers(cls):
@@ -370,6 +429,7 @@ class STONE_PICKAXE(WOODEN_PICKAXE):
     tier = "stone"
     mining_speed = 4.0
     attack_damage_modifier = 2.0
+    max_damage = 131
 
 
 @register_material
@@ -380,6 +440,7 @@ class IRON_PICKAXE(WOODEN_PICKAXE):
     tier = "iron"
     mining_speed = 6.0
     attack_damage_modifier = 3.0
+    max_damage = 250
 
 
 @register_material
@@ -390,6 +451,7 @@ class DIAMOND_PICKAXE(WOODEN_PICKAXE):
     tier = "diamond"
     mining_speed = 8.0
     attack_damage_modifier = 4.0
+    max_damage = 1561
 
 @register_material
 class TORCH(BlockItem):
@@ -405,6 +467,9 @@ class WOODEN_HOE(Tool):
     tier = "wood"
     tool_type = "hoe"
     mining_speed = 2.0
+
+    def on_successful_block_use(self, stack, holder, block) -> bool:
+        return self.damage_stack(stack, 1, holder)
 
 
 class SNOWBALL(Material):
@@ -446,14 +511,10 @@ def get_material_by_id(material_id: str):
     if material_type is not None:
         return material_type()
     from resources.server import blocks
-    try:
+    if blocks.has_block_id(key):
         return get_block_item(blocks.get_block_by_id(key))
-    except ValueError:
-        # Recipes may use plural forms (e.g. "oak_planks") while block IDs
-        # are singular ("oak_plank").  Try stripping a trailing 's'.
-        if key.endswith('s'):
-            try:
-                return get_block_item(blocks.get_block_by_id(key[:-1]))
-            except ValueError:
-                pass
-        return AIR()
+    # Recipes may use plural forms (e.g. "oak_planks") while block IDs
+    # are singular ("oak_plank").  Try stripping a trailing 's'.
+    if key.endswith('s') and blocks.has_block_id(key[:-1]):
+        return get_block_item(blocks.get_block_by_id(key[:-1]))
+    return AIR()

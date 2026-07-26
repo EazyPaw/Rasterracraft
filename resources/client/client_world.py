@@ -22,8 +22,6 @@ class ClientWorld:
         self.light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
         self.sky_light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
         self.block_light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
-        # Renderer-facing copy-on-write snapshots.  Publishing one tuple keeps
-        # sky and block light from different updates out of the same frame.
         self._light_snapshots: dict[int, tuple[Any, Any, Any]] = {}
         self.biome_map: dict[int, np.ndarray[Any, np.dtype[np.str_]]] = {}
         self.y_max = 256
@@ -36,9 +34,6 @@ class ClientWorld:
         self._chunk_state_lock = threading.RLock()
         self._loading_chunks: set[int] = set()
         self._chunk_load_versions: dict[int, int] = {}
-        # LightUpdate is decoded on the socket thread while Chunk payloads are
-        # decoded in a worker. Track which light epoch existed when each chunk
-        # load began so an older chunk payload cannot overwrite a newer update.
         self._light_update_epochs: dict[int, int] = {}
         self._chunk_load_light_epochs: dict[int, int] = {}
         self._chunk_load_counter = 0
@@ -47,8 +42,6 @@ class ClientWorld:
         self._entities_lock = threading.RLock()
         self._break_progress: dict[str, dict[str, Any]] = {}
         self._last_fluid_sound_tick = -10_000
-        # (chunk version, surface height, is_water).  Surface height is a float
-        # because a flowing water block can expose a partial-height surface.
         self._precipitation_height_cache: dict[tuple[int, int], tuple[int, float, bool]] = {}
 
     def _mark_render_chunk_dirty(self, rx: int) -> None:
@@ -215,9 +208,6 @@ class ClientWorld:
                 and self._light_update_epochs.get(rx, 0)
                 != self._chunk_load_light_epochs.get(rx, 0)
             ):
-                # A newer LightUpdate already won this race. The chunk's light
-                # payload represents an older server snapshot and must not be
-                # allowed to restore it.
                 return
             self.light_map[rx] = light_array
             if sky_array is not None:

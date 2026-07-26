@@ -362,9 +362,29 @@ def decode_packet(packet: dict, player: Player):
             handled = block.on_use(player, held.material)
         if not handled:
             return
+        player.apply_item_event(held, "on_successful_block_use", block)
         player.clear_eating()
         player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
         forward_packet_to_others(player, player, mode="entity_update")
+
+    elif packet['__class__'] == 'OpenFurnace':
+        if not _allow_action_this_tick(player, 'open_furnace'):
+            return
+        position = _read_block_position(packet)
+        if position is None:
+            return
+        x, y, z = position
+        world = player.world
+        if (
+            not (0 <= y < world.attribute.MAX_BUILD_HEIGHT)
+            or x // 16 not in player.client_loaded_regions
+            or not world.is_chunk_loaded(x // 16)
+            or not _can_player_reach_block(player, x, y, z)
+        ):
+            return
+        furnace = world.get_block(x, y, z)
+        if getattr(furnace, "block_id", None) == "furnace":
+            furnace.open_for(player)
 
     elif packet['__class__'] == 'PickupItem':
         from resources.server.entities.item import Item
@@ -392,6 +412,9 @@ def decode_packet(packet: dict, player: Player):
             slot = max(0, min(len(player.inventory) - 1, int(player.selected_slot)))
             held = player.inventory[slot]
             if target.interact(player, held):
+                player.apply_item_event(
+                    held, "on_successful_entity_interaction", target,
+                )
                 player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
                 forward_packet_to_others(player, player, mode="entity_update")
 
@@ -476,6 +499,10 @@ def decode_packet(packet: dict, player: Player):
         formatted = f"<{player.name}> {text}"
         player.world.server.broadcast_chat(formatted, (255, 255, 255))
     elif packet['__class__'] == 'ClientShutdown':
+        for container in tuple(player.open_inventory_containers.values()):
+            furnace = getattr(container, "furnace", None)
+            if furnace is not None:
+                furnace.close_for(player)
         player.world.server.save_all(player, force=True)
         player.world.server.send_client_socket(player, {'__class__': 'SaveComplete'}, "Forward")
     elif packet['__class__'] == 'InventoryClick':
@@ -492,6 +519,12 @@ def decode_packet(packet: dict, player: Player):
             )
         except (TypeError, ValueError, IndexError):
             player.sync_inventory()
+    elif packet['__class__'] == 'CloseFurnace':
+        container_id = str(packet.get('container', ''))
+        container = player.open_inventory_containers.get(container_id)
+        furnace = getattr(container, "furnace", None)
+        if furnace is not None:
+            furnace.close_for(player)
     elif packet['__class__'] == 'ContainerQuickMove':
         try:
             player.container_quick_move(

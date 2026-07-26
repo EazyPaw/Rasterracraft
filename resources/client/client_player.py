@@ -23,9 +23,6 @@ class ClientPlayer(Entity):
         self.uuid = uuid.UUID('{00000000-0000-0000-0000-000000000000}')
         self.entity_id = "player"
         self.client = client
-        # The base Entity implements vanilla's per-tick acceleration and drag.
-        # Keep the player speed attribute at the Java default (0.1); the
-        # effective ground acceleration is 0.098 blocks/tick.
         self.move_speed = 0.1
         self.damping = 0.91
         self.width = 0.6

@@ -8,3 +8,6 @@ class BlockTag(Enum):
 class DamageTag(Enum):
     BYPASSES_COOLDOWN = "bypasses_cooldown"
     BYPASSES_ARMOR = "bypasses_armor"
+
+class ItemTag(Enum):
+    COBBLESTONE = "cobblestone"

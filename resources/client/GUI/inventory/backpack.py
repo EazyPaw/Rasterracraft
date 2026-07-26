@@ -38,6 +38,7 @@ class Backpack(GUI):
     crafting_offset = (98, 17)
     crafting_output_offset = (154, 28)
     quick_move_screen = "inventory"
+    inventory_offset = (7, 83)
 
     def __init__(self, render):
         super().__init__(render)
@@ -222,6 +223,7 @@ class Backpack(GUI):
         x = pos[0] + (size - icon.get_width()) / 2
         y = pos[1] + (size - icon.get_height()) / 2
         self.render.blit(icon, (x, y))
+        stack.draw_durability_bar(self.render, pos[0], pos[1], size)
         if stack.amount > 1:
             self.render.render_text(str(stack.amount), (pos[0] + size - self.render.gui_scale * 10, pos[1] + size - self.render.gui_scale * 11), (255, 255, 255), int(20 * self.render.gui_scale / 3.5), True)
 
@@ -293,8 +295,8 @@ class Backpack(GUI):
         gui_x = (self.render.SCREEN_WIDTH - texture.get_width()) // 2
         gui_y = (self.render.SCREEN_HEIGHT - texture.get_height()) // 2
         # 槽位区域相对于背包纹理的偏移量
-        slot_area_x = gui_x + 7 * self.render.gui_scale
-        slot_area_y = gui_y + 83 * self.render.gui_scale
+        slot_area_x = gui_x + self.inventory_offset[0] * self.render.gui_scale
+        slot_area_y = gui_y + self.inventory_offset[1] * self.render.gui_scale
         slot_pixel_size = self.render.gui_scale * self.slot_size
 
         mouse_x, mouse_y = pos
@@ -674,8 +676,8 @@ class Backpack(GUI):
         self.solt_pos = []
 
         # 计算槽位区域的起始位置（相对于背包纹理左上角的偏移）
-        slot_area_x = x + 7 * self.render.gui_scale   # 槽位区域左边距
-        slot_area_y = y + 83 * self.render.gui_scale  # 槽位区域上边距
+        slot_area_x = x + self.inventory_offset[0] * self.render.gui_scale
+        slot_area_y = y + self.inventory_offset[1] * self.render.gui_scale
 
         # 每个槽位的实际像素大小（随 GUI 缩放比例变化）
         slot_pixel_size = self.render.gui_scale * self.slot_size
@@ -724,6 +726,9 @@ class Backpack(GUI):
                         item_x = slot_x + (slot_pixel_size - texture_item.get_width()) / 2
                         item_y = slot_y + (slot_pixel_size - texture_item.get_height()) / 2
                         self.render.blit(texture_item, (item_x, item_y))
+                        item.draw_durability_bar(
+                            self.render, slot_x, slot_y, slot_pixel_size,
+                        )
 
                         # 绘制物品数量（数量 > 1 时显示在右下角）
                         if hasattr(item, 'amount') and item.amount > 1:
@@ -744,7 +749,16 @@ class Backpack(GUI):
             texture_item = self.dragging_item.get_texture(self.render.gui_scale * 0.7, shadow=True)
             if texture_item is not None:
                 # 物品图标居中跟随鼠标
-                self.render.blit(texture_item, (self.render.mouse_x - texture_item.get_width() // 2, self.render.mouse_y - texture_item.get_height() // 2))
+                drag_x = self.render.mouse_x - texture_item.get_width() // 2
+                drag_y = self.render.mouse_y - texture_item.get_height() // 2
+                self.render.blit(texture_item, (drag_x, drag_y))
+                drag_slot_size = self.slot_size * self.render.gui_scale
+                self.dragging_item.draw_durability_bar(
+                    self.render,
+                    self.render.mouse_x - drag_slot_size / 2,
+                    self.render.mouse_y - drag_slot_size / 2,
+                    drag_slot_size,
+                )
                 # 拖拽物品数量显示在右下角
                 if self.dragging_item.amount > 1:
                     self.render.render_text(str(self.dragging_item.amount), (self.render.mouse_x + texture_item.get_width() // 4, self.render.mouse_y + texture_item.get_height() // 4)

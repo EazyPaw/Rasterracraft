@@ -93,6 +93,21 @@ class GameMode(ABC):
         })
         return True
 
+    def try_open_furnace(self) -> bool:
+        target = self.player.choosing_block
+        if target is None or target.block_id != "furnace":
+            return False
+        if self.player.client.hold_mouse_buttons[2]:
+            return True
+        location = target.location
+        self.player.client.sent_packet({
+            "__class__": "OpenFurnace",
+            "x": int(location.x),
+            "y": int(location.y),
+            "z": int(location.z),
+        })
+        return True
+
     def mouse_wheel(self, direction):
         pass
 
@@ -147,6 +162,8 @@ class CreativeMode(GameMode):
 
     def right_click_on_block(self, block: Block):
         if self.player.client.hold_mouse_buttons[2]:
+            return
+        if self.try_open_furnace():
             return
         if self.player.choosing_block and self.player.choosing_block.block_id == "crafting_table":
             if self.crafting_table not in self.player.client.render.drawing_GUIs:
@@ -377,6 +394,8 @@ class SurvivalMode(GameMode):
 
     def right_click_on_block(self, block: Block):
         item = self.player.inventory[self.player.selected_slot]
+        if self.try_open_furnace():
+            return
         if self.player.choosing_block and self.player.choosing_block.block_id == "crafting_table":
             if self.crafting_table not in self.player.client.render.drawing_GUIs:
                 self.player.client.render.show_gui(self.crafting_table)

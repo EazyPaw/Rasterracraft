@@ -231,6 +231,8 @@ class World:
         self._light_recalc_lock = threading.RLock()
         self._scheduled_fluid_ticks: set[tuple[int, int, int]] = set()
         self._fluid_lock = threading.RLock()
+        self._ticking_blocks: set[Block] = set()
+        self._ticking_blocks_lock = threading.RLock()
         self.random_tick_speed = 3
         self.weather: Weather = Weather.CLEAR
         self.weather_tick = self._random_weather_duration(self.weather)
@@ -298,12 +300,45 @@ class World:
                     if self.weather is Weather.RAIN and block.solid:
                         self._try_accumulate_snow(x, y, z)
 
+    def register_ticking_block(self, block: Block) -> None:
+        with self._ticking_blocks_lock:
+            self._ticking_blocks.add(block)
+
+    def unregister_ticking_block(self, block: Block) -> None:
+        with self._ticking_blocks_lock:
+            self._ticking_blocks.discard(block)
+
+    def tick_block_entities(self) -> None:
+        """Tick loaded blocks which explicitly registered a server clock."""
+        with self._ticking_blocks_lock:
+            ticking = tuple(self._ticking_blocks)
+        for block in ticking:
+            location = getattr(block, "location", None)
+            if (
+                location is None
+                or location.world is not self
+                or self.get_block(location) is not block
+            ):
+                self.unregister_ticking_block(block)
+                continue
+            tick = getattr(block, "tick_server", None)
+            if callable(tick):
+                tick()
+
     def _try_accumulate_snow(self, x: int, y: int, z: int) -> bool:
         """Attempt one random-tick snow layer on an exposed solid block."""
         if y + 1 >= self.attribute.MAX_BUILD_HEIGHT:
             return False
         above = self.get_block(x, y + 1, z)
         if not isinstance(above, AIR):
+            return False
+        # Precipitation only reaches surfaces with an uninterrupted path to
+        # the sky.  Checking just ``above`` incorrectly lets snow collect
+        # beneath roofs and other solid cover.
+        if any(
+            self.get_block(x, cover_y, z).solid
+            for cover_y in range(y + 2, self.attribute.MAX_BUILD_HEIGHT)
+        ):
             return False
         biome_id = self.get_biome(x, y + 1)
         if biome.get_precipitation_type(biome_id, y + 1) != "snow":
@@ -826,6 +861,9 @@ class World:
             return set()
         rela_x = x % 16
         old_block = cast(Block, chunk.region_array[rela_x][y][z])
+        on_unload = getattr(old_block, "on_unload", None)
+        if callable(on_unload):
+            on_unload()
         chunk.region_array[rela_x][y][z] = block
         chunk.invalidate_packet_cache()
         self.mark_chunk_dirty(chunk.x)
@@ -863,6 +901,9 @@ class World:
                             self.server.send_client_socket(player, neighbor_block, "BlockUpdate")
         if getattr(old_block, "is_fluid", False) or getattr(placed_block, "is_fluid", False):
             self.schedule_fluid_around(x, y, z)
+        on_load = getattr(block, "on_load", None)
+        if callable(on_load):
+            on_load()
 
         return set()
 

@@ -16,6 +16,7 @@ class Material:
     _scaled_texture_cache = {}
     name_space_key = "minecraft"
     attribute_modifiers = ()
+    Tags = ()
 
     def __init__(self):
         self.texture_cache = {}
@@ -103,6 +104,32 @@ class Material:
     @client_method
     def get_anchor(self):
         return {'anchor':(0.5,0.9),'offset':(0, 0),'scale':0.5,'rotation':-90}
+
+
+class DamageableItem(Material):
+    """Base for items which store vanilla-style damage on their ItemStack.
+
+    Concrete items own their event hooks and therefore the amount consumed by
+    each successful action.  Server action code only reports what happened.
+    """
+
+    max_stack_size = 1
+    max_damage = 0
+
+    def damage_stack(self, stack, amount: int, holder=None) -> bool:
+        return stack.hurt_and_break(amount, holder)
+
+    def on_mined_block(self, stack, holder, block) -> bool:
+        return False
+
+    def on_post_hurt_enemy(self, stack, holder, target) -> bool:
+        return False
+
+    def on_successful_block_use(self, stack, holder, block) -> bool:
+        return False
+
+    def on_successful_entity_interaction(self, stack, holder, target) -> bool:
+        return False
 
 
 class Food(Material):

@@ -301,6 +301,30 @@ def decode_packet(packet: dict, client: 'Client') -> None:
             _set_inventory_cursor(client, cursor)
             if 'attributes' in packet:
                 _apply_local_attribute_snapshot(player, packet['attributes'])
+    elif packet['__class__'] == 'FurnaceOpen':
+        from resources.client.GUI.inventory.furnace import Furnace
+        for gui in list(client.render.drawing_GUIs):
+            if isinstance(gui, Furnace):
+                gui._server_closed = True
+                client.render.close_gui(gui)
+        client.render.show_gui(Furnace(client.render, packet))
+    elif packet['__class__'] == 'FurnaceUpdate':
+        from resources.client.GUI.inventory.furnace import Furnace
+        for gui in list(client.render.drawing_GUIs):
+            if (
+                isinstance(gui, Furnace)
+                and gui.container_id == str(packet.get('container', ''))
+            ):
+                gui.apply_update(packet)
+    elif packet['__class__'] == 'FurnaceClosed':
+        from resources.client.GUI.inventory.furnace import Furnace
+        for gui in list(client.render.drawing_GUIs):
+            if (
+                isinstance(gui, Furnace)
+                and gui.container_id == str(packet.get('container', ''))
+            ):
+                gui._server_closed = True
+                client.render.close_gui(gui)
     elif packet['__class__'] == 'PlayerHurt':
         player = client.client_player
         if player is not None:

@@ -113,6 +113,10 @@ class Inventory:
                 result.append(slot)
         return result
 
+    def can_place(self, slot: int, stack: ItemStack) -> bool:
+        """Container hook; ordinary inventories accept every stack."""
+        return True
+
     @staticmethod
     def copy_stack(stack: ItemStack, amount: int | None = None) -> ItemStack:
         """Create an independent stack suitable for moving between containers."""
@@ -148,6 +152,8 @@ class Inventory:
 
         for slot in ordered_slots:
             target = self[slot]
+            if not self.can_place(slot, stack):
+                continue
             if target.is_empty() or not target.is_stackable_with(
                 stack, require_full_fit=False
             ):
@@ -164,6 +170,8 @@ class Inventory:
                 return before
 
         for slot in ordered_slots:
+            if not self.can_place(slot, stack):
+                continue
             if not self[slot].is_empty():
                 continue
             moved = min(stack.amount, stack.max_stack_size)

@@ -73,6 +73,13 @@ class HotBar(GUI):
             item_y = y + self.render.gui_scale * self.bar_height / 2 - texture_.get_height() / 2
 
             self.render.blit(texture_, (item_x, item_y))
+            slot_left = slot_x - self.render.gui_scale * self.bar_width / 48
+            item.draw_durability_bar(
+                self.render,
+                slot_left,
+                y + (self.render.gui_scale * self.bar_height - slot_width) / 2,
+                slot_width,
+            )
 
             # 绘制物品数量
             if item.amount > 1:
@@ -107,6 +114,5 @@ class HotBar(GUI):
         shadow_position = position.move(max(1, font_size // 10), max(1, font_size // 10))
         self.render.screen.blit(shadow, shadow_position)
         self.render.screen.blit(text, position)
-
 
 
