@@ -208,7 +208,7 @@ __marimo__/
 /assets/
 /test.py
 /data/
-/resources/client/render.py.bak
+/src/client/render.py.bak
 /saves/
 /main.build/
 /main.dist/

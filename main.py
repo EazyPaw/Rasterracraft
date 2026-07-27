@@ -4,7 +4,7 @@ import os
 
 os.environ["PYCRAFT_CLIENT"] = "1"
 
-from resources.client import client_main
+from src.client import client_main
 
 if __name__ == "__main__":
     handler = colorlog.StreamHandler()

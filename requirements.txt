@@ -1,0 +1,6 @@
+# Runtime dependencies for PyCraft2D.
+colorlog==6.10.1
+msgpack==1.1.2
+noise==1.2.2
+numpy==2.4.4
+pygame-ce==2.5.7

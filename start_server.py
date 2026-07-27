@@ -12,7 +12,7 @@ try:
 except ImportError:
     HAS_COLORLOG = False
 
-from resources.server.server_main import Server
+from src.server.server_main import Server
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PyCraft2D Server")
