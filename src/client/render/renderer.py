@@ -433,6 +433,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
 
             # 退出检查
             if not self.running or self.client.is_shutting_down:
+                self.client.capture_save_icon()
                 break
 
             try:
