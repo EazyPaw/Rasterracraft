@@ -480,7 +480,7 @@ class Server:
         # 恢复玩家的游戏模式（优先读取玩家存档，回退到世界默认模式）
         saved_gamemode = data.get("gamemode") or self.level_data.get("game_mode")
         if saved_gamemode:
-            from src.client.game_mode import get_gamemode_by_id
+            from resources.client.game_mode import get_gamemode_by_id
 
             player.gamemode = get_gamemode_by_id(saved_gamemode)
         saved_inventory = data.get("inventory")
@@ -655,8 +655,16 @@ class Server:
         self.send_client_socket(player, packet, "Forward")
 
     def broadcast_sound(
-        self, sound_id: str, x: float, y: float, z: float = 0.0, *, volume: float = 1.0
+        self,
+        sound_id: str,
+        x: float,
+        y: float,
+        z: float = 0.0,
+        *,
+        volume: float = 1.0,
+        positional: bool = True,
     ) -> None:
+        """向所有客户端发送音效；默认按给定世界坐标进行空间混音。"""
         packet = {
             "__class__": "SoundEffect",
             "sound_id": str(sound_id),
@@ -664,7 +672,7 @@ class Server:
             "y": float(y),
             "z": float(z),
             "volume": float(volume),
-            "global": True,
+            "global": not positional,
         }
         for player in tuple(self.players):
             self.send_client_socket(player, packet, "Forward")

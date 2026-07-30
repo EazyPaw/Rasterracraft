@@ -17,6 +17,10 @@ from src.server.biome import get_precipitation_type
 
 
 class ClientWorld:
+    SOUND_MAX_DISTANCE = 16.0
+    SOUND_FULL_VOLUME_DISTANCE = 1.5
+    SOUND_PAN_STRENGTH = 0.85
+
     def __init__(self, client):
         self.id_name = "null"
         self._regions: dict[int, np.ndarray[Any, np.dtype[Block]]] = {}
@@ -620,31 +624,51 @@ class ClientWorld:
 
         px, py, pz = player.x, player.y, getattr(player, "z", 0.0)
 
-        # 计算相对位置
         dx = x - px
         dy = y - py
         dz = z - pz
-        dist = math.sqrt(dx * dx + dy * dy + dz * dz)
-        max_dist = 16.0  # 最大可听距离（可根据需要调整）
-        max_pan_range = 10.0  # 立体声完全偏到一侧的水平距离
-
-        if dist > max_dist:
-            return  # 太远，不播放
-
-        # 距离衰减因子（线性衰减）
-        vol_factor = max(0.0, 1.0 - dist / max_dist)
-
-        # 立体声左右平衡计算（基于水平偏移 dx）
-        # pan 范围 [-1, 1]，-1 完全左声道，1 完全右声道
-        pan = max(-1.0, min(1.0, dx / max_pan_range))
-
-        left_vol = vol_factor * math.sqrt((1.0 - pan) / 2.0)
-        right_vol = vol_factor * math.sqrt((1.0 + pan) / 2.0)
-
-        # 调用资源管理器播放立体声音效
-        self.client.resources_manager.play_sound(
-            sound_id, stereo_balance=(left_vol * volume, right_vol * volume)
+        attenuation, left_gain, right_gain = self.calculate_spatial_audio(
+            dx, dy, dz
         )
+        if attenuation <= 0.0:
+            return
+
+        self.client.resources_manager.play_sound(
+            sound_id,
+            volume=volume * attenuation,
+            stereo_balance=(left_gain, right_gain),
+        )
+
+    @classmethod
+    def calculate_spatial_audio(
+        cls, dx: float, dy: float, dz: float
+    ) -> tuple[float, float, float]:
+        """返回距离衰减以及左右声道增益。"""
+        distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if distance >= cls.SOUND_MAX_DISTANCE:
+            return 0.0, 0.0, 0.0
+
+        if distance <= cls.SOUND_FULL_VOLUME_DISTANCE:
+            attenuation = 1.0
+        else:
+            audible_range = (
+                cls.SOUND_MAX_DISTANCE - cls.SOUND_FULL_VOLUME_DISTANCE
+            )
+            remaining = (cls.SOUND_MAX_DISTANCE - distance) / audible_range
+            # 平方曲线让屏幕边缘之外的声音明显变弱，同时保留近处细节。
+            attenuation = max(0.0, min(1.0, remaining)) ** 2
+
+        planar_distance = math.hypot(dx, dy)
+        if planar_distance <= 1e-6:
+            pan = 0.0
+        else:
+            # 声像取决于方向角而非横向相差格数，因此近处左右声源也能分辨。
+            pan = max(-1.0, min(1.0, dx / planar_distance))
+            pan *= cls.SOUND_PAN_STRENGTH
+
+        left_gain = 1.0 - max(0.0, pan)
+        right_gain = 1.0 + min(0.0, pan)
+        return attenuation, left_gain, right_gain
 
     def tick_fluid_sounds(self) -> None:
         player = getattr(self.client, "client_player", None) or getattr(
@@ -657,7 +681,7 @@ class ClientWorld:
         if tick - self._last_fluid_sound_tick < 30:
             return
 
-        from src.server.block_class import FluidBlock
+        from resources.server.block_class import FluidBlock
 
         px, py = float(player.x), float(player.y)
         pz = int(getattr(player, "z", 0))

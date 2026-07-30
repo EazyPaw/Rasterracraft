@@ -1,5 +1,6 @@
 # Commented and arranged by ChatGPT
 import logging
+import threading
 
 import pygame
 import json
@@ -24,6 +25,17 @@ BUILTIN_SOUND_FALLBACKS = {
     },
 }
 
+DEFAULT_SOUND_CHANNELS = 32
+SOUND_CATEGORY_PRIORITIES = {
+    "ambient": 0,
+    "weather": 0,
+    "block": 1,
+    "neutral": 1,
+    "hostile": 2,
+    "player": 2,
+    "master": 2,
+}
+
 
 class ResourcesManager:
     def __init__(self, client):
@@ -31,6 +43,10 @@ class ResourcesManager:
         self.textures = {}
         self.sounds = {}  # 存储解析后的音效信息
         self.sound_objects = {}  # 缓存已加载的 pygame.mixer.Sound 对象
+        self._audio_lock = threading.RLock()
+        self._active_sound_channels = {}
+        self._sound_sequence = 0
+        self._ensure_sound_channels()
         self.stained_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_STAINED_CACHE = 512  # 染色缓存上限
         self._lang_map = {}
@@ -419,6 +435,65 @@ class ResourcesManager:
                 "sounds": info.get("sounds", []),
             }
 
+    def _ensure_sound_channels(self, required_channel: int | None = None) -> int:
+        """保证混音器拥有足够的音效频道，并返回当前频道数。"""
+        if pygame.mixer.get_init() is None:
+            return 0
+
+        minimum = DEFAULT_SOUND_CHANNELS
+        if required_channel is not None:
+            minimum = max(minimum, required_channel + 1)
+        channel_count = pygame.mixer.get_num_channels()
+        if channel_count < minimum:
+            pygame.mixer.set_num_channels(minimum)
+            channel_count = minimum
+        return channel_count
+
+    def _acquire_sound_channel(
+        self,
+        *,
+        audibility: float,
+        priority: int,
+        channel_id: int | None,
+    ):
+        """分配频道；满载时仅抢占优先级更低或更安静的旧音效。"""
+        channel_count = self._ensure_sound_channels(channel_id)
+        if channel_count <= 0:
+            return None, None
+
+        if channel_id is not None:
+            return pygame.mixer.Channel(channel_id), channel_id
+
+        busy_channels = []
+        for current_id in range(channel_count):
+            channel = pygame.mixer.Channel(current_id)
+            if not channel.get_busy():
+                self._active_sound_channels.pop(current_id, None)
+                return channel, current_id
+            busy_channels.append((current_id, channel))
+
+        # 未通过资源管理器启动的频道不参与抢占，以免切断未知的持续音频。
+        candidates = [
+            (
+                metadata["priority"],
+                metadata["audibility"],
+                metadata["sequence"],
+                current_id,
+                channel,
+            )
+            for current_id, channel in busy_channels
+            if (metadata := self._active_sound_channels.get(current_id)) is not None
+        ]
+        if not candidates:
+            return None, None
+
+        candidate_priority, candidate_audibility, _, selected_id, selected = min(
+            candidates
+        )
+        if (priority, audibility) < (candidate_priority, candidate_audibility):
+            return None, None
+        return selected, selected_id
+
     def play_sound(
         self,
         sound_id: str,
@@ -427,6 +502,7 @@ class ResourcesManager:
         loops: int = 0,
         fade_ms: int = 0,
         channel_id: int | None = None,
+        priority: int | None = None,
     ):
         """
         播放音效。
@@ -436,6 +512,7 @@ class ResourcesManager:
         :param loops: 额外循环次数；-1 表示持续循环。
         :param fade_ms: 淡入时长（毫秒）。
         :param channel_id: 可选的固定混音通道，适合持续环境音。
+        :param priority: 可选的抢占优先级；数值越大越不容易被覆盖。
         :return: 非流式音效的 pygame Channel，无法播放时返回 None。
         """
         if sound_id not in self.sounds:
@@ -477,40 +554,47 @@ class ResourcesManager:
             if stream:
                 # 流式播放（背景音乐）不支持立体声控制，使用基础音量
                 pygame.mixer.music.load(full_path)
-                pygame.mixer.music.set_volume(base_volume)
+                pygame.mixer.music.set_volume(max(0.0, min(1.0, base_volume)))
                 pygame.mixer.music.play(loops=loops, fade_ms=fade_ms)
                 return None
             else:
-                # 非流式音效
-                if full_path not in self.sound_objects:
-                    self.sound_objects[full_path] = pygame.mixer.Sound(full_path)
-                sound_obj = self.sound_objects[full_path]
+                with self._audio_lock:
+                    # 先取得频道并设置音量，再开始播放，避免短音效以满音量起音。
+                    if full_path not in self.sound_objects:
+                        self.sound_objects[full_path] = pygame.mixer.Sound(full_path)
+                    sound_obj = self.sound_objects[full_path]
 
-                if stereo_balance is not None:
-                    left, right = stereo_balance
-                    left *= base_volume
-                    right *= base_volume
-                    # 播放并获取 Channel，直接设置左右音量
-                    channel = (
-                        pygame.mixer.Channel(channel_id)
-                        if channel_id is not None
-                        else sound_obj.play(loops=loops, fade_ms=fade_ms)
+                    if stereo_balance is None:
+                        left = right = max(0.0, min(1.0, base_volume))
+                    else:
+                        left, right = stereo_balance
+                        left = max(0.0, min(1.0, float(left) * base_volume))
+                        right = max(0.0, min(1.0, float(right) * base_volume))
+
+                    effective_priority = (
+                        int(priority)
+                        if priority is not None
+                        else SOUND_CATEGORY_PRIORITIES.get(
+                            sound_data.get("category", "master"), 1
+                        )
                     )
-                    if channel_id is not None:
-                        channel.play(sound_obj, loops=loops, fade_ms=fade_ms)
-                    if channel:
-                        channel.set_volume(left, right)
-                    return channel
-                else:
-                    channel = (
-                        pygame.mixer.Channel(channel_id)
-                        if channel_id is not None
-                        else sound_obj.play(loops=loops, fade_ms=fade_ms)
+                    audibility = max(left, right)
+                    channel, selected_id = self._acquire_sound_channel(
+                        audibility=audibility,
+                        priority=effective_priority,
+                        channel_id=channel_id,
                     )
-                    if channel_id is not None:
-                        channel.play(sound_obj, loops=loops, fade_ms=fade_ms)
-                    if channel:
-                        channel.set_volume(base_volume)
+                    if channel is None:
+                        return None
+
+                    channel.set_volume(left, right)
+                    channel.play(sound_obj, loops=loops, fade_ms=fade_ms)
+                    self._sound_sequence += 1
+                    self._active_sound_channels[selected_id] = {
+                        "priority": effective_priority,
+                        "audibility": audibility,
+                        "sequence": self._sound_sequence,
+                    }
                     return channel
         except pygame.error as e:
             print(f"Error playing sound '{full_path}': {e}")

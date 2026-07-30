@@ -989,6 +989,11 @@ class Leaves(Block):
     hardness = 0.2
     preferred_tool = "hoe"
 
+    def __init__(self):
+        super().__init__()
+        self.distance = 0
+        self.persistent = False
+
     @client_method
     def get_texture(self, size, client):
         # 获取 biome_id 用于缓存键（不同群系染色不同）
