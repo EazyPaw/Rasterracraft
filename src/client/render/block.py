@@ -16,6 +16,8 @@ from .constants import (
     BLOCK_LIGHT_LEVELS,
     BLOCK_LIGHT_TINT,
     BLOCK_RATIO_LEVELS,
+    BLOCK_SECTION_LIGHT_LEVELS,
+    BLOCK_SECTION_TINT_COLOR_STEP,
     BLOCK_TINT_COLOR_STEP,
 )
 from .render_utils import cyclic_lerp_color, lerp_color, quantize_color, quantize_unit
@@ -41,6 +43,61 @@ class BlockRenderMixin:
         - default_font: 默认字体
         - SKY_LOWER_KEYFRAMES: 天空下层颜色关键帧
     """
+
+    @staticmethod
+    def _surface_memory_bytes(surface: pygame.Surface) -> int:
+        """返回 Surface 像素缓冲区的近似内存占用。"""
+        width, height = surface.get_size()
+        return width * height * surface.get_bytesize()
+
+    def _trim_surface_cache(
+        self,
+        cache,
+        max_entries: int,
+        max_bytes: int | None = None,
+        entry_bytes: int | None = None,
+    ) -> None:
+        """同时按条目数和像素字节数收紧 Surface LRU。"""
+        if max_bytes is not None and entry_bytes is not None:
+            max_entries = min(max_entries, max(1, max_bytes // entry_bytes))
+        while len(cache) > max_entries:
+            cache.popitem(last=False)
+        if max_bytes is None or entry_bytes is not None:
+            return
+        total = sum(self._surface_memory_bytes(surface) for surface in cache.values())
+        while cache and total > max_bytes:
+            _, surface = cache.popitem(last=False)
+            total -= self._surface_memory_bytes(surface)
+
+    def _get_block_section_lighting_state(
+        self,
+        sky_light_weight: float,
+        sky_color: tuple[int, int, int],
+    ) -> tuple[float, tuple[int, int, int], tuple]:
+        """将连续昼夜状态压缩为可复用的有限分区光照档位。"""
+        weight_key, quantized_weight = quantize_unit(
+            sky_light_weight, BLOCK_SECTION_LIGHT_LEVELS
+        )
+        quantized_color = quantize_color(
+            sky_color, BLOCK_SECTION_TINT_COLOR_STEP
+        )
+        return quantized_weight, quantized_color, (weight_key, quantized_color)
+
+    def _recycle_block_section_surface(self, surface: pygame.Surface) -> None:
+        """在全局数量/字节预算内复用被淘汰的分区 Surface。"""
+        pools = self.block_section_surface_pool
+        max_entries = getattr(self, "MAX_BLOCK_SECTION_SURFACE_POOL", 0)
+        max_bytes = getattr(self, "MAX_BLOCK_SECTION_SURFACE_POOL_BYTES", 0)
+        if max_entries <= 0 or max_bytes <= 0:
+            return
+
+        pooled_surfaces = [item for pool in pools.values() for item in pool]
+        if len(pooled_surfaces) >= max_entries:
+            return
+        used_bytes = sum(self._surface_memory_bytes(item) for item in pooled_surfaces)
+        if used_bytes + self._surface_memory_bytes(surface) > max_bytes:
+            return
+        pools.setdefault(surface.get_size(), []).append(surface)
 
     def _compute_corner_color(
         self,
@@ -606,31 +663,36 @@ class BlockRenderMixin:
         surface_h = section_h * bs + padding * 2
         pool_key = (surface_w, surface_h)
 
-        if tick_key != 0:
-            old_keys = [
-                old_key
-                for old_key in cache
-                if old_key[0] == section_x
-                and old_key[1] == section_y
-                and old_key[2] == bs
-            ]
-            for old_key in old_keys:
-                old_surface = cache.pop(old_key)
-                old_pool_key = old_surface.get_size()
-                pool = self.block_section_surface_pool.setdefault(old_pool_key, [])
-                if len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
-                    pool.append(old_surface)
+        # 一个世界分区只保留当前版本。昼夜、动画帧或区块版本变化时复用旧
+        # Surface，避免连续光照状态把大图缓存灌满后再触发大量分配/回收。
+        old_keys = [
+            old_key
+            for old_key in cache
+            if old_key[0] == section_x
+            and old_key[1] == section_y
+            and old_key[2] == bs
+        ]
+        for old_key in old_keys:
+            self._recycle_block_section_surface(cache.pop(old_key))
 
-        if len(cache) >= self.MAX_BLOCK_SECTION_CACHE:
+        incoming_bytes = surface_w * surface_h * 4
+        max_cache_bytes = getattr(
+            self, "MAX_BLOCK_SECTION_CACHE_BYTES", incoming_bytes
+        )
+        cache_bytes = sum(self._surface_memory_bytes(item) for item in cache.values())
+        while cache and (
+            len(cache) >= self.MAX_BLOCK_SECTION_CACHE
+            or cache_bytes + incoming_bytes > max_cache_bytes
+        ):
             _, old_surface = cache.popitem(last=False)
-            old_pool_key = old_surface.get_size()
-            pool = self.block_section_surface_pool.setdefault(old_pool_key, [])
-            if len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
-                pool.append(old_surface)
+            cache_bytes -= self._surface_memory_bytes(old_surface)
+            self._recycle_block_section_surface(old_surface)
 
         pool = self.block_section_surface_pool.get(pool_key)
         if pool:
             surface = pool.pop()
+            if not pool:
+                self.block_section_surface_pool.pop(pool_key, None)
         else:
             surface = pygame.Surface(
                 (surface_w, surface_h), pygame.SRCALPHA
@@ -680,11 +742,7 @@ class BlockRenderMixin:
             if min_x <= section_x <= max_x and min_y <= section_y <= max_y:
                 continue
 
-            surface = cache.pop(key)
-            pool_key = surface.get_size()
-            pool = self.block_section_surface_pool.setdefault(pool_key, [])
-            if len(pool) < self.MAX_BLOCK_SECTION_SURFACE_POOL:
-                pool.append(surface)
+            self._recycle_block_section_surface(cache.pop(key))
 
     def _prefetch_block_sections(
         self,
@@ -783,6 +841,9 @@ class BlockRenderMixin:
         )
         sky_color = lerp_color(sky_color, night_tint, sky_state["night"] * 0.85)
         sky_color = quantize_color(sky_color, BLOCK_TINT_COLOR_STEP)
+        sky_light_weight, sky_color, lighting_key = (
+            self._get_block_section_lighting_state(sky_light_weight, sky_color)
+        )
 
         x_blocks = _math.ceil(width / block_size)
         y_blocks = _math.ceil(height / block_size)
@@ -798,10 +859,6 @@ class BlockRenderMixin:
         sy_start = y_start // section_h
         sy_end = y_end // section_h
 
-        lighting_key = (
-            int(round(sky_light_weight * 1024)),
-            sky_color,
-        )
         last_cam = self._last_block_cache_cam
         velocity_x = 0.0 if last_cam is None else cam_x - last_cam[0]
         velocity_y = 0.0 if last_cam is None else cam_y - last_cam[1]
@@ -1331,8 +1388,12 @@ class BlockRenderMixin:
             lit_tex = tex.copy()
             lit_tex.blit(grad, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
             cache[key] = lit_tex
-            if len(cache) > self.MAX_LIT_CACHE:
-                cache.popitem(last=False)
+            self._trim_surface_cache(
+                cache,
+                self.MAX_LIT_CACHE,
+                getattr(self, "MAX_LIT_CACHE_BYTES", None),
+                bs * bs * 4,
+            )
         else:
             # ---- 完整高度方块（走缓存） ----
             # 7a. 获取/生成渐变纹理
@@ -1358,15 +1419,23 @@ class BlockRenderMixin:
                 small.fill(color_br, (1, 1, 1, 1))
                 grad = pygame.transform.smoothscale(small, (bs, bs)).convert_alpha()
                 grad_cache[grad_key] = grad
-                if len(grad_cache) > self.MAX_GRADIENT_CACHE:
-                    grad_cache.popitem(last=False)
+                self._trim_surface_cache(
+                    grad_cache,
+                    self.MAX_GRADIENT_CACHE,
+                    getattr(self, "MAX_GRADIENT_CACHE_BYTES", None),
+                    bs * bs * 4,
+                )
 
             # 7b. 生成最终光照纹理（纹理 × 光照渐变）
             lit_tex = tex.copy()
             lit_tex.blit(grad, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
             cache[key] = lit_tex
-            if len(cache) > self.MAX_LIT_CACHE:
-                cache.popitem(last=False)
+            self._trim_surface_cache(
+                cache,
+                self.MAX_LIT_CACHE,
+                getattr(self, "MAX_LIT_CACHE_BYTES", None),
+                bs * bs * 4,
+            )
 
         # ---- 8. 绘制到屏幕（非满高方块底部对齐） ----
         screen.blit(lit_tex, (sx, sy + bs - tex_h))

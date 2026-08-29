@@ -155,8 +155,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         # ---- 渲染缓存（LRU 淘汰策略） ----
         self.gradient_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_GRADIENT_CACHE: int = 256
+        self.MAX_GRADIENT_CACHE_BYTES: int = 8 * 1024 * 1024
         self.lit_tex_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_LIT_CACHE: int = 768
+        self.MAX_LIT_CACHE_BYTES: int = 24 * 1024 * 1024
         self.corner_color_cache: OrderedDict[tuple, tuple[int, int, int]] = (
             OrderedDict()
         )
@@ -175,12 +177,15 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.debug = False
         self.tinted_surface_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_TINTED_SURFACE_CACHE: int = 768
+        self.MAX_TINTED_SURFACE_CACHE_BYTES: int = 12 * 1024 * 1024
         self.block_section_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_BLOCK_SECTION_CACHE: int = 192
+        self.MAX_BLOCK_SECTION_CACHE_BYTES: int = 32 * 1024 * 1024
         self.block_section_surface_pool: dict[
             tuple[int, int], list[pygame.Surface]
         ] = {}
-        self.MAX_BLOCK_SECTION_SURFACE_POOL: int = 64
+        self.MAX_BLOCK_SECTION_SURFACE_POOL: int = 16
+        self.MAX_BLOCK_SECTION_SURFACE_POOL_BYTES: int = 8 * 1024 * 1024
         self.block_section_animation_cache: OrderedDict[tuple, tuple[str, ...]] = (
             OrderedDict()
         )
@@ -480,8 +485,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         mask.fill(tint)
         tinted.blit(mask, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
         cache[key] = tinted
-        if len(cache) > self.MAX_TINTED_SURFACE_CACHE:
-            cache.popitem(last=False)
+        self._trim_surface_cache(
+            cache,
+            self.MAX_TINTED_SURFACE_CACHE,
+            self.MAX_TINTED_SURFACE_CACHE_BYTES,
+        )
         return tinted
 
     def draw_rect(

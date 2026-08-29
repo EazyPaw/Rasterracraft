@@ -30,3 +30,8 @@ BLOCK_LIGHT_LEVELS: int = 63
 
 # 天空/方块光源比例离散化级别数（0-15 共 16 级）
 BLOCK_RATIO_LEVELS: int = 15
+
+# 分区缓存使用更粗的环境光档位。分区 Surface 远大于单方块纹理，若把连续
+# 变化的昼夜权重直接放进缓存键，会在日出/日落期间几乎每帧重建整屏分区。
+BLOCK_SECTION_LIGHT_LEVELS: int = 31
+BLOCK_SECTION_TINT_COLOR_STEP: int = 16

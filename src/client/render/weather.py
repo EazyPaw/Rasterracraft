@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import math
 import random
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 import pygame
 
-from .render_utils import cyclic_lerp_color, lerp_color
+from .render_utils import cyclic_lerp_color, lerp_color, quantize_color
 
 if TYPE_CHECKING:
     from src.client.camera import Camera
@@ -44,6 +45,12 @@ class WeatherMixin:
     # =========================================================================
 
     WEATHER_FADE_SECONDS: float = 1.5
+    WEATHER_TINT_COLOR_STEP: int = 16
+    MAX_WEATHER_LIT_CACHE: int = 96
+    MAX_WEATHER_LIT_CACHE_BYTES: int = 8 * 1024 * 1024
+    CLOUD_TINT_COLOR_STEP: int = 16
+    MAX_CLOUD_TINT_CACHE: int = 12
+    MAX_CLOUD_TINT_CACHE_BYTES: int = 12 * 1024 * 1024
 
     # =========================================================================
     # 实例属性类型声明
@@ -132,10 +139,10 @@ class WeatherMixin:
         # 原始天气纹理缓存（缩放 + 翻转）
         self._weather_texture_cache = {}
         # 带光照染色的天气纹理缓存
-        self._weather_lit_cache = {}
+        self._weather_lit_cache = OrderedDict()
         # 云层 Surface 缓存
         self._cloud_surface_cache = {}
-        self._cloud_tint_cache = {}
+        self._cloud_tint_cache = OrderedDict()
         # 云层视差状态。相机位移使用帧间增量，避免镜头缩放时绝对坐标
         # 乘以新比例造成整条云带瞬移。
         self._cloud_last_camera_x = None
@@ -390,29 +397,44 @@ class WeatherMixin:
 
         :return: 缓存策略：
             以 (kind, size, flipped, tint, alpha) 为键。
-            颜色和透明度按 8 像素步长量化以减少缓存条目数。
-            缓存上限 384 条，超出后按 FIFO 淘汰（弹出一个最早条目）。
+            颜色和透明度按有限档位量化，并同时受条目数和像素字节预算约束。
 
         """
-        # 按 8 像素步长量化颜色和透明度，大幅减少缓存条目数
-        tint = tuple(max(0, min(255, int(channel // 8 * 8))) for channel in tint)
-        alpha = max(0, min(255, int(alpha // 8 * 8)))
+        # 昼夜与天气强度连续变化；较粗档位能避免每帧制造一套降水纹理。
+        tint = quantize_color(tint, self.WEATHER_TINT_COLOR_STEP)
+        alpha = max(0, min(255, int(round(alpha / 16) * 16)))
 
         key = (kind, size, flipped, tint, alpha)
         cached = self._weather_lit_cache.get(key)
         if cached is not None:
+            if hasattr(self._weather_lit_cache, "move_to_end"):
+                self._weather_lit_cache.move_to_end(key)
             return cached
 
         # 获取基础纹理 → 染色 → 设置透明度
         base = self._get_weather_texture(kind, size, flipped)
-        tinted = self.get_tinted_surface(base, tint).copy()
+        # 此缓存本身已经按 tint/alpha 管理，直接染色可避免在全局 tint 缓存
+        # 中再留一份同尺寸 Surface。
+        tinted = base.copy()
+        tinted.fill((*tint, 255), special_flags=pygame.BLEND_RGBA_MULT)
         tinted.set_alpha(alpha)
 
         self._weather_lit_cache[key] = tinted
 
-        # FIFO 淘汰：缓存超过上限时弹出最早条目
-        if len(self._weather_lit_cache) > 384:
-            self._weather_lit_cache.pop(next(iter(self._weather_lit_cache)))
+        total_bytes = sum(
+            surface.get_width() * surface.get_height() * surface.get_bytesize()
+            for surface in self._weather_lit_cache.values()
+        )
+        while self._weather_lit_cache and (
+            len(self._weather_lit_cache) > self.MAX_WEATHER_LIT_CACHE
+            or total_bytes > self.MAX_WEATHER_LIT_CACHE_BYTES
+        ):
+            if hasattr(self._weather_lit_cache, "popitem"):
+                try:
+                    _, old = self._weather_lit_cache.popitem(last=False)
+                except TypeError:
+                    _, old = self._weather_lit_cache.popitem()
+            total_bytes -= old.get_width() * old.get_height() * old.get_bytesize()
 
         return tinted
 
@@ -596,8 +618,8 @@ class WeatherMixin:
         # 云条带总长度（屏幕宽度 + 安全边距）
         travel = self.SCREEN_WIDTH + max(1, round(180 * scale))
         cloud_height = max(1, round(64 * scale))
-        # 保留完整 RGB 精度，云色随天空关键帧连续变化。
-        color_key = color
+        # 云带 Surface 很大，完整 RGB 会在昼夜变化时每帧生成三张新图。
+        color_key = quantize_color(color, self.CLOUD_TINT_COLOR_STEP)
 
         now = pygame.time.get_ticks() / 1000.0
         last_draw_time = self._cloud_last_draw_time
@@ -654,9 +676,26 @@ class WeatherMixin:
                 cloud = shape.copy()
                 cloud.fill((*color_key, 255), special_flags=pygame.BLEND_RGBA_MULT)
                 self._cloud_tint_cache[tint_key] = cloud
-                # 限制颜色缓存，避免天气过渡时保留大量旧颜色 Surface。
-                if len(self._cloud_tint_cache) > 192:
-                    self._cloud_tint_cache.pop(next(iter(self._cloud_tint_cache)))
+                total_bytes = sum(
+                    surface.get_width()
+                    * surface.get_height()
+                    * surface.get_bytesize()
+                    for surface in self._cloud_tint_cache.values()
+                )
+                while self._cloud_tint_cache and (
+                    len(self._cloud_tint_cache) > self.MAX_CLOUD_TINT_CACHE
+                    or total_bytes > self.MAX_CLOUD_TINT_CACHE_BYTES
+                ):
+                    if hasattr(self._cloud_tint_cache, "popitem"):
+                        try:
+                            _, old = self._cloud_tint_cache.popitem(last=False)
+                        except TypeError:
+                            _, old = self._cloud_tint_cache.popitem()
+                    total_bytes -= (
+                        old.get_width() * old.get_height() * old.get_bytesize()
+                    )
+            elif hasattr(self._cloud_tint_cache, "move_to_end"):
+                self._cloud_tint_cache.move_to_end(tint_key)
 
             # 增量更新相位，而不是用绝对世界坐标乘当前缩放重新计算。
             # travel 改变时保留当前像素相位，因此调焦不会横向跳动。
