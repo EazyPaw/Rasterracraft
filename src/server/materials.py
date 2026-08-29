@@ -589,6 +589,12 @@ class WOODEN_HOE(Tool):
     def on_successful_block_use(self, stack, holder, block) -> bool:
         return self.damage_stack(stack, 1, holder)
 
+@register_material
+class DIAMOND(Material):
+    name_id = "diamond"
+    name = "item.diamond.name"
+    _texture_path = "items.diamond"
+
 
 class SNOWBALL(Material): ...
 

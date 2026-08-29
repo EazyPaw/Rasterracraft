@@ -1,6 +1,7 @@
 # Commented and arranged by ChatGPT
 import os
 import random
+import src.server.materials as materials
 
 from src.server.biome import get_biome_by_id, get_precipitation_type
 
@@ -168,6 +169,7 @@ class GRASS_BLOCK(TillableBlockMixin, Block):
     preferred_tool = "shovel"
     _side_texture_cache = {}  # 缓存不同尺寸的侧面纹理
     Tags = [BlockTag.GRASS_BLOCKS, BlockTag.ANIMALS_SPAWNABLE_ON]
+    drops = (BlockDrop(materials.DIRT),)
 
     def __init__(self, snowed=False):
         super().__init__()
@@ -1394,6 +1396,7 @@ class COAL_ORE(Block):
     hardness = 3.0
     preferred_tool = "pickaxe"
     requires_correct_tool = True
+    drops = (BlockDrop(materials.COAL),)
 
 
 class IRON_ORE(Block):
@@ -1424,6 +1427,7 @@ class DIAMOND_ORE(Block):
     preferred_tool = "pickaxe"
     requires_correct_tool = True
     required_tool_tier = "iron"
+    drops = (BlockDrop(materials.DIAMOND),)
 
 
 class EMERALD_ORE(Block):
@@ -1761,7 +1765,7 @@ class MYCELIUM(Block):
 
 class MUSHROOM_STEM(Block):
     block_id = "mushroom_stem"
-    name = "tile.mushroom_stem.name"
+    name = "tile.mushroom.name"
     _texture_path = "blocks.mushroom_block_skin_stem"
 
 
