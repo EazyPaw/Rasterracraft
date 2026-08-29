@@ -28,6 +28,7 @@ from src.server.inventory import (
 from src.server.crafting import load_recipes
 from src.server.experience import total_experience_for_level
 from src.server.player import Player
+from src.server.performance import TickPerformanceMonitor
 from src.server.server_packets import encode_packet, decode_packet
 from src.server.text import Text
 from src.server.utils import recv_exact, set_client, set_server
@@ -56,8 +57,17 @@ class Server:
         self.main_world_id = "overworld"
         self.worlds: dict[str, World] = {}
         self.ready = threading.Event()  # 用于等待初始化完成
-        self.TPS = 0
         self.rate = 20
+        self.performance_monitor = TickPerformanceMonitor(self.rate)
+        self.TPS = float(self.rate)
+        self.mspt = 0.0
+        # Keep these public fields for status displays and integrations.
+        self.tps_agv = [float(self.rate)] * 3
+        self.mspt_agv = [0.0] * 3
+        self.tps_avg = self.tps_agv
+        self.mspt_avg = self.mspt_agv
+        self.mspt_min = [0.0] * 3
+        self.mspt_max = [0.0] * 3
         self.ticks = 0
         self.server_ticks = 0
         self.view_distance = 4
@@ -108,7 +118,10 @@ class Server:
                 inp = inp[1:]
             cmd = inp.split(" ")
             result = self.command_executor.execute_command("server_cmd", cmd)
-            result = result.replace("§c", "\x1b[31;21m")
+            if isinstance(result, Text):
+                result = result.to_plain_string()
+            else:
+                result = result.replace("§c", "\x1b[31;21m")
             logging.info(result)
 
     def register_event(self, func, *args, ticks=1):
@@ -289,6 +302,8 @@ class Server:
             self.register_event(self.integrated_check, ticks=200)
 
         next_time = time.perf_counter()
+        self.performance_monitor.reset(next_time)
+        next_performance_refresh = next_time
         last_overload_warning = -float("inf")
 
         while self.running:
@@ -336,7 +351,25 @@ class Server:
 
                     next_time += int(behind_seconds / interval) * interval
                     last_overload_warning = now
+
+            tick_completed = time.perf_counter()
+            self.TPS, self.mspt = self.performance_monitor.record_tick(
+                tick_elapsed * 1000.0, tick_completed
+            )
+            if tick_completed >= next_performance_refresh:
+                self.get_performance_snapshot(tick_completed)
+                next_performance_refresh = tick_completed + 1.0
             self.ticks += 1
+
+    def get_performance_snapshot(self, now: float | None = None):
+        snapshot = self.performance_monitor.snapshot(now)
+        self.TPS = snapshot.current_tps
+        self.mspt = snapshot.current_mspt
+        self.tps_agv[:] = snapshot.tps_averages
+        self.mspt_agv[:] = (stats[0] for stats in snapshot.mspt_stats)
+        self.mspt_min[:] = (stats[1] for stats in snapshot.mspt_stats)
+        self.mspt_max[:] = (stats[2] for stats in snapshot.mspt_stats)
+        return snapshot
 
     def init(self):
         t_start = time.perf_counter()

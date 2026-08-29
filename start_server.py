@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import sys
+import sysconfig
 
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 
@@ -60,6 +61,20 @@ if __name__ == "__main__":
 
     if args.integrated:
         logging.info("Starting integrated server (subprocess mode)...")
+
+    free_threaded_build = sysconfig.get_config_var("Py_GIL_DISABLED") == 1
+    gil_enabled = getattr(sys, "_is_gil_enabled", lambda: True)()
+    if free_threaded_build and not gil_enabled:
+        logging.warning("********")
+        logging.warning("Server is running with the GIL disabled (experimental)")
+        logging.warning("Parallel chunk generation may be faster")
+        logging.warning("Single-threaded tick work may be slower")
+        logging.warning("Some native dependencies do not declare free-thread safety")
+        logging.warning("********")
+    elif free_threaded_build:
+        logging.warning(
+            "Free-threaded Python detected, but the GIL is enabled by a native module"
+        )
 
     # 子进程模式下传入 integrated=True（禁用 stdin 输入）和 client=None（无耦合对象）
     server = Server(integrated=args.integrated, save_id=args.save_id)

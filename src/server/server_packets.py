@@ -486,7 +486,7 @@ def decode_packet(packet: dict, player: Player):
                 try:
                     result = server.command_executor.execute_command(player, args)
                     # 检查是否为错误回显（§c 开头）
-                    if result.startswith("§c"):
+                    if isinstance(result, str) and result.startswith("§c"):
                         color = (255, 85, 85)  # 红色
                     else:
                         color = (255, 255, 255)  # 白色

@@ -23,7 +23,9 @@ class CommandExecutor:
     def __init__(self, server: "Server"):
         self.server = server
         self.allow_python_execute = True  # 是否允许执行 Python 命令。攻击者可以通过该命令执行任意恶意指令，这十分危险！通常仅应该在开发时被打开！
-        self.commands_map: Dict[str, Callable[[List[str], Player | str], str]] = {
+        self.commands_map: Dict[
+            str, Callable[[List[str], Player | str], str | Text]
+        ] = {
             "regions": self.list_region,
             "players": self.list_players,
             "tp": self.teleport,
@@ -38,8 +40,61 @@ class CommandExecutor:
             "kick": self.kick_command,
             "locate": self.locate_command,
             "summon": self.summon_command,
+            "tps": self.tps_command,
+            "mspt": self.mspt_command,
             "stop": self.stop_server,
         }
+
+    @staticmethod
+    def _performance_color(
+        value: float, good: float, warning: float, higher_is_better=True
+    ):
+        if higher_is_better:
+            if value >= good:
+                return TextColor.GREEN
+            if value >= warning:
+                return TextColor.YELLOW
+        else:
+            if value <= good:
+                return TextColor.GREEN
+            if value <= warning:
+                return TextColor.YELLOW
+        return TextColor.RED
+
+    def tps_command(self, args, executor: Player | str):
+        if args:
+            raise ValueError("Usage: /tps")
+        values = self.server.get_performance_snapshot().tps_averages
+        message = Text("TPS from last 1m, 5m, 15m: ", TextColor.GOLD)
+        for index, value in enumerate(values):
+            if index:
+                message += Text(", ", TextColor.GOLD)
+            message += Text(
+                f"{value:.1f}",
+                self._performance_color(value, good=18.0, warning=15.0),
+            )
+        return message
+
+    def mspt_command(self, args, executor: Player | str):
+        if args:
+            raise ValueError("Usage: /mspt")
+        stats_by_window = self.server.get_performance_snapshot().mspt_stats
+        message = Text("Server tick times ", TextColor.GOLD)
+        message += Text("(avg/min/max) ", TextColor.GRAY)
+        message += Text("from last 5s, 10s, 1m:\n", TextColor.GOLD)
+        for window_index, stats in enumerate(stats_by_window):
+            if window_index:
+                message += Text(", ", TextColor.GOLD)
+            for stat_index, value in enumerate(stats):
+                if stat_index:
+                    message += Text("/", TextColor.GRAY)
+                message += Text(
+                    f"{value:.1f}",
+                    self._performance_color(
+                        value, good=40.0, warning=50.0, higher_is_better=False
+                    ),
+                )
+        return message
 
     def python_execute(self, args, executor: Player | str):
         """
@@ -608,7 +663,7 @@ class CommandExecutor:
 
         return f"Filled {filled} block(s) with {block_id}"
 
-    def execute_command(self, executor: Player | str, args: list) -> str:
+    def execute_command(self, executor: Player | str, args: list) -> str | Text:
         cmd = args.pop(0)
         if cmd in self.commands_map:
             try:
