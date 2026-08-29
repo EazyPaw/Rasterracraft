@@ -15,6 +15,7 @@ import pygame
 
 from src.client import render, client_world
 from src.client.client_packets import decode_packet, encode_packet
+from src.client.camera import CameraMode
 from src.client.game_manager import GameManager
 from src.client.client_player import ClientPlayer
 from src.client.GUI.main_menu import MainMenu
@@ -104,6 +105,14 @@ class Client:
         self.render.request_text_input(False)
 
         # 简写方法
+
+    def set_camera_mode(self, mode: CameraMode | str) -> None:
+        """设置玩家镜头模式：``centered`` 或 ``mouse_lead``。"""
+        self.render.camera.set_mode(mode)
+
+    def toggle_camera_mode(self) -> CameraMode:
+        """切换玩家镜头模式，并返回切换后的模式。"""
+        return self.render.camera.toggle_mode()
 
     def _prepare_socket_transport(self):
         self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

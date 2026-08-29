@@ -157,7 +157,8 @@ class GameManager:
     def sync_player_camera(self):
         """同步玩家位置到相机。
         trans_world_location 内置了方块网格的 -0.5/+0.5 偏移，
-        这里反向补偿，并跟踪视觉模型中点（而非碰撞体中点）。"""
+        这里反向补偿，并跟踪视觉模型中点（而非碰撞体中点）。
+        鼠标引导模式只偏移该镜头目标，不修改玩家或鼠标世界坐标。"""
         player = self.client.client_player
         if player is None:
             return
@@ -165,8 +166,21 @@ class GameManager:
         visual_mid_y = (
             player.y + player.skeleton.size * player.skeleton.AUTHORED_HEIGHT_BLOCKS / 2
         )
-        self.client.render.camera.move_to(
-            player.x + player.width / 2 - 0.5, visual_mid_y + 0.5, 1 / self.client.rate
+        render = self.client.render
+        anchor_x = player.x + player.width / 2 - 0.5
+        anchor_y = visual_mid_y + 0.5
+        target_x, target_y = render.camera.get_follow_target(
+            anchor_x,
+            anchor_y,
+            pygame.mouse.get_pos(),
+            (render.SCREEN_WIDTH, render.SCREEN_HEIGHT),
+            render.block_size,
+        )
+        render.camera.move_to(
+            target_x,
+            target_y,
+            1 / self.client.rate,
+            lead_offset=(target_x - anchor_x, target_y - anchor_y),
         )
 
     def handle_events(self):

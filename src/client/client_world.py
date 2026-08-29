@@ -681,7 +681,7 @@ class ClientWorld:
         if tick - self._last_fluid_sound_tick < 30:
             return
 
-        from resources.server.block_class import FluidBlock
+        from src.server.block_class import FluidBlock
 
         px, py = float(player.x), float(player.y)
         pz = int(getattr(player, "z", 0))

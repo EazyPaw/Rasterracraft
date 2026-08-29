@@ -78,7 +78,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             (self.SCREEN_WIDTH, self.SCREEN_HEIGHT),
             pygame.RESIZABLE,
         )
-        pygame.display.set_caption("PyCraft 2D - 0.0.1 SNAPSHOT")
+        pygame.display.set_caption("Rasterracraft - 0.0.1 SNAPSHOT")
         self.icon: pygame.Surface = pygame.image.load("icon.png").convert_alpha()
         pygame.display.set_icon(self.icon)
 
@@ -633,11 +633,14 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         block_x = _math.floor(world_x)
         block_y = _math.floor(world_y)
 
-        # 距离检查
+        # 距离检查：鼠标引导模式下主玩家不再位于屏幕正中。
+        player_screen_x, player_screen_y = self.camera.get_player_screen_center(
+            (self.SCREEN_WIDTH, self.SCREEN_HEIGHT), self.block_size
+        )
         distance = (
             _math.sqrt(
-                (self.mouse_x - self.SCREEN_WIDTH / 2) ** 2
-                + (self.mouse_y - self.SCREEN_HEIGHT / 2) ** 2
+                (self.mouse_x - player_screen_x) ** 2
+                + (self.mouse_y - player_screen_y) ** 2
             )
             / self.block_size
         )

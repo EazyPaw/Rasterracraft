@@ -480,7 +480,7 @@ class Server:
         # 恢复玩家的游戏模式（优先读取玩家存档，回退到世界默认模式）
         saved_gamemode = data.get("gamemode") or self.level_data.get("game_mode")
         if saved_gamemode:
-            from resources.client.game_mode import get_gamemode_by_id
+            from src.client.game_mode import get_gamemode_by_id
 
             player.gamemode = get_gamemode_by_id(saved_gamemode)
         saved_inventory = data.get("inventory")

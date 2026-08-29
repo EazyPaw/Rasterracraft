@@ -216,7 +216,7 @@ class MainMenu(GUI):
 
         # 左侧：版本号
         self.render.render_text(
-            f"PyCraft 2D {version}", (8, y), (255, 255, 255), footer_font_size, True
+            f"{version}", (8, y), (255, 255, 255), footer_font_size, True
         )
 
         # 右侧：版权文字

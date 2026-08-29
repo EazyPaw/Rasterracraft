@@ -197,7 +197,7 @@ class EntitySkeleton(ABC):
         # 朝向
         self.facing = self.RIGHT
 
-        # 屏幕固定模式：为 True 时实体始终绘制在屏幕中心，不走相机变换
+        # 本地固定模式：绕过服务器位置插值，不走普通实体相机变换。
         self._pinned = False
         # 模型视觉中心（相对于实体坐标），子类在 __init__ 中覆写
         self._visual_center = (0.5, 0.5)
@@ -287,7 +287,7 @@ class EntitySkeleton(ABC):
     def _draw_part_at_screen(
         self, part: BodyPart, anchor_screen: tuple[float, float], tint=(255, 255, 255)
     ):
-        """绕过世界坐标变换，直接在屏幕坐标绘制部件（用于固定屏幕中心的实体）。"""
+        """绕过世界坐标变换，直接在屏幕坐标绘制本地主玩家部件。"""
         if not part.show:
             return
         anchor = pygame.Vector2(anchor_screen)
@@ -307,7 +307,7 @@ class EntitySkeleton(ABC):
         self.client.render.blit(texture, (round(top_left.x), round(top_left.y)))
 
     def draw(self):
-        """按层级绘制实体所有可见部件。_pinned 实体固定于屏幕中心。"""
+        """按层级绘制实体所有可见部件。_pinned 实体不使用服务器位置插值。"""
         scale = self.client.render.trans_scale * self.size
         render = self.client.render
         tint_x = self.entity.x + getattr(self.entity, "width", 1.0) * 0.5
@@ -318,10 +318,12 @@ class EntitySkeleton(ABC):
             tint = (255, 72, 72)
 
         if self._pinned:
-            # 屏幕固定模式：视觉中心精确对准屏幕中央，完全绕过相机
-            screen_cx = render.SCREEN_WIDTH / 2
-            screen_cy = render.SCREEN_HEIGHT / 2
             bs = render.block_size
+            # 主玩家仍绕过服务器位置插值，但要与鼠标引导的镜头
+            # 使用相反屏幕偏移；居中模式下该偏移始终为零。
+            screen_cx, screen_cy = render.camera.get_player_screen_center(
+                (render.SCREEN_WIDTH, render.SCREEN_HEIGHT), bs
+            )
             vc_x, vc_y = self._visual_center
             for part in self._parts_in_draw_order():
                 part.rebuild_texture(scale)
@@ -349,7 +351,7 @@ class PlayerSkeleton(EntitySkeleton):
         # 脚底对齐 entity.y，模型向上延伸约 1.8 格。
         self.size = self.VISUAL_HEIGHT_BLOCKS / self.AUTHORED_HEIGHT_BLOCKS
 
-        # 客户端主玩家：固定在屏幕中心，不走相机变换
+        # 客户端主玩家：绕过服务器位置插值，只接受本地镜头引导偏移。
         self._pinned = pinned
         self._visual_center = (
             getattr(player, "width", 1.0) * 0.5,
