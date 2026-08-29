@@ -133,6 +133,10 @@ class PrimedTNTSkeleton(EntitySkeleton):
     def update(self):
         pass
 
+    def get_hitbox_render_position(self) -> tuple[float, float]:
+        """TNT 当前不插值；判定框必须跟随其实际绘制坐标。"""
+        return self.entity.x, self.entity.y
+
     def draw(self):
         render = self.client.render
         block_size = render.block_size

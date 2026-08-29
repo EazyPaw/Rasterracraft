@@ -74,6 +74,25 @@ class GameManager:
                 self._pressed_keys.clear()
                 self._pressed_mouse_buttons.clear()
 
+    def _get_key_action(self, event_key: int):
+        """解析单键或有顺序的组合键操作。
+
+        组合键元组的最后一个键是触发键，前面的键必须保持按下。
+        例如 ``(F3, B)`` 只会在按住 F3 后按下 B 时触发。
+        """
+        action = self.client.key_map.get(event_key)
+        if action is not None:
+            return action
+
+        for shortcut, shortcut_action in self.client.key_map.items():
+            if not isinstance(shortcut, tuple) or not shortcut:
+                continue
+            if shortcut[-1] != event_key:
+                continue
+            if all(key in self._pressed_keys for key in shortcut):
+                return shortcut_action
+        return None
+
     def tick_ig(self):
         """执行一次游戏内逻辑更新"""
         if self.client.client_player is None:
@@ -212,8 +231,9 @@ class GameManager:
                             not self.client.client_player.flying
                         )
                     self.last_pressed_time[pygame.K_SPACE] = now
-                if event.key in self.client.key_map:
-                    self.client.key_map[event.key]()
+                action = self._get_key_action(event.key)
+                if action is not None:
+                    action()
             if event.type == pygame.MOUSEWHEEL:
                 self.client.client_player.game_mode.mouse_wheel(event.y)
 

@@ -335,6 +335,38 @@ class EntitySkeleton(ABC):
             for part in self._parts_in_draw_order():
                 part.draw(render, entity_pos, scale, tint)
 
+    def get_hitbox_render_position(self) -> tuple[float, float]:
+        """返回与当前 Skeleton 帧完全一致的判定框世界坐标。"""
+        return self._render_x, self._render_y
+
+    def draw_hitbox(self) -> None:
+        """沿用 Skeleton 的插值或本地固定坐标绘制实体判定框。"""
+        render = self.client.render
+        if self._pinned:
+            block_size = render.block_size
+            screen_cx, screen_cy = render.camera.get_player_screen_center(
+                (render.SCREEN_WIDTH, render.SCREEN_HEIGHT), block_size
+            )
+            visual_center_x, visual_center_y = self._visual_center
+
+            def pinned_transform(position: tuple[float, float]):
+                return (
+                    screen_cx + (position[0] - visual_center_x) * block_size,
+                    screen_cy - (position[1] - visual_center_y) * block_size,
+                )
+
+            render.draw_entity_hitbox(
+                self.entity,
+                position=(0.0, 0.0),
+                transform=pinned_transform,
+            )
+            return
+
+        render.draw_entity_hitbox(
+            self.entity,
+            position=self.get_hitbox_render_position(),
+        )
+
 
 class PlayerSkeleton(EntitySkeleton):
     """基于 Minecraft Steve 皮肤的 2D 玩家骨架。"""

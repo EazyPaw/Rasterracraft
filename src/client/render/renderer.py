@@ -175,6 +175,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         # ---- 供外部使用的绘制方法引用 ----
         self.blit = self.screen.blit
         self.debug = False
+        self.show_entity_hitboxes = False
         self.tinted_surface_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
         self.MAX_TINTED_SURFACE_CACHE: int = 768
         self.MAX_TINTED_SURFACE_CACHE_BYTES: int = 12 * 1024 * 1024
@@ -706,7 +707,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
 
     def draw_player(self) -> None:
         """绘制玩家实体。"""
-        self.client.client_player.skeleton.draw()
+        player = self.client.client_player
+        player.skeleton.draw()
+        if getattr(self, "show_entity_hitboxes", False):
+            self.draw_skeleton_hitbox(player, player.skeleton)
 
     def draw_entities(self, z_filter: int | None = None) -> None:
         """绘制服务端同步的非本地实体。"""
@@ -731,6 +735,80 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             if entity.skeleton is not None:
                 entity.skeleton.update()
                 entity.skeleton.draw()
+            if getattr(self, "show_entity_hitboxes", False):
+                self.draw_skeleton_hitbox(entity, entity.skeleton)
+
+    def draw_skeleton_hitbox(self, entity, skeleton) -> None:
+        """优先使用 Skeleton 当前帧坐标，无对应接口时回退到实体坐标。"""
+        draw_hitbox = getattr(skeleton, "draw_hitbox", None)
+        if callable(draw_hitbox):
+            draw_hitbox()
+            return
+        self.draw_entity_hitbox(entity)
+
+    def draw_entity_hitbox(self, entity, *, position=None, transform=None) -> None:
+        """按给定渲染坐标绘制 Minecraft F3+B 风格判定框。"""
+        try:
+            width = float(entity.width)
+            height = float(entity.height)
+        except (AttributeError, TypeError, ValueError):
+            return
+        if position is None:
+            position = (getattr(entity, "x", None), getattr(entity, "y", None))
+        try:
+            x = float(position[0])
+            y = float(position[1])
+        except (IndexError, TypeError, ValueError):
+            return
+        if not all(_math.isfinite(value) for value in (x, y, width, height)):
+            return
+        if width <= 0.0 or height <= 0.0:
+            return
+
+        transform = transform or self.trans_world_location
+        left, bottom = transform((x, y))
+        right, top = transform((x + width, y + height))
+        outline = pygame.Rect(
+            round(left),
+            round(top),
+            max(1, round(right - left)),
+            max(1, round(bottom - top)),
+        )
+        line_width = max(1, round(self.block_size / 64))
+        self.draw_rect((255, 255, 255), outline, line_width)
+
+        # 原版判定框用红线标出眼睛高度，用蓝线显示实体注视方向。
+        default_eye_height = height * (
+            0.75 if getattr(entity, "sneaking", False) else 0.85
+        )
+        try:
+            eye_height = float(getattr(entity, "eye_height", default_eye_height))
+        except (TypeError, ValueError):
+            eye_height = default_eye_height
+        eye_height = max(0.0, min(height, eye_height))
+        eye_y = y + eye_height
+        eye_left = transform((x, eye_y))
+        eye_right = transform((x + width, eye_y))
+        self.draw_line((255, 0, 0), eye_left, eye_right, line_width)
+
+        try:
+            look_angle = float(getattr(entity, "look_angle", 0.0))
+        except (TypeError, ValueError):
+            look_angle = 0.0
+        if not _math.isfinite(look_angle):
+            look_angle = 0.0
+        direction = 1.0 if int(getattr(entity, "facing", 1)) == 1 else -1.0
+        angle = _math.radians(look_angle)
+        eye_x = x + width * 0.5
+        look_length = 2.0
+        look_start = transform((eye_x, eye_y))
+        look_end = transform(
+            (
+                eye_x + direction * _math.cos(angle) * look_length,
+                eye_y + direction * _math.sin(angle) * look_length,
+            )
+        )
+        self.draw_line((0, 0, 255), look_start, look_end, line_width)
 
     def get_mouse_world_position(self) -> tuple[float, float]:
         """将当前鼠标位置转换为世界坐标。"""
@@ -933,6 +1011,12 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def debug_mode(self) -> None:
         """切换调试模式（显示方块光照值）。"""
         self.debug = not self.debug
+
+    def hitbox_mode(self) -> None:
+        """切换实体判定框显示（对应 Minecraft Java 版 F3+B）。"""
+        self.show_entity_hitboxes = not getattr(self, "show_entity_hitboxes", False)
+        state = "已显示" if self.show_entity_hitboxes else "已隐藏"
+        self.client.add_chat_message(f"实体判定框：{state}", (255, 255, 255))
 
     def draw_biome_debug_overlay(self) -> None:
         block_size = self.block_size

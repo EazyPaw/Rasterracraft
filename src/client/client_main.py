@@ -559,7 +559,8 @@ class Client:
                 pygame.K_s: self.client_player.handle_shift,
             }
             self.key_map = {
-                pygame.K_F3: self.render.debug_mode,
+                (pygame.K_F3, pygame.K_g): self.render.debug_mode,
+                (pygame.K_F3, pygame.K_b): self.render.hitbox_mode,
                 pygame.K_e: self.client_player.game_mode.open_inventory,
                 pygame.K_LCTRL: self.client_player.switch_sprint,
             }
