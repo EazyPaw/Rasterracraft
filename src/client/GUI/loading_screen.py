@@ -5,9 +5,10 @@ from src.client.GUI.gui import GUI
 
 
 class LoadingScreen(GUI):
-    def __init__(self, render):
+    def __init__(self, render, title_key: str = "menu.loadingLevel"):
         super().__init__(render)
         self.priority = 1000
+        self.title_key = title_key
         self._background_cache = None
         self._background_cache_key = None
 
@@ -17,7 +18,7 @@ class LoadingScreen(GUI):
         width, height = screen.get_size()
         self._draw_background(width, height)
 
-        title = client.resources_manager.get_translation_key("menu.loadingLevel")
+        title = client.resources_manager.get_translation_key(self.title_key)
         title_font = self.render.get_font(max(28, min(46, height // 14)))
         title_surface = title_font.render(title, True, (245, 245, 245))
         screen.blit(

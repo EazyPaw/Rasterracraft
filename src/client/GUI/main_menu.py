@@ -3,6 +3,7 @@ import pygame
 
 from src.client.GUI.button import Button
 from src.client.GUI.gui import GUI
+from src.client.GUI.multiplayer_menu import MultiplayerMenu
 from src.client.GUI.saves_menu import SavesMenu
 from src.client.resources_manager import transkey
 from src.server.utils import client_method
@@ -28,6 +29,7 @@ class MainMenu(GUI):
         self._background_cache_key = None
         # 添加默认的“单人游戏”按钮
         self.add_button(transkey("menu.singleplayer"), self.start_singleplayer)
+        self.add_button(transkey("menu.multiplayer"), self.open_multiplayer)
         self.add_button(transkey("menu.quit"), client.shutdown)
 
     def add_button(
@@ -58,6 +60,14 @@ class MainMenu(GUI):
         self.render.close_gui(self)  # 关闭主菜单
         self.render.client.saves_menu = SavesMenu(self.render, self)
         self.render.show_gui(self.render.client.saves_menu)  # 显示存档菜单
+
+    def open_multiplayer(self):
+        """打开直接连接页面，由玩家输入服务器地址。"""
+        if self.starting_world:
+            return
+        self.render.close_gui(self)
+        self.render.client.multiplayer_menu = MultiplayerMenu(self.render, self)
+        self.render.show_gui(self.render.client.multiplayer_menu)
 
     def draw(self):
         """绘制主菜单：布局按钮、背景、Logo 和页脚"""

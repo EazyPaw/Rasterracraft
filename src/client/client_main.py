@@ -98,7 +98,10 @@ class Client:
         self.key_map = {}
         self.current_save_id: str | None = None
         self.current_game_mode: str = "survival"
+        self.connection_target = ("127.0.0.1", 14525)
+        self.integrated_session = False
         self.saves_menu: SavesMenu | None = None
+        self.multiplayer_menu = None
         self.main_menu = MainMenu(self.render)
         self.render.show_gui(self.main_menu)
         self.game_thread.start()
@@ -131,14 +134,18 @@ class Client:
         self.server_thread.daemon = True
 
     def start_socket(self):
-        # 重试连接：子进程模式下服务端需要时间绑定端口并开始监听
-        max_retries = 10
+        # 本地子进程需要时间绑定端口；远程服务器直接尝试一次。
+        max_retries = 10 if self.integrated_session else 1
         retry_delay = 0.3
         last_error = None
         connected = False
         for attempt in range(max_retries):
             try:
-                self.client_sock.connect(("127.0.0.1", 14525))
+                if not self.integrated_session:
+                    self.client_sock.settimeout(5.0)
+                self.client_sock.connect(self.connection_target)
+                if not self.integrated_session:
+                    self.client_sock.settimeout(None)
                 connected = True
                 break
             except ConnectionRefusedError as e:
@@ -147,7 +154,8 @@ class Client:
                     time.sleep(retry_delay)
                 else:
                     logging.error(
-                        "Could not connect to integrated server after retries"
+                        "Could not connect to server %s:%s after retries",
+                        *self.connection_target,
                     )
             except OSError as e:
                 last_error = e
@@ -156,7 +164,11 @@ class Client:
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                 else:
-                    logging.error(f"Could not connect to integrated server: {e}")
+                    logging.error(
+                        "Could not connect to server %s:%s: %s",
+                        *self.connection_target,
+                        e,
+                    )
 
         if not connected:
             if self.socket_thread_running and not self.is_shutting_down:
@@ -165,7 +177,7 @@ class Client:
                 )
             return
 
-        logging.info("Connected to integrated server")
+        logging.info("Connected to server %s:%s", *self.connection_target)
         self.socket_connected.set()
         while self.socket_thread_running:
             try:
@@ -273,6 +285,63 @@ class Client:
                 version=self.version,
             )["id"]
         self.current_save_id = save_id
+        self.connection_target = ("127.0.0.1", 14525)
+        self.integrated_session = True
+        level = save_manager.load_level(save_id) or {}
+        requested_mode = str(level.get("game_mode", "survival")).lower()
+        self.current_game_mode = (
+            requested_mode
+            if requested_mode in ("creative", "survival")
+            else "survival"
+        )
+        self._prepare_game_session()
+
+        if self.server_mode == "subprocess":
+            self._start_server_subprocess()
+        else:
+            self._start_server_thread()
+        self.socket_thread.start()
+
+    def start_multiplayer(self, server_address: str):
+        """连接玩家输入的远程服务器，不启动本地集成服务端。"""
+        if self.game_started:
+            return
+        self.connection_target = self.parse_server_address(server_address)
+        self.integrated_session = False
+        self.current_save_id = None
+        self.current_game_mode = "survival"
+        self._prepare_game_session(loading_title_key="connect.connecting")
+        self.socket_thread.start()
+
+    @staticmethod
+    def parse_server_address(
+        server_address: str, default_port: int = 14525
+    ) -> tuple[str, int]:
+        """解析 ``主机`` 或 ``主机:端口``，并验证端口范围。"""
+        address = str(server_address).strip()
+        if not address or any(char.isspace() for char in address):
+            raise ValueError("Invalid server address")
+
+        host = address
+        port = default_port
+        if address.count(":") == 1:
+            host, port_text = address.rsplit(":", 1)
+            if not host or not port_text:
+                raise ValueError("Invalid server address")
+            try:
+                port = int(port_text)
+            except ValueError as exc:
+                raise ValueError("Invalid server port") from exc
+        elif ":" in address:
+            # 当前网络传输使用 IPv4；拒绝含多个冒号的歧义地址。
+            raise ValueError("IPv6 addresses are not supported")
+
+        if not 1 <= port <= 65535:
+            raise ValueError("Server port out of range")
+        return host, port
+
+    def _prepare_game_session(self, loading_title_key: str = "menu.loadingLevel"):
+        """初始化本地或远程游戏共用的客户端会话状态。"""
         self.disconnect_screen = None
         self.death_screen = None
         self.save_complete_event.clear()
@@ -288,22 +357,16 @@ class Client:
             self.render.close_gui(self.main_menu)
         if self.saves_menu is not None and self.saves_menu in self.render.drawing_GUIs:
             self.render.close_gui(self.saves_menu)
-        level = save_manager.load_level(save_id) or {}
-        requested_mode = str(level.get("game_mode", "survival")).lower()
-        self.current_game_mode = (
-            requested_mode if requested_mode in ("creative", "survival") else "survival"
-        )
+        if (
+            self.multiplayer_menu is not None
+            and self.multiplayer_menu in self.render.drawing_GUIs
+        ):
+            self.render.close_gui(self.multiplayer_menu)
         self.client_player = ClientPlayer(self, self.current_game_mode)
         self._install_game_controls()
 
-        self.loading_screen = LoadingScreen(self.render)
+        self.loading_screen = LoadingScreen(self.render, loading_title_key)
         self.render.show_gui(self.loading_screen)
-
-        if self.server_mode == "subprocess":
-            self._start_server_subprocess()
-        else:
-            self._start_server_thread()
-        self.socket_thread.start()
 
     def on_chunk_loaded(self, rx: int) -> None:
         self.loaded_chunk_regions.add(int(rx))
@@ -470,6 +533,8 @@ class Client:
         self.game_manager.last_pressed_time.clear()
         self.current_save_id = None
         self.current_game_mode = "survival"
+        self.connection_target = ("127.0.0.1", 14525)
+        self.integrated_session = False
         self.server = None
         self.server_process = None
         self.game_started = False
@@ -594,10 +659,11 @@ class Client:
                 logging.warning("Socket thread did not exit cleanly")
         self.socket_connected.clear()
 
-        if self.server_mode == "subprocess":
-            self._shutdown_server_subprocess()
-        else:
-            self._shutdown_server_thread()
+        if self.integrated_session:
+            if self.server_mode == "subprocess":
+                self._shutdown_server_subprocess()
+            else:
+                self._shutdown_server_thread()
 
     def shutdown(self):
         """优雅地关闭客户端。
