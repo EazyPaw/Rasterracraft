@@ -2,6 +2,7 @@
 import pygame
 
 from src.client.resources_manager import transkey
+from src.server.attributes import AttributeOperation, normalize_id
 from src.server.text import Text, TextColor
 
 
@@ -59,6 +60,41 @@ class ItemTooltip:
         namespace = str(getattr(material, "name_space_key", "minecraft") or "minecraft")
         return f"{namespace}:{item_id}"
 
+    def _attack_damage_lines(self, stack) -> list[Text]:
+        get_modifiers = getattr(stack, "get_attribute_modifiers", None)
+        if not callable(get_modifiers):
+            return []
+
+        lines = []
+        attribute_name = transkey(
+            "attribute.name.generic.attackDamage", client=self.render.client
+        )
+        for attribute_id, modifier in get_modifiers("mainhand"):
+            if normalize_id(attribute_id) != "minecraft:attack_damage":
+                continue
+            amount = float(modifier.amount)
+            operation = modifier.operation
+            if operation is not AttributeOperation.ADD_VALUE:
+                amount *= 100.0
+            if amount == 0.0:
+                continue
+            operation_index = {
+                AttributeOperation.ADD_VALUE: 0,
+                AttributeOperation.ADD_MULTIPLIED_BASE: 1,
+                AttributeOperation.ADD_MULTIPLIED_TOTAL: 2,
+            }[operation]
+            sign = "plus" if amount > 0.0 else "take"
+            description = transkey(
+                f"attribute.modifier.{sign}.{operation_index}",
+                abs(amount),
+                attribute_name,
+                client=self.render.client,
+            )
+            lines.append(
+                Text(description, TextColor.BLUE if amount > 0.0 else TextColor.RED)
+            )
+        return lines
+
     def get_lines(self, stack) -> list[str | Text]:
         lines: list[str | Text] = [self._translated_name(stack)]
         lore = stack.get_lore()
@@ -68,6 +104,10 @@ class ItemTooltip:
                     lines.extend(self._split_line(entry))
                 else:
                     lines.extend(self._split_line(str(entry)))
+        attribute_lines = self._attack_damage_lines(stack)
+        if attribute_lines:
+            lines.append("")
+            lines.extend(attribute_lines)
         lines.append(Text(self._namespaced_id(stack), TextColor.DARK_GRAY))
         return lines
 

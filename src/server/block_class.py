@@ -240,7 +240,14 @@ class Block(ABC):
     def can_harvest(self, material) -> bool:
         if not self.requires_correct_tool:
             return True
-        tiers = {"wood": 0, "stone": 1, "iron": 2, "diamond": 3, "netherite": 4}
+        tiers = {
+            "wood": 0,
+            "gold": 0,
+            "stone": 1,
+            "iron": 2,
+            "diamond": 3,
+            "netherite": 4,
+        }
         return getattr(
             material, "tool_type", None
         ) == self.preferred_tool and tiers.get(

@@ -8,6 +8,7 @@ import pygame
 import src.server.materials as materials
 
 from src.server.attributes import AttributeModifier
+from src.server.material_class import BlockItem
 from src.server.text import Text, TextColor
 
 from src.server.utils import client_method
@@ -336,6 +337,13 @@ class ItemStack:
             return result
 
         return res
+
+    @client_method
+    def get_gui_texture(self, gui_scale: float, client):
+        """Return an icon sized and styled for an 18x18 GUI slot."""
+        is_block_item = isinstance(self.material, BlockItem)
+        scale = float(gui_scale) * (0.7 if is_block_item else 1.0)
+        return self.get_texture(scale, shadow=is_block_item, client=client)
 
     def get_lore(self) -> list[str | Text]:
         lore = []

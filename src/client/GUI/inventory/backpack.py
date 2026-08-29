@@ -238,7 +238,7 @@ class Backpack(GUI):
     def _draw_crafting_stack(self, stack, pos):
         if self._is_empty(stack):
             return
-        icon = stack.get_texture(self.render.gui_scale * 0.7, shadow=True)
+        icon = stack.get_gui_texture(self.render.gui_scale)
         if icon is None:
             return
         size = self.slot_size * self.render.gui_scale
@@ -805,10 +805,7 @@ class Backpack(GUI):
                     # 空格子跳过，不渲染
                     if item.is_empty():
                         continue
-                    # 获取带阴影的物品纹理（缩放倍率 0.7×gui_scale）
-                    texture_item = item.get_texture(
-                        self.render.gui_scale * 0.7, shadow=True
-                    )
+                    texture_item = item.get_gui_texture(self.render.gui_scale)
 
                     if texture_item is not None:
                         # 物品图标在槽位内居中
@@ -856,9 +853,7 @@ class Backpack(GUI):
                 (self.render.mouse_x, self.render.mouse_y),
             )
         if self.dragging_item and not self.dragging_item.is_empty():
-            texture_item = self.dragging_item.get_texture(
-                self.render.gui_scale * 0.7, shadow=True
-            )
+            texture_item = self.dragging_item.get_gui_texture(self.render.gui_scale)
             if texture_item is not None:
                 # 物品图标居中跟随鼠标
                 drag_x = self.render.mouse_x - texture_item.get_width() // 2

@@ -68,7 +68,7 @@ class HotBar(GUI):
 
             if item.is_empty():
                 continue
-            texture_ = item.get_texture(self.render.gui_scale * 0.7, shadow=True)
+            texture_ = item.get_gui_texture(self.render.gui_scale)
 
             if texture_ is None:
                 continue

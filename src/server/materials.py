@@ -408,6 +408,114 @@ class Tool(DamageableItem):
         return {"anchor": (0.7, 0.7), "offset": (0, 0), "scale": 0.8, "rotation": -135}
 
 
+class Sword(Tool):
+    tool_type = "sword"
+    attack_damage_modifier = 4.0
+    attack_speed_modifier = -2.4
+
+    def on_post_hurt_enemy(self, stack, holder, target) -> bool:
+        return self.damage_stack(stack, 1, holder)
+
+
+@register_material
+class WOODEN_SWORD(Sword):
+    name_id = "wooden_sword"
+    name = "item.swordWood.name"
+    _texture_path = "items.wood_sword"
+
+
+@register_material
+class GOLDEN_SWORD(WOODEN_SWORD):
+    name_id = "golden_sword"
+    name = "item.swordGold.name"
+    _texture_path = "items.gold_sword"
+    tier = "gold"
+    max_damage = 32
+
+
+@register_material
+class STONE_SWORD(WOODEN_SWORD):
+    name_id = "stone_sword"
+    name = "item.swordStone.name"
+    _texture_path = "items.stone_sword"
+    tier = "stone"
+    attack_damage_modifier = 5.0
+    max_damage = 131
+
+
+@register_material
+class IRON_SWORD(WOODEN_SWORD):
+    name_id = "iron_sword"
+    name = "item.swordIron.name"
+    _texture_path = "items.iron_sword"
+    tier = "iron"
+    attack_damage_modifier = 6.0
+    max_damage = 250
+
+
+@register_material
+class DIAMOND_SWORD(WOODEN_SWORD):
+    name_id = "diamond_sword"
+    name = "item.swordDiamond.name"
+    _texture_path = "items.diamond_sword"
+    tier = "diamond"
+    attack_damage_modifier = 7.0
+    max_damage = 1561
+
+
+@register_material
+class WOODEN_AXE(Tool):
+    name_id = "wooden_axe"
+    name = "item.hatchetWood.name"
+    _texture_path = "items.wood_axe"
+    tool_type = "axe"
+    mining_speed = 2.0
+    attack_damage_modifier = 3.0
+
+
+@register_material
+class GOLDEN_AXE(WOODEN_AXE):
+    name_id = "golden_axe"
+    name = "item.hatchetGold.name"
+    _texture_path = "items.gold_axe"
+    tier = "gold"
+    mining_speed = 12.0
+    max_damage = 32
+
+
+@register_material
+class STONE_AXE(WOODEN_AXE):
+    name_id = "stone_axe"
+    name = "item.hatchetStone.name"
+    _texture_path = "items.stone_axe"
+    tier = "stone"
+    mining_speed = 4.0
+    attack_damage_modifier = 4.0
+    max_damage = 131
+
+
+@register_material
+class IRON_AXE(WOODEN_AXE):
+    name_id = "iron_axe"
+    name = "item.hatchetIron.name"
+    _texture_path = "items.iron_axe"
+    tier = "iron"
+    mining_speed = 6.0
+    attack_damage_modifier = 5.0
+    max_damage = 250
+
+
+@register_material
+class DIAMOND_AXE(WOODEN_AXE):
+    name_id = "diamond_axe"
+    name = "item.hatchetDiamond.name"
+    _texture_path = "items.diamond_axe"
+    tier = "diamond"
+    mining_speed = 8.0
+    attack_damage_modifier = 6.0
+    max_damage = 1561
+
+
 @register_material
 class WOODEN_PICKAXE(Tool):
     name_id = "wooden_pickaxe"
@@ -417,6 +525,16 @@ class WOODEN_PICKAXE(Tool):
     mining_speed = 2.0
     attack_damage_modifier = 1.0
     attack_speed_modifier = -2.8
+
+
+@register_material
+class GOLDEN_PICKAXE(WOODEN_PICKAXE):
+    name_id = "golden_pickaxe"
+    name = "item.pickaxeGold.name"
+    _texture_path = "items.gold_pickaxe"
+    tier = "gold"
+    mining_speed = 12.0
+    max_damage = 32
 
 
 @register_material
