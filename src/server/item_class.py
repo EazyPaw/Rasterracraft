@@ -339,7 +339,7 @@ class ItemStack:
         return res
 
     @client_method
-    def get_gui_texture(self, gui_scale: float, client):
+    def get_gui_texture(self, gui_scale: float, client = None):
         """Return an icon sized and styled for an 18x18 GUI slot."""
         is_block_item = isinstance(self.material, BlockItem)
         scale = float(gui_scale) * (0.7 if is_block_item else 1.0)

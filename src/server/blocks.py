@@ -1709,7 +1709,7 @@ class TORCH(ParticleEmitterBlock):
 
 class OAK_SLAB(SLABS):
     block_id = "oak_slab"
-    name = "tile.oak_slab.name"
+    name = "tile.woodSlab.name"
     _texture_path = "blocks.planks_oak"
 
 
@@ -1755,7 +1755,7 @@ class TNT(Block):
 
 class MYCELIUM(Block):
     block_id = "mycelium"
-    name = "tile.mycelium.name"
+    name = "tile.mycel.name"
     _texture_path = "blocks.mycelium_side"
 
 
@@ -1767,13 +1767,13 @@ class MUSHROOM_STEM(Block):
 
 class RED_MUSHROOM_BLOCK(Block):
     block_id = "red_mushroom_block"
-    name = "tile.red_mushroom_block.name"
+    name = "tile.mushroom.name"
     _texture_path = "blocks.mushroom_block_skin_red"
 
 
 class BROWN_MUSHROOM_BLOCK(Block):
     block_id = "brown_mushroom_block"
-    name = "tile.brown_mushroom_block.name"
+    name = "tile.mushroom.name"
     _texture_path = "blocks.mushroom_block_skin_brown"
 
 
@@ -1835,3 +1835,11 @@ def has_block_id(block_id: str) -> bool:
     if _BLOCK_REGISTRY is None:
         _BLOCK_REGISTRY = _build_block_id_cache()
     return str(block_id) in _BLOCK_REGISTRY
+
+
+def get_registered_block_ids() -> tuple[str, ...]:
+    """Return every currently registered block id in definition order."""
+    global _BLOCK_REGISTRY
+    if _BLOCK_REGISTRY is None:
+        _BLOCK_REGISTRY = _build_block_id_cache()
+    return tuple(_BLOCK_REGISTRY)

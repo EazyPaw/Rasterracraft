@@ -247,14 +247,18 @@ class Backpack(GUI):
         self.render.blit(icon, (x, y))
         stack.draw_durability_bar(self.render, pos[0], pos[1], size)
         if stack.amount > 1:
+            font_size = int(20 * self.render.gui_scale / 3.5)
+            digit_count = len(str(abs(stack.amount)))
             self.render.render_text(
                 str(stack.amount),
                 (
-                    pos[0] + size - self.render.gui_scale * 10,
-                    pos[1] + size - self.render.gui_scale * 11,
+                    pos[0]
+                    + size
+                    - self.render.gui_scale * (3 + digit_count * 3),
+                    pos[1] + size - self.render.gui_scale * 5 - 6,
                 ),
                 (255, 255, 255),
-                int(20 * self.render.gui_scale / 3.5),
+                font_size,
                 True,
             )
 

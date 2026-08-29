@@ -23,7 +23,6 @@ class MultiplayerMenu(GUI):
 
         self.address_box = InputBox(
             "",
-            placeholder="127.0.0.1:14525",
             label=transkey("addServer.enterIp"),
             max_length=253,
             on_change=self._on_address_changed,

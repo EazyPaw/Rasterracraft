@@ -961,8 +961,16 @@ class Player(Entity):
 
     def container_click(self, container_id: str, slot, button: int) -> None:
         container = self.get_inventory_container(container_id)
-        if isinstance(container, Inventory):
-            self._click_container(container, int(slot), int(button))
+        if (
+            container is self.equipment
+            and getattr(self.gamemode, "name_id", "survival") != "creative"
+        ):
+            self.sync_inventory()
+            return
+        if isinstance(container, Inventory) or container is self.equipment:
+            self._click_container(container, slot, int(button))
+            if container is self.equipment:
+                self._equipment_attribute_signature = None
         self.sync_inventory()
 
     def container_drag(self, container_id: str, slots, button: int) -> None:
@@ -1120,10 +1128,17 @@ class Player(Entity):
             self._container_changed(destination)
         self.sync_inventory()
 
-    def _click_container(self, container, slot: int, button: int) -> None:
-        if not 0 <= int(slot) < len(container) or button not in (1, 3):
+    def _click_container(self, container, slot, button: int) -> None:
+        if button not in (1, 3):
             return
-        slot = int(slot)
+        if isinstance(container, dict):
+            slot = str(slot)
+            if slot not in container:
+                return
+        else:
+            slot = int(slot)
+            if not 0 <= slot < len(container):
+                return
         target = container[slot]
         cursor = self.cursor_stack
         if cursor.is_empty():

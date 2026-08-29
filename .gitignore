@@ -207,6 +207,7 @@ marimo/_lsp/
 __marimo__/
 /assets/
 /test.py
+/tests/
 /data/
 /src/client/render.py.bak
 /saves/

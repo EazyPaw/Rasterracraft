@@ -59,15 +59,38 @@ class ClientPlayer(Entity):
         self.fore_place = False
 
     def set_creative_slot(
-        self, slot: int, item_id: str = "air", amount: int = 64, nbt=None
+        self,
+        slot: int | None,
+        item_id: str = "air",
+        amount: int = 64,
+        nbt=None,
+        *,
+        target: str = "inventory",
     ) -> None:
-        self.client.sent_packet(
-            {
-                "__class__": "CreativeSetSlot",
-                "slot": int(slot),
-                "item": {"id": str(item_id), "amount": int(amount), "nbt": nbt or {}},
-            }
+        packet = {
+            "__class__": "CreativeSetSlot",
+            "target": str(target),
+            "item": {"id": str(item_id), "amount": int(amount), "nbt": nbt or {}},
+        }
+        if slot is not None:
+            packet["slot"] = int(slot)
+        self.client.sent_packet(packet)
+
+    def set_creative_cursor(
+        self, item_id: str = "air", amount: int = 64, nbt=None
+    ) -> None:
+        """Ask the server to create a stack on the creative inventory cursor."""
+        self.set_creative_slot(
+            None,
+            item_id,
+            amount,
+            nbt,
+            target="cursor",
         )
+
+    def clear_creative_inventory(self) -> None:
+        """Clear all player inventory and equipment slots while in creative mode."""
+        self.client.sent_packet({"__class__": "CreativeClearInventory"})
 
     def move_update(self):
         if self.dead:

@@ -632,3 +632,31 @@ def get_material_by_id(material_id: str):
     if key.endswith("s") and blocks.has_block_id(key[:-1]):
         return get_block_item(blocks.get_block_by_id(key[:-1]))
     return AIR()
+
+
+def get_creative_inventory_materials() -> tuple[Material, ...]:
+    """Build the unsplit creative catalogue from registered items and blocks.
+
+    Registry aliases and blocks which already have a dedicated item are de-duplicated
+    by their resulting item id. Air is intentionally omitted because it represents an
+    empty stack rather than something the player can take.
+    """
+    result: list[Material] = []
+    seen: set[str] = set()
+
+    def append(material: Material) -> None:
+        material_id = str(getattr(material, "name_id", "air"))
+        if material_id == "air" or material_id in seen:
+            return
+        seen.add(material_id)
+        result.append(material)
+
+    for namespace in _material_registry.values():
+        for material_type in namespace.values():
+            append(material_type())
+
+    from src.server import blocks
+
+    for block_id in blocks.get_registered_block_ids():
+        append(get_material_by_id(block_id))
+    return tuple(result)

@@ -564,14 +564,28 @@ def decode_packet(packet: dict, player: Player):
             player.sync_inventory()
             return
         try:
-            slot = int(packet.get("slot"))
-            if not 0 <= slot < len(player.inventory):
-                raise ValueError
             item_payload = packet.get("item", packet)
             item = payload_to_stack(item_payload)
-            player.inventory[slot] = EmptyItemStack() if item.is_empty() else item
+            item = EmptyItemStack() if item.is_empty() else item
+            if packet.get("target", "inventory") == "cursor":
+                player.cursor_stack = item
+            else:
+                slot = int(packet.get("slot"))
+                if not 0 <= slot < len(player.inventory):
+                    raise ValueError
+                player.inventory[slot] = item
         except (TypeError, ValueError):
             pass
+        player.sync_inventory()
+    elif packet["__class__"] == "CreativeClearInventory":
+        if getattr(player.gamemode, "name_id", "survival") != "creative":
+            player.sync_inventory()
+            return
+        for slot in range(len(player.inventory)):
+            player.inventory[slot] = EmptyItemStack()
+        for slot in player.equipment:
+            player.equipment[slot] = EmptyItemStack()
+        player._equipment_attribute_signature = None
         player.sync_inventory()
     elif packet["__class__"] == "InventoryDrag":
         try:

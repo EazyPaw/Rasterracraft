@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from src.client.GUI.chat import ChatGUI
 from src.client.GUI.inventory.backpack import Backpack
 from src.client.GUI.inventory.crafting_table import CraftingTable
+from src.client.GUI.inventory.creative_inventory import CreativeInventory
 from src.client.GUI.inventory.hotbar import HotBar
 from src.client.GUI.survival_hud import SurvivalHUD
 from src.server.block_class import Block
@@ -134,7 +135,7 @@ class CreativeMode(GameMode):
         self.player.block_interaction_range = 5
         self.player.flyable = True
         self.update_gui()
-        self.inv = Backpack(self.player.client.render)
+        self.inv = CreativeInventory(self.player.client.render)
         self.crafting_table = CraftingTable(self.player.client.render)
 
     def update_gui(self):
