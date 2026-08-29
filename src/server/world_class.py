@@ -240,6 +240,9 @@ class World:
         self.random_tick_speed = 3
         self.weather: Weather = Weather.CLEAR
         self.weather_tick = self._random_weather_duration(self.weather)
+        self.spawn_point = 0
+        for i in range(self.spawn_point - self.server.view_distance, self.spawn_point + self.server.view_distance):
+            self.generate_chunk(i)
 
     @staticmethod
     def _random_weather_duration(weather: Weather) -> int:
