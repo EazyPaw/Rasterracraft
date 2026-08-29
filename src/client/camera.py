@@ -88,6 +88,37 @@ class Camera:
         offset_x, offset_y = self.get_lead_screen_offset(block_size)
         return width / 2 + offset_x, height / 2 + offset_y
 
+    def rescale_lead_for_zoom(
+        self, old_block_size: float, new_block_size: float
+    ) -> None:
+        """缩放镜头时保持鼠标引导产生的屏幕像素偏移不变。"""
+        if old_block_size <= 0 or new_block_size <= 0:
+            return
+
+        ratio = old_block_size / new_block_size
+
+        def rescale_pair(position, lead):
+            if position is None:
+                return position, lead * ratio
+            anchor = position - lead
+            lead *= ratio
+            return anchor + lead, lead
+
+        self.x, self.lead_x = rescale_pair(self.x, self.lead_x)
+        self.y, self.lead_y = rescale_pair(self.y, self.lead_y)
+        self._target_x, self._target_lead_x = rescale_pair(
+            self._target_x, self._target_lead_x
+        )
+        self._target_y, self._target_lead_y = rescale_pair(
+            self._target_y, self._target_lead_y
+        )
+        self._start_x, self._start_lead_x = rescale_pair(
+            self._start_x, self._start_lead_x
+        )
+        self._start_y, self._start_lead_y = rescale_pair(
+            self._start_y, self._start_lead_y
+        )
+
     def move_to(
         self,
         target_x: float,

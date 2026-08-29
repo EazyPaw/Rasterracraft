@@ -12,6 +12,7 @@ Render 类是整个渲染系统的核心，通过多重继承组合以下 Mixin�
 import logging
 import math as _math
 import os
+import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
@@ -42,6 +43,10 @@ from .weather import WeatherMixin
 
 if TYPE_CHECKING:
     from src.client.client_main import Client
+
+
+# 临时调试入口：改成 False 即可完整禁用 Ctrl + 滚轮缩放。
+ENABLE_DEBUG_CTRL_WHEEL_ZOOM = True
 
 
 class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
@@ -93,8 +98,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         pygame.key.set_repeat(0, 0)
 
         # ---- 渲染参数 ----
-        self.block_size: int = 64
-        self.trans_scale: float = self.block_size / 16
+        self._block_size: int = 64
+        self._block_size_float: float = float(self._block_size)
+        self._target_block_size: int = self._block_size
+        self._zoom_last_update: float = time.perf_counter()
+        self.trans_scale: float = self._block_size / 16
         self.gui_scale: float = 3.5
         self.running: bool = False
 
@@ -188,6 +196,142 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.MAX_BLOCK_SECTION_PREFETCH_PER_FRAME: int = 2
         self._last_block_cache_cam: tuple[float, float] | None = None
         self.biome_debug_colors: dict[str, tuple[int, int, int]] = {}
+
+    # ===================== 世界渲染缩放 =====================
+
+    MIN_BLOCK_SIZE = 16
+    MAX_BLOCK_SIZE = 128
+    DEBUG_ZOOM_STEP = 4
+    ZOOM_LERP_SPEED = 14.0
+    MAX_ZOOM_FRAME_TIME = 0.1
+
+    @property
+    def block_size(self) -> int:
+        return self._block_size
+
+    @block_size.setter
+    def block_size(self, value: int | float) -> None:
+        # 保留直接赋值兼容性；赋值会平滑移动到新的目标尺寸。
+        self.set_block_size(value)
+
+    @property
+    def target_block_size(self) -> int:
+        return getattr(self, "_target_block_size", self.block_size)
+
+    def set_block_size(self, value: int | float, *, immediate: bool = False) -> bool:
+        """设置方块目标尺寸；必要时可用 ``immediate=True`` 跳过动画。"""
+        new_size = max(
+            self.MIN_BLOCK_SIZE,
+            min(self.MAX_BLOCK_SIZE, int(round(value))),
+        )
+        old_target = getattr(self, "_target_block_size", self.block_size)
+        current_float = getattr(self, "_block_size_float", float(self.block_size))
+        changed = new_size != old_target or (
+            immediate
+            and (new_size != self.block_size or current_float != float(new_size))
+        )
+        if not changed:
+            return False
+
+        self._target_block_size = new_size
+        if immediate:
+            self._block_size_float = float(new_size)
+            self._zoom_last_update = time.perf_counter()
+            self._apply_block_size(new_size)
+        return True
+
+    def _apply_block_size(self, new_size: int) -> bool:
+        """应用一个已经取整的渲染尺寸，并同步所有派生状态。"""
+        old_size = self._block_size
+        if new_size == old_size:
+            return False
+
+        self._block_size = new_size
+        self.trans_scale = new_size / 16.0
+
+        camera = getattr(self, "camera", None)
+        if camera is not None:
+            camera.rescale_lead_for_zoom(old_size, new_size)
+
+        self._invalidate_world_scale_caches(old_size, new_size)
+        return True
+
+    def update_block_size(self, delta_time: float | None = None) -> bool:
+        """按帧率无关的指数插值推进当前方块尺寸。"""
+        now = time.perf_counter()
+        if delta_time is None:
+            delta_time = now - getattr(self, "_zoom_last_update", now)
+        self._zoom_last_update = now
+        delta_time = max(0.0, min(float(delta_time), self.MAX_ZOOM_FRAME_TIME))
+
+        current = getattr(self, "_block_size_float", float(self.block_size))
+        target = float(self.target_block_size)
+        remaining = target - current
+        if abs(remaining) <= 0.01:
+            current = target
+        elif delta_time > 0:
+            alpha = 1.0 - _math.exp(-self.ZOOM_LERP_SPEED * delta_time)
+            current += remaining * alpha
+
+        self._block_size_float = current
+        render_size = int(round(current))
+        if current == target:
+            render_size = int(target)
+        return self._apply_block_size(render_size)
+
+    def adjust_block_size(self, wheel_delta: int | float) -> bool:
+        """按滚轮方向调整世界缩放；正值拉近，负值拉远。"""
+        if wheel_delta == 0:
+            return False
+        return self.set_block_size(
+            self.target_block_size + self.DEBUG_ZOOM_STEP * int(wheel_delta)
+        )
+
+    def _invalidate_world_scale_caches(self, old_size: int, new_size: int) -> None:
+        """释放旧缩放下的大型 Surface，避免频繁调焦造成显存持续增长。"""
+        cache_names = (
+            "gradient_cache",
+            "lit_tex_cache",
+            "tinted_surface_cache",
+            "partial_alpha_surface_cache",
+            "block_section_cache",
+            "block_section_surface_pool",
+            "block_section_padding_cache",
+            "_weather_texture_cache",
+            "_weather_lit_cache",
+            "_cloud_surface_cache",
+            "_cloud_tint_cache",
+        )
+        for name in cache_names:
+            cache = getattr(self, name, None)
+            if cache is not None:
+                cache.clear()
+
+        self._last_block_cache_cam = None
+        # 云层滚动量以像素累计，按相同比例换算可避免插值期间反复跳回原点。
+        if hasattr(self, "_cloud_vertical_scroll"):
+            self._cloud_vertical_scroll *= new_size / max(old_size, 1)
+        camera = getattr(self, "camera", None)
+        if camera is not None:
+            if hasattr(self, "_cloud_last_camera_x"):
+                self._cloud_last_camera_x = float(camera.x)
+            if hasattr(self, "_cloud_last_camera_y"):
+                self._cloud_last_camera_y = float(camera.y)
+
+    def _consume_debug_zoom_event(self, event: pygame.event.Event) -> bool:
+        """临时 Ctrl + 滚轮调焦入口；返回 True 时不再切换快捷栏。"""
+        if not ENABLE_DEBUG_CTRL_WHEEL_ZOOM or event.type != pygame.MOUSEWHEEL:
+            return False
+        if not self.client.in_game or self.client.client_player is None:
+            return False
+        if getattr(self.client.game_manager, "ing_mouse_lock", 0) > 0:
+            return False
+        if not pygame.key.get_mods() & pygame.KMOD_CTRL:
+            return False
+
+        self.adjust_block_size(event.y)
+        # 即使已经到达缩放边界，也消费事件，避免 Ctrl + 滚轮误切快捷栏。
+        return True
 
     # ===================== 坐标转换 =====================
 
@@ -400,6 +544,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 if event.type == pygame.QUIT:
                     self.running = False
                     self.client.shutdown()
+                elif self._consume_debug_zoom_event(event):
+                    continue
                 elif event.type == pygame.VIDEORESIZE:
                     # 窗口大小变化：重建所有尺寸相关的资源
                     self.SCREEN_WIDTH, self.SCREEN_HEIGHT = event.size
@@ -410,6 +556,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self._weather_texture_cache.clear()
                     self._weather_lit_cache.clear()
                     self._cloud_surface_cache.clear()
+                    self._cloud_tint_cache.clear()
                     self.tinted_surface_cache.clear()
                     self.block_section_cache.clear()
                     self.block_section_surface_pool.clear()
@@ -430,6 +577,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.client.game_manager.event_queue.append(event)
 
             self._sync_text_input_state()
+            self.update_block_size()
 
             # 退出检查
             if not self.running or self.client.is_shutting_down:

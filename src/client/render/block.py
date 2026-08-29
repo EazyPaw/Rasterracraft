@@ -1337,7 +1337,14 @@ class BlockRenderMixin:
             # ---- 完整高度方块（走缓存） ----
             # 7a. 获取/生成渐变纹理
             _q = lambda c: (c[0] >> 3, c[1] >> 3, c[2] >> 3)
-            grad_key = (_q(color_tl), _q(color_tr), _q(color_bl), _q(color_br))
+            # 同一组光照颜色在不同镜头缩放下需要不同尺寸的渐变 Surface。
+            grad_key = (
+                bs,
+                _q(color_tl),
+                _q(color_tr),
+                _q(color_bl),
+                _q(color_br),
+            )
             grad_cache = self.gradient_cache
             if grad_key in grad_cache:
                 grad = grad_cache[grad_key]

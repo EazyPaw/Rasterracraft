@@ -136,8 +136,12 @@ class WeatherMixin:
         # 云层 Surface 缓存
         self._cloud_surface_cache = {}
         self._cloud_tint_cache = {}
-        # 云层的垂直视差状态。首帧仅记录相机位置，避免出生点定位导致云层跳变。
+        # 云层视差状态。相机位移使用帧间增量，避免镜头缩放时绝对坐标
+        # 乘以新比例造成整条云带瞬移。
+        self._cloud_last_camera_x = None
         self._cloud_last_camera_y = None
+        self._cloud_last_draw_time = None
+        self._cloud_horizontal_phases = {}
         self._cloud_vertical_scroll = 0.0
         # 溅落粒子防重复标记
         self._last_impact_tick = -1
@@ -584,24 +588,39 @@ class WeatherMixin:
         # 根据天气强度在两种颜色间插值
         color = lerp_color(clear_color, rain_color, intensity)
 
-        # 云层缩放：按屏幕尺寸自适应
-        scale = max(2, int(min(self.SCREEN_WIDTH, self.SCREEN_HEIGHT) / 240))
+        # 窗口只决定基础密度；实际云形像素尺寸与方块尺寸同比例缩放。
+        viewport_scale = float(
+            max(2, int(min(self.SCREEN_WIDTH, self.SCREEN_HEIGHT) / 240))
+        )
+        scale = max(0.5, viewport_scale * float(self.block_size) / 64.0)
         # 云条带总长度（屏幕宽度 + 安全边距）
-        travel = self.SCREEN_WIDTH + 180 * scale
+        travel = self.SCREEN_WIDTH + max(1, round(180 * scale))
+        cloud_height = max(1, round(64 * scale))
         # 保留完整 RGB 精度，云色随天空关键帧连续变化。
         color_key = color
 
         now = pygame.time.get_ticks() / 1000.0
+        last_draw_time = self._cloud_last_draw_time
+        frame_time = 0.0 if last_draw_time is None else max(0.0, now - last_draw_time)
+        frame_time = min(frame_time, 0.1)
+        self._cloud_last_draw_time = now
 
-        # 累计相机垂直位移。跨越超过一屏的差值视为出生/传送，
-        # 不让背景云被一次性推出屏幕。
+        # 累计相机位移。跨越超过一屏的差值视为出生/传送，不让背景云
+        # 被一次性推出屏幕；缩放本身造成的相机补偿会由 Render 提前同步。
+        camera_x = float(self.camera.x)
         camera_y = float(self.camera.y)
+        last_camera_x = self._cloud_last_camera_x
         last_camera_y = self._cloud_last_camera_y
-        if last_camera_y is not None:
-            camera_delta_y = camera_y - last_camera_y
-            visible_world_height = self.SCREEN_HEIGHT / max(float(self.block_size), 1.0)
-            if abs(camera_delta_y) <= visible_world_height:
-                self._cloud_vertical_scroll += camera_delta_y * self.block_size
+        camera_delta_x = 0.0 if last_camera_x is None else camera_x - last_camera_x
+        camera_delta_y = 0.0 if last_camera_y is None else camera_y - last_camera_y
+        visible_world_width = self.SCREEN_WIDTH / max(float(self.block_size), 1.0)
+        visible_world_height = self.SCREEN_HEIGHT / max(float(self.block_size), 1.0)
+        if abs(camera_delta_x) > visible_world_width:
+            camera_delta_x = 0.0
+        if abs(camera_delta_y) > visible_world_height:
+            camera_delta_y = 0.0
+        self._cloud_vertical_scroll += camera_delta_y * self.block_size
+        self._cloud_last_camera_x = camera_x
         self._cloud_last_camera_y = camera_y
 
         # 三层云的定义：(水平视差, 垂直视差, 移动速度, 透明度, Y位置比例)
@@ -612,8 +631,15 @@ class WeatherMixin:
                 (0.92, 0.28, 0.80, 178, 0.24),
             )
         ):
-            # 几何只按屏幕参数缓存；颜色在独立缓存中染色，避免每帧重建矩形云形。
-            shape_key = (self.SCREEN_WIDTH, self.SCREEN_HEIGHT, scale, index, alpha)
+            # 方块尺寸是几何缓存键的一部分，防止缩放后继续复用旧尺寸云形。
+            shape_key = (
+                self.SCREEN_WIDTH,
+                self.SCREEN_HEIGHT,
+                self.block_size,
+                round(scale, 4),
+                index,
+                alpha,
+            )
             shape = self._cloud_surface_cache.get(shape_key)
             if shape is None:
                 shape = self._build_cloud_surface(
@@ -632,19 +658,23 @@ class WeatherMixin:
                 if len(self._cloud_tint_cache) > 192:
                     self._cloud_tint_cache.pop(next(iter(self._cloud_tint_cache)))
 
-            # 云场偏移随玩家/相机移动而改变，每层使用不同的视差因子，
-            # 产生层次分明的视差效果而非单一覆盖层平移。
-            # 微小的漂移速度使天空保持生动但不喧宾夺主。
+            # 增量更新相位，而不是用绝对世界坐标乘当前缩放重新计算。
+            # travel 改变时保留当前像素相位，因此调焦不会横向跳动。
+            offset = self._cloud_horizontal_phases.get(index)
+            if offset is None:
+                offset = (camera_x * self.block_size * parallax_x) % travel
             offset = (
-                self.camera.x * self.block_size * parallax_x - now * speed
+                offset
+                + camera_delta_x * self.block_size * parallax_x
+                - frame_time * speed
             ) % travel
+            self._cloud_horizontal_phases[index] = offset
             # 相机向上移动时，世界屏幕坐标向下移动；云层同向位移，
             # 但各层按不同比例滚动，从而产生垂直深度感。
             raw_y = (
                 self.SCREEN_HEIGHT * y_ratio + self._cloud_vertical_scroll * parallax_y
             )
             # 在整个云面离开屏幕后无缝回到另一侧，避免长距离攀爬时云层永久消失。
-            cloud_height = 64 * scale
             vertical_travel = self.SCREEN_HEIGHT + cloud_height
             y = int((raw_y + cloud_height) % vertical_travel - cloud_height)
 
@@ -658,7 +688,11 @@ class WeatherMixin:
 
     @staticmethod
     def _build_cloud_surface(
-        travel: int, scale: int, color: tuple[int, int, int], alpha: int, layer: int
+        travel: int,
+        scale: float,
+        color: tuple[int, int, int],
+        alpha: int,
+        layer: int,
     ) -> pygame.Surface:
         """构建单层云的 Surface（静态方法）。
 
@@ -675,7 +709,9 @@ class WeatherMixin:
         :return: 带透明通道的云 Surface
 
         """
-        surface = pygame.Surface((travel, 64 * scale), pygame.SRCALPHA)
+        surface = pygame.Surface(
+            (max(1, int(travel)), max(1, round(64 * scale))), pygame.SRCALPHA
+        )
 
         # 六块确定性的云布局（相对偏移和大小）
         # 格式：(x偏移, y偏移, 宽度, 高度)，单位为缩放前的格数
@@ -695,8 +731,8 @@ class WeatherMixin:
                 continue
 
             # 云块在条带上的基准位置
-            base_x = int(index * travel / 5 - 90 * scale)
-            base_y = int((0.18 + (index % 3) * 0.16) * 64 * scale)
+            base_x = round(index * travel / 5 - 90 * scale)
+            base_y = round((0.18 + (index % 3) * 0.16) * 64 * scale)
 
             # 每块云使用前三或后三个矩形组合形成不规则轮廓
             start = 0 if index % 2 == 0 else 3
@@ -705,10 +741,10 @@ class WeatherMixin:
                     surface,
                     (*color, alpha),
                     (
-                        base_x + px * scale,
-                        base_y + py * scale,
-                        pw * scale,
-                        ph * scale,
+                        round(base_x + px * scale),
+                        round(base_y + py * scale),
+                        max(1, round(pw * scale)),
+                        max(1, round(ph * scale)),
                     ),
                 )
 
