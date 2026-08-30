@@ -338,6 +338,13 @@ class Block(ABC):
     def on_random_tick(self):
         pass
 
+    def get_server(self):
+        """
+        返回方块属于的服务端对象，如果没有(是客户端方块)则返回 None
+        """
+        server = getattr(getattr(self.location, "world", None), "server", None)
+        return server
+
 
 class FluidBlock(Block):
     solid = False

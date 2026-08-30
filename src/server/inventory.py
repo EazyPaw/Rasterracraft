@@ -86,6 +86,9 @@ class Inventory:
     def __len__(self):
         return len(self._items)
 
+    def __iter__(self):
+        return iter(self._items)
+
     def is_full(self) -> bool:
         """
         返回物品栏是否已经被占满

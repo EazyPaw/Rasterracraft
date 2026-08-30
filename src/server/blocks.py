@@ -2,6 +2,7 @@
 import os
 import random
 import src.server.materials as materials
+from src.server.container import Container
 
 from src.server.biome import get_biome_by_id, get_precipitation_type
 
@@ -1808,6 +1809,10 @@ class FIRE(Block):
 
     def get_collision_box(self):
         return EMPTY
+
+# class CHEST(Container):
+#     block_id = "chest"
+#     name = "tile.chest.name"
 
 
 # ---- block_id → Block 子类 缓存 ----

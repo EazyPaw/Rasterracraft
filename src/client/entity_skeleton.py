@@ -74,6 +74,9 @@ class BodyPart:
         # base_texture 是缩放后的贴图；texture 是在 base_texture 基础上旋转后的贴图。
         self.base_texture = self.original_texture
         self.texture = self.original_texture
+        self.original_overlay_texture: pygame.Surface | None = None
+        self.base_overlay_texture: pygame.Surface | None = None
+        self.overlay_texture: pygame.Surface | None = None
         self.size = self.original_texture.get_size()
         # 用这个 key 避免每帧重复缩放/旋转同一张贴图。
         self._last_transform_key = None
@@ -85,6 +88,25 @@ class BodyPart:
             return
         self.original_texture = texture.copy()
         self._last_transform_key = None
+
+    def set_overlay_texture(self, texture: pygame.Surface | None):
+        """Set a texture rendered additively after the base texture's world tint."""
+        self.original_overlay_texture = (
+            texture.copy() if texture is not None else None
+        )
+        self._last_transform_key = None
+
+    @staticmethod
+    def _clip_overlay_to_base_alpha(
+        base: pygame.Surface, overlay: pygame.Surface
+    ) -> None:
+        """Clear rotation padding because RGB additive blending ignores alpha."""
+        if not base.get_flags() & pygame.SRCALPHA:
+            return
+        base_alpha = pygame.surfarray.array_alpha(base)
+        overlay_rgb = pygame.surfarray.pixels3d(overlay)
+        overlay_rgb[base_alpha == 0] = 0
+        del overlay_rgb
 
     def set_pose(self, pose: Pose):
         """设置目标姿态；真正显示出来的姿态会在 tick() 里缓动过去。"""
@@ -131,6 +153,18 @@ class BodyPart:
 
         self.base_texture = base
         self.texture = pygame.transform.rotate(base, self.angle)
+        if self.original_overlay_texture is None:
+            self.base_overlay_texture = None
+            self.overlay_texture = None
+        else:
+            overlay = pygame.transform.scale(
+                self.original_overlay_texture, (width, height)
+            )
+            if self.flip_x:
+                overlay = pygame.transform.flip(overlay, True, False)
+            self.base_overlay_texture = overlay
+            self.overlay_texture = pygame.transform.rotate(overlay, self.angle)
+            self._clip_overlay_to_base_alpha(self.texture, self.overlay_texture)
         self.size = self.texture.get_size()
         # 如果贴图被水平翻转，pivot 的 x 坐标也要镜像，否则关节会错位。
         self._render_pivot = (
@@ -175,7 +209,14 @@ class BodyPart:
         top_left = anchor_screen - rotated_center - rotated_pivot_from_center
 
         texture = render.get_tinted_surface(self.texture, tint)
-        render.blit(texture, (round(top_left.x), round(top_left.y)))
+        draw_pos = (round(top_left.x), round(top_left.y))
+        render.blit(texture, draw_pos)
+        if self.overlay_texture is not None:
+            render.blit(
+                self.overlay_texture,
+                draw_pos,
+                special_flags=pygame.BLEND_RGB_ADD,
+            )
 
 
 class EntitySkeleton(ABC):
@@ -304,7 +345,14 @@ class EntitySkeleton(ABC):
         )
         top_left = anchor - rotated_center - rotated_pivot_from_center
         texture = self.client.render.get_tinted_surface(part.texture, tint)
-        self.client.render.blit(texture, (round(top_left.x), round(top_left.y)))
+        draw_pos = (round(top_left.x), round(top_left.y))
+        self.client.render.blit(texture, draw_pos)
+        if part.overlay_texture is not None:
+            self.client.render.blit(
+                part.overlay_texture,
+                draw_pos,
+                special_flags=pygame.BLEND_RGB_ADD,
+            )
 
     def draw(self):
         """按层级绘制实体所有可见部件。_pinned 实体不使用服务器位置插值。"""
@@ -421,6 +469,7 @@ class PlayerSkeleton(EntitySkeleton):
         self._held_item_rotation = 0.0
 
         self._held_item_textures: dict[int, pygame.Surface] = {}
+        self._held_item_glint_textures: dict[int, pygame.Surface | None] = {}
         self._held_item_pivots: dict[int, tuple[float, float]] = {}
         self._held_item_texture_side = None
         self._armor_key = None
@@ -582,19 +631,17 @@ class PlayerSkeleton(EntitySkeleton):
         texture = self.client.resources_manager.get_texture_img(
             f"models.armor.{texture_name}_layer_{layer}"
         ).copy()
-        if texture_name != "leather":
-            return texture
-
-        color_getter = getattr(stack.material, "get_dye_color", None)
-        color = color_getter(stack) if callable(color_getter) else 0xA06540
-        texture.fill(
-            ((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF, 255),
-            special_flags=pygame.BLEND_RGBA_MULT,
-        )
-        overlay = self.client.resources_manager.get_texture_img(
-            f"models.armor.leather_layer_{layer}_overlay"
-        )
-        texture.blit(overlay, (0, 0))
+        if texture_name == "leather":
+            color_getter = getattr(stack.material, "get_dye_color", None)
+            color = color_getter(stack) if callable(color_getter) else 0xA06540
+            texture.fill(
+                ((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF, 255),
+                special_flags=pygame.BLEND_RGBA_MULT,
+            )
+            overlay = self.client.resources_manager.get_texture_img(
+                f"models.armor.leather_layer_{layer}_overlay"
+            )
+            texture.blit(overlay, (0, 0))
         return texture
 
     @staticmethod
@@ -612,6 +659,12 @@ class PlayerSkeleton(EntitySkeleton):
                 slot,
                 getattr(getattr(equipment.get(slot), "material", None), "name_id", "air"),
                 repr(getattr(equipment.get(slot), "nbt", {})),
+                (
+                    equipment[slot].get_texture_state_key(self.client)
+                    if equipment.get(slot) is not None
+                    and not equipment[slot].is_empty()
+                    else None
+                ),
             )
             for slot in ("head", "chest", "legs", "feet")
         )
@@ -625,40 +678,55 @@ class PlayerSkeleton(EntitySkeleton):
                     ("feet", 1),
                 )
             }
+            glint_layers = {
+                key: (
+                    equipment[key[0]].get_enchantment_glint_overlay(
+                        texture, self.client
+                    )
+                    if texture is not None
+                    else None
+                )
+                for key, texture in layers.items()
+            }
+            part_layout = {
+                "armor_head": (("head", 1), (0, 8, 8, 8)),
+                "armor_chest_body": (("chest", 1), (16, 20, 4, 12)),
+                "armor_chest_front_arm": (("chest", 1), (40, 20, 4, 12)),
+                "armor_chest_back_arm": (("chest", 1), (40, 20, 4, 12)),
+                "armor_leggings_body": (("legs", 2), (16, 20, 4, 12)),
+                "armor_leggings_front_leg": (("legs", 2), (0, 20, 4, 12)),
+                "armor_leggings_back_leg": (("legs", 2), (0, 20, 4, 12)),
+                "armor_boots_front_leg": (("feet", 1), (0, 20, 4, 12)),
+                "armor_boots_back_leg": (("feet", 1), (0, 20, 4, 12)),
+            }
             base_parts = {
-                "armor_head": self._combine_armor_crops(
-                    (layers[("head", 1)],), (0, 8, 8, 8)
-                ),
-                "armor_chest_body": self._combine_armor_crops(
-                    (layers[("chest", 1)],), (16, 20, 4, 12)
-                ),
-                "armor_chest_front_arm": self._combine_armor_crops(
-                    (layers[("chest", 1)],), (40, 20, 4, 12)
-                ),
-                "armor_chest_back_arm": self._combine_armor_crops(
-                    (layers[("chest", 1)],), (40, 20, 4, 12)
-                ),
-                "armor_leggings_body": self._combine_armor_crops(
-                    (layers[("legs", 2)],), (16, 20, 4, 12)
-                ),
-                "armor_leggings_front_leg": self._combine_armor_crops(
-                    (layers[("legs", 2)],), (0, 20, 4, 12)
-                ),
-                "armor_leggings_back_leg": self._combine_armor_crops(
-                    (layers[("legs", 2)],), (0, 20, 4, 12)
-                ),
-                "armor_boots_front_leg": self._combine_armor_crops(
-                    (layers[("feet", 1)],), (0, 20, 4, 12)
-                ),
-                "armor_boots_back_leg": self._combine_armor_crops(
-                    (layers[("feet", 1)],), (0, 20, 4, 12)
-                ),
+                name: self._combine_armor_crops((layers[layer_key],), rect)
+                for name, (layer_key, rect) in part_layout.items()
+            }
+            glint_parts = {
+                name: (
+                    glint_layers[layer_key].subsurface(rect).copy()
+                    if glint_layers[layer_key] is not None
+                    else None
+                )
+                for name, (layer_key, rect) in part_layout.items()
             }
             self._armor_part_textures = {
                 self.RIGHT: base_parts,
                 self.LEFT: {
                     name: pygame.transform.flip(texture, True, False)
                     for name, texture in base_parts.items()
+                },
+            }
+            self._armor_part_glint_textures = {
+                self.RIGHT: glint_parts,
+                self.LEFT: {
+                    name: (
+                        pygame.transform.flip(texture, True, False)
+                        if texture is not None
+                        else None
+                    )
+                    for name, texture in glint_parts.items()
                 },
             }
             self._armor_part_visible = {
@@ -669,8 +737,12 @@ class PlayerSkeleton(EntitySkeleton):
             self._armor_texture_side = None
 
         if self._armor_texture_side != self.facing:
+            glint_textures = getattr(self, "_armor_part_glint_textures", {}).get(
+                self.facing, {}
+            )
             for name, texture in self._armor_part_textures.get(self.facing, {}).items():
                 self.body[name].set_source_texture(texture)
+                self.body[name].set_overlay_texture(glint_textures.get(name))
             self._armor_texture_side = self.facing
 
     def _update_held_item_texture(self):
@@ -697,8 +769,12 @@ class PlayerSkeleton(EntitySkeleton):
             offset = (0.0, 0.0)
             item_scale = 0.7
             item_rotation = 0.0
+            glint_texture = None
             if stack is not None and not stack.is_empty():
-                texture = stack.get_texture(1.0, shadow=False)
+                texture = stack.get_base_texture(1.0, client=self.client)
+                glint_texture = stack.get_enchantment_glint_overlay(
+                    texture, self.client
+                )
                 try:
                     raw_pose = stack.material.get_anchor()
                     if isinstance(raw_pose, dict):
@@ -739,6 +815,14 @@ class PlayerSkeleton(EntitySkeleton):
                 self.RIGHT: pygame.transform.flip(texture, True, False),
                 self.LEFT: texture,
             }
+            self._held_item_glint_textures = {
+                self.RIGHT: (
+                    pygame.transform.flip(glint_texture, True, False)
+                    if glint_texture is not None
+                    else None
+                ),
+                self.LEFT: glint_texture,
+            }
             self._held_item_pivots = {
                 self.RIGHT: right_pivot,
                 self.LEFT: (texture.get_width() - right_pivot[0], right_pivot[1]),
@@ -748,6 +832,7 @@ class PlayerSkeleton(EntitySkeleton):
 
         if self._held_item_texture_side != self.facing:
             part.set_source_texture(self._held_item_textures[self.facing])
+            part.set_overlay_texture(self._held_item_glint_textures[self.facing])
             self._held_item_pivot = self._held_item_pivots[self.facing]
             self._held_item_texture_side = self.facing
 

@@ -732,7 +732,7 @@ class Tool(DamageableItem):
         用于获取渲染时客户端的手持点位，第三个值为缩放倍率，第四个参数为旋转度数（角度制）
         :return:
         """
-        return {"anchor": (0.7, 0.7), "offset": (0, 0), "scale": 0.8, "rotation": -135}
+        return {"anchor": (0.7, 0.7), "offset": (0, 0), "scale": 1.0, "rotation": -135}
 
 
 class Sword(Tool):

@@ -394,6 +394,14 @@ class ItemStack:
             return False
 
     @client_method
+    def get_base_texture(self, scale: float, client):
+        """Return this stack's material/variant texture without enchantment glint."""
+        stack_texture_getter = getattr(self.material, "get_stack_texture", None)
+        if callable(stack_texture_getter):
+            return stack_texture_getter(self, scale, client=client)
+        return self.material.get_texture(scale, client=client)
+
+    @client_method
     def get_texture(self, scale: float, client, shadow=False, multiply=1):
         animation_key = self.material.get_texture_animation_key()
         variant_getter = getattr(self.material, "get_texture_variant_key", None)
@@ -406,12 +414,7 @@ class ItemStack:
             variant_key,
         )
         px_scale = max(1, int(round(client.render.gui_scale)))
-
-        stack_texture_getter = getattr(self.material, "get_stack_texture", None)
-        if callable(stack_texture_getter):
-            res = stack_texture_getter(self, scale, client=client)
-        else:
-            res = self.material.get_texture(scale, client=client)
+        res = self.get_base_texture(scale, client=client)
         if shadow and res is not None:
             cached = self.material.texture_cache.get(cache_key)
             if cached is not None:
@@ -469,6 +472,45 @@ class ItemStack:
                 time_units % self._glint_y_period_units,
             )
         return animation_key, variant_key, enchantments, glint_frame
+
+    def get_enchantment_glint_overlay(self, texture, client):
+        """Return only the additive glint contribution for a separate render pass."""
+        if texture is None or not self.has_enchantments():
+            return None
+
+        time_units, x_offset, y_offset = self._get_glint_offsets(client)
+        glint_source = client.resources_manager.get_texture_img(
+            "misc.enchanted_glint_item"
+        )
+        cache_key = (
+            "overlay",
+            texture,
+            glint_source,
+            self._glint_strength,
+            self._glint_uv_scale,
+            self._glint_rotation_degrees,
+            time_units % self._glint_x_period_units,
+            time_units % self._glint_y_period_units,
+        )
+        cached = self._glint_texture_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        width, height = texture.get_size()
+        sampled_rgb, sampled_alpha = self._sample_glint_texture(
+            glint_source,
+            width,
+            height,
+            x_offset,
+            y_offset,
+        )
+        overlay = self._source_color_glint_overlay(
+            texture, sampled_rgb, sampled_alpha
+        )
+        self._glint_texture_cache[cache_key] = overlay
+        if len(self._glint_texture_cache) > 256:
+            self._glint_texture_cache.pop(next(iter(self._glint_texture_cache)))
+        return overlay
 
     def _apply_enchantment_glint(self, texture, client):
         if texture is None or not self.has_enchantments():
@@ -620,6 +662,27 @@ class ItemStack:
         result_alpha[:] = item_alpha.astype(np.uint8)
         del result_alpha
         return result
+
+    @classmethod
+    def _source_color_glint_overlay(cls, texture, sampled_rgb, sampled_alpha):
+        """Build the RGB contribution used by a later additive render pass."""
+        item_alpha = pygame.surfarray.array_alpha(texture).astype(np.float32)
+        source_color = sampled_rgb * (cls._glint_strength / 255.0)
+        contribution = source_color * source_color * 255.0
+        fragment_visible = sampled_alpha >= 25.5
+        coverage = (item_alpha / 255.0) * fragment_visible
+        overlay_rgb = np.clip(
+            contribution * coverage[:, :, None], 0.0, 255.0
+        )
+
+        overlay = pygame.Surface(texture.get_size(), pygame.SRCALPHA)
+        pygame.surfarray.blit_array(
+            overlay, np.rint(overlay_rgb).astype(np.uint8)
+        )
+        overlay_alpha = pygame.surfarray.pixels_alpha(overlay)
+        overlay_alpha[:] = item_alpha.astype(np.uint8)
+        del overlay_alpha
+        return overlay
 
     @client_method
     def get_gui_texture(self, gui_scale: float, client = None):

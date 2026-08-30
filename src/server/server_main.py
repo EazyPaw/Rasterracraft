@@ -292,7 +292,7 @@ class Server:
         if not self.players:  # 无玩家
             logging.warning("Null client, closing integrated server.")
             self.close_server()
-            self.register_event(self.integrated_check, ticks=20)
+        self.register_event(self.integrated_check, ticks=20)
 
     def run(self):
 
