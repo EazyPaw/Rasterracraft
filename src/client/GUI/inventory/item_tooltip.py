@@ -1,8 +1,11 @@
 # Commented and arranged by ChatGPT
+import re
+
 import pygame
 
 from src.client.resources_manager import transkey
 from src.server.attributes import AttributeOperation, normalize_id
+from src.server.enchantments import get_enchantment
 from src.server.text import Text, TextColor
 
 
@@ -66,6 +69,7 @@ class ItemTooltip:
             return []
 
         lines = []
+        totals: dict[tuple[str, AttributeOperation], float] = {}
         material = getattr(stack, "material", None)
         equipment_slot = getattr(material, "equipment_slot", "mainhand")
         names = {
@@ -78,14 +82,18 @@ class ItemTooltip:
             translation_key = names.get(normalized_id)
             if translation_key is None:
                 continue
+            key = (normalized_id, modifier.operation)
+            totals[key] = totals.get(key, 0.0) + float(modifier.amount)
+
+        for (normalized_id, operation), raw_amount in totals.items():
+            translation_key = names[normalized_id]
             attribute_name = transkey(translation_key, client=self.render.client)
             if attribute_name == translation_key:
                 attribute_name = {
                     "minecraft:armor": "Armor",
                     "minecraft:armor_toughness": "Armor Toughness",
                 }.get(normalized_id, attribute_name)
-            amount = float(modifier.amount)
-            operation = modifier.operation
+            amount = raw_amount
             if operation is not AttributeOperation.ADD_VALUE:
                 amount *= 100.0
             if amount == 0.0:
@@ -96,15 +104,44 @@ class ItemTooltip:
                 AttributeOperation.ADD_MULTIPLIED_TOTAL: 2,
             }[operation]
             sign = "plus" if amount > 0.0 else "take"
-            description = transkey(
-                f"attribute.modifier.{sign}.{operation_index}",
-                abs(amount),
-                attribute_name,
-                client=self.render.client,
+            description_key = f"attribute.modifier.{sign}.{operation_index}"
+            resources = self.render.client.resources_manager
+            template = resources._lang_map.get(
+                description_key,
+                resources._fallback_lang_map.get(description_key, description_key),
+            )
+            # The bundled 1.8 English language file uses ``%d`` here, but
+            # enchantments can make the combined attribute fractional (8.25).
+            # Preserve localization/order while allowing that precise value.
+            template = re.sub(r"%(\d+\$)?[di]", r"%\1s", template)
+            description = resources._format_translation(
+                template, (f"{abs(amount):g}", attribute_name)
             )
             lines.append(
                 Text(description, TextColor.BLUE if amount > 0.0 else TextColor.RED)
             )
+        return lines
+
+    def _enchantment_lines(self, stack) -> list[Text]:
+        component = getattr(stack, "nbt", {}).get("minecraft:enchantments")
+        if isinstance(component, dict) and not bool(
+            component.get("show_in_tooltip", True)
+        ):
+            return []
+
+        lines = []
+        for enchantment_id, level in stack.get_enchantments().items():
+            enchantment = get_enchantment(enchantment_id)
+            if enchantment is None:
+                name = enchantment_id
+            else:
+                name = transkey(enchantment.translation_key, client=self.render.client)
+            level_name = transkey(
+                f"enchantment.level.{level}", client=self.render.client
+            )
+            if level_name == f"enchantment.level.{level}":
+                level_name = str(level)
+            lines.append(Text(f"{name} {level_name}", TextColor.GRAY))
         return lines
 
     def _attack_damage_lines(self, stack) -> list[Text]:
@@ -112,7 +149,13 @@ class ItemTooltip:
         return self._attribute_lines(stack)
 
     def get_lines(self, stack) -> list[str | Text]:
-        lines: list[str | Text] = [self._translated_name(stack)]
+        translated_name = self._translated_name(stack)
+        lines: list[str | Text] = [
+            Text(translated_name, TextColor.AQUA)
+            if stack.has_enchantments()
+            else translated_name
+        ]
+        lines.extend(self._enchantment_lines(stack))
         lore = stack.get_lore()
         if lore is not None:
             for entry in lore:

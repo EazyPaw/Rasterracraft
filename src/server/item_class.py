@@ -3,6 +3,7 @@ import colorsys
 import math
 import random
 
+import numpy as np
 import pygame
 
 import src.server.materials as materials
@@ -16,6 +17,18 @@ from src.server.utils import client_method
 
 class ItemStack:
     _durability_bar_cache = {}
+    _glint_texture_cache = {}
+    _glint_coordinate_cache = {}
+    _glint_strength = 1.0
+    _glint_speed = 0.5
+    # Item surfaces use local 0..1 UVs instead of Minecraft's atlas UVs.
+    # Sampling one eighth of the glint makes the glint texture eight times
+    # larger than the isolated item icon instead of repeating it eight times.
+    _glint_uv_scale = 1.0 / 8.0
+    _glint_rotation_degrees = 10.0
+    _glint_x_period_units = 110000
+    _glint_y_period_units = 30000
+    _glint_frames_per_second = 60
 
     def __init__(self, material, amount: int = 1, nbt=None):
         if nbt is None:
@@ -87,8 +100,11 @@ class ItemStack:
     def get_remaining_durability(self) -> int:
         return max(0, self.get_max_damage() - self.get_damage())
 
-    def _get_enchantment_level(self, enchantment_id: str) -> int:
-        wanted = str(enchantment_id).split(":")[-1]
+    def get_enchantments(self) -> dict[str, int]:
+        """Return normalized enchantment levels from current and legacy NBT shapes."""
+        from src.server.enchantments import normalize_enchantment_id
+
+        result: dict[str, int] = {}
         components = (
             self.nbt.get("minecraft:enchantments"),
             self.nbt.get("enchantments"),
@@ -99,24 +115,76 @@ class ItemStack:
                 levels = component.get("levels", component)
                 if isinstance(levels, dict):
                     for key, value in levels.items():
-                        if str(key).split(":")[-1] != wanted:
+                        if str(key) in {"show_in_tooltip", "tooltip_display"}:
                             continue
                         try:
-                            return max(0, int(value))
+                            enchantment_id = normalize_enchantment_id(key)
+                            level = max(0, int(value))
                         except (TypeError, ValueError):
-                            return 0
+                            continue
+                        if level:
+                            result.setdefault(enchantment_id, level)
             elif isinstance(component, list):
                 for entry in component:
                     if not isinstance(entry, dict):
                         continue
                     key = entry.get("id", entry.get("name", ""))
-                    if str(key).split(":")[-1] != wanted:
-                        continue
                     try:
-                        return max(0, int(entry.get("lvl", entry.get("level", 0))))
+                        enchantment_id = normalize_enchantment_id(key)
+                        level = max(0, int(entry.get("lvl", entry.get("level", 0))))
                     except (TypeError, ValueError):
-                        return 0
-        return 0
+                        continue
+                    if level:
+                        result.setdefault(enchantment_id, level)
+        return result
+
+    def has_enchantments(self) -> bool:
+        return bool(self.get_enchantments())
+
+    def get_enchantment_level(self, enchantment_id: str) -> int:
+        from src.server.enchantments import normalize_enchantment_id
+
+        try:
+            wanted = normalize_enchantment_id(enchantment_id)
+        except ValueError:
+            return 0
+        return self.get_enchantments().get(wanted, 0)
+
+    def _get_enchantment_level(self, enchantment_id: str) -> int:
+        """Compatibility alias for the former durability-only helper."""
+        return self.get_enchantment_level(enchantment_id)
+
+    def set_enchantment(self, enchantment_id: str, level: int) -> None:
+        """Apply or replace one registered enchantment using canonical component NBT."""
+        from src.server.enchantments import get_enchantment
+
+        enchantment = get_enchantment(enchantment_id)
+        if enchantment is None:
+            raise ValueError(f"unknown enchantment: {enchantment_id}")
+        level = enchantment.validate_level(level)
+        if not enchantment.supports(self):
+            raise ValueError(f"{enchantment.id} cannot be applied to this item")
+
+        levels = self.get_enchantments()
+        levels[enchantment.id] = level
+        self.nbt.pop("enchantments", None)
+        self.nbt.pop("Enchantments", None)
+        component = self.nbt.get("minecraft:enchantments")
+        show_in_tooltip = True
+        if isinstance(component, dict):
+            show_in_tooltip = bool(component.get("show_in_tooltip", True))
+        updated_component = (
+            dict(component)
+            if isinstance(component, dict) and "levels" in component
+            else {
+                key: value
+                for key, value in (component.items() if isinstance(component, dict) else ())
+                if key in {"show_in_tooltip", "tooltip_display"}
+            }
+        )
+        updated_component["levels"] = levels
+        updated_component["show_in_tooltip"] = show_in_tooltip
+        self.nbt["minecraft:enchantments"] = updated_component
 
     @staticmethod
     def _holder_has_infinite_materials(holder) -> bool:
@@ -260,6 +328,35 @@ class ItemStack:
                 result.append((str(attribute_id), AttributeModifier.from_dict(entry)))
             except (KeyError, TypeError, ValueError):
                 continue
+
+        from src.server.enchantments import get_enchantment
+
+        for enchantment_id, level in self.get_enchantments().items():
+            enchantment = get_enchantment(enchantment_id)
+            if enchantment is None:
+                continue
+            try:
+                enchantment_entries = enchantment.get_attribute_modifiers(level)
+            except (TypeError, ValueError):
+                continue
+            for entry in enchantment_entries:
+                entry_slot = str(entry.get("slot", "any")).lower().replace("_", "")
+                valid_slot = (
+                    entry_slot == "any"
+                    or entry_slot == slot
+                    or entry_slot == "hand" and slot in {"mainhand", "offhand"}
+                    or entry_slot == "armor"
+                    and slot in {"head", "chest", "legs", "feet"}
+                )
+                if not valid_slot:
+                    continue
+                attribute_id = entry.get("type", entry.get("attribute"))
+                if attribute_id is None or "id" not in entry:
+                    continue
+                try:
+                    result.append((str(attribute_id), AttributeModifier.from_dict(entry)))
+                except (KeyError, TypeError, ValueError):
+                    continue
         return tuple(result)
 
     def stack_item(self, other: "ItemStack") -> bool:
@@ -308,9 +405,6 @@ class ItemStack:
             animation_key,
             variant_key,
         )
-        if cache_key in self.material.texture_cache:
-            return self.material.texture_cache[cache_key]
-
         px_scale = max(1, int(round(client.render.gui_scale)))
 
         stack_texture_getter = getattr(self.material, "get_stack_texture", None)
@@ -319,6 +413,14 @@ class ItemStack:
         else:
             res = self.material.get_texture(scale, client=client)
         if shadow and res is not None:
+            cached = self.material.texture_cache.get(cache_key)
+            if cached is not None:
+                if not self.has_enchantments():
+                    return cached
+                result = cached.copy()
+                result.blit(self._apply_enchantment_glint(res, client), (0, 0))
+                return result
+
             # 创建带阴影的最终纹理
             width = res.get_width()
             height = res.get_height()
@@ -346,9 +448,178 @@ class ItemStack:
             if len(self.material.texture_cache) > 128:
                 self.material.texture_cache.pop(next(iter(self.material.texture_cache)))
 
+            if self.has_enchantments():
+                result = result.copy()
+                result.blit(self._apply_enchantment_glint(res, client), (0, 0))
             return result
 
-        return res
+        return self._apply_enchantment_glint(res, client)
+
+    def get_texture_state_key(self, client):
+        """Return every state that can change this stack's rendered texture."""
+        animation_key = self.material.get_texture_animation_key(client=client)
+        variant_getter = getattr(self.material, "get_texture_variant_key", None)
+        variant_key = variant_getter(self) if callable(variant_getter) else None
+        enchantments = tuple(sorted(self.get_enchantments().items()))
+        glint_frame = None
+        if enchantments:
+            time_units, _, _ = self._get_glint_offsets(client)
+            glint_frame = (
+                time_units % self._glint_x_period_units,
+                time_units % self._glint_y_period_units,
+            )
+        return animation_key, variant_key, enchantments, glint_frame
+
+    def _apply_enchantment_glint(self, texture, client):
+        if texture is None or not self.has_enchantments():
+            return texture
+
+        time_units, x_offset, y_offset = self._get_glint_offsets(client)
+        glint_source = client.resources_manager.get_texture_img(
+            "misc.enchanted_glint_item"
+        )
+        cache_key = (
+            texture,
+            glint_source,
+            self._glint_strength,
+            self._glint_uv_scale,
+            self._glint_rotation_degrees,
+            time_units % self._glint_x_period_units,
+            time_units % self._glint_y_period_units,
+        )
+        cached = self._glint_texture_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        width, height = texture.get_size()
+        sampled_rgb, sampled_alpha = self._sample_glint_texture(
+            glint_source,
+            width,
+            height,
+            x_offset,
+            y_offset,
+        )
+        result = self._source_color_additive_glint(
+            texture, sampled_rgb, sampled_alpha
+        )
+        self._glint_texture_cache[cache_key] = result
+        if len(self._glint_texture_cache) > 256:
+            self._glint_texture_cache.pop(next(iter(self._glint_texture_cache)))
+        return result
+
+    @classmethod
+    def _get_glint_offsets(cls, client):
+        """Return vanilla's two wall-clock glint translations at a bounded frame rate."""
+        try:
+            elapsed_millis = max(
+                0.0,
+                float(
+                    getattr(client, "glint_time_millis", pygame.time.get_ticks())
+                ),
+            )
+        except (TypeError, ValueError):
+            elapsed_millis = float(pygame.time.get_ticks())
+        frame = int(elapsed_millis * cls._glint_frames_per_second / 1000.0)
+        elapsed_millis = frame * 1000.0 / cls._glint_frames_per_second
+        time_units = int(elapsed_millis * cls._glint_speed * 8.0)
+        return (
+            time_units,
+            (time_units % cls._glint_x_period_units) / cls._glint_x_period_units,
+            (time_units % cls._glint_y_period_units) / cls._glint_y_period_units,
+        )
+
+    @classmethod
+    def _get_glint_coordinates(cls, width, height):
+        cache_key = (width, height, cls._glint_uv_scale, cls._glint_rotation_degrees)
+        cached = cls._glint_coordinate_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        u = (np.arange(width, dtype=np.float32) + 0.5) / max(1, width)
+        v = (np.arange(height, dtype=np.float32) + 0.5) / max(1, height)
+        scaled_u, scaled_v = np.meshgrid(
+            u * cls._glint_uv_scale,
+            v * cls._glint_uv_scale,
+            indexing="ij",
+        )
+        angle = math.radians(cls._glint_rotation_degrees)
+        cosine = math.cos(angle)
+        sine = math.sin(angle)
+        coordinates = (
+            scaled_u * cosine - scaled_v * sine,
+            scaled_u * sine + scaled_v * cosine,
+        )
+        cls._glint_coordinate_cache[cache_key] = coordinates
+        if len(cls._glint_coordinate_cache) > 16:
+            cls._glint_coordinate_cache.pop(
+                next(iter(cls._glint_coordinate_cache))
+            )
+        return coordinates
+
+    @classmethod
+    def _sample_glint_texture(
+        cls, source, width, height, x_offset, y_offset
+    ):
+        """Repeat and linearly sample the glint using vanilla's texture matrix."""
+        base_u, base_v = cls._get_glint_coordinates(width, height)
+        sample_u = np.mod(base_u - x_offset, 1.0)
+        sample_v = np.mod(base_v + y_offset, 1.0)
+
+        source_width, source_height = source.get_size()
+        source_x = sample_u * source_width - 0.5
+        source_y = sample_v * source_height - 0.5
+        x0 = np.floor(source_x).astype(np.int32)
+        y0 = np.floor(source_y).astype(np.int32)
+        x1 = (x0 + 1) % source_width
+        y1 = (y0 + 1) % source_height
+        x0 %= source_width
+        y0 %= source_height
+        x_weight = (source_x - np.floor(source_x))[:, :, None]
+        y_weight = (source_y - np.floor(source_y))[:, :, None]
+
+        source_rgb = pygame.surfarray.array3d(source).astype(np.float32)
+        top = source_rgb[x0, y0] * (1.0 - x_weight) + source_rgb[
+            x1, y0
+        ] * x_weight
+        bottom = source_rgb[x0, y1] * (1.0 - x_weight) + source_rgb[
+            x1, y1
+        ] * x_weight
+        sampled_rgb = top * (1.0 - y_weight) + bottom * y_weight
+
+        if source.get_flags() & pygame.SRCALPHA:
+            source_alpha = pygame.surfarray.array_alpha(source).astype(np.float32)
+            x_weight_2d = x_weight[:, :, 0]
+            y_weight_2d = y_weight[:, :, 0]
+            top_alpha = source_alpha[x0, y0] * (1.0 - x_weight_2d) + source_alpha[
+                x1, y0
+            ] * x_weight_2d
+            bottom_alpha = source_alpha[x0, y1] * (
+                1.0 - x_weight_2d
+            ) + source_alpha[x1, y1] * x_weight_2d
+            sampled_alpha = top_alpha * (1.0 - y_weight_2d) + bottom_alpha * y_weight_2d
+        else:
+            sampled_alpha = np.full((width, height), 255.0, dtype=np.float32)
+        return sampled_rgb, sampled_alpha
+
+    @classmethod
+    def _source_color_additive_glint(cls, texture, sampled_rgb, sampled_alpha):
+        """Emulate vanilla's SRC_COLOR/ONE glint pass while preserving item alpha."""
+        base_rgb = pygame.surfarray.array3d(texture).astype(np.float32)
+        item_alpha = pygame.surfarray.array_alpha(texture).astype(np.float32)
+        source_color = sampled_rgb * (cls._glint_strength / 255.0)
+        contribution = source_color * source_color * 255.0
+        fragment_visible = sampled_alpha >= 25.5
+        coverage = (item_alpha / 255.0) * fragment_visible
+        blended = np.clip(
+            base_rgb + contribution * coverage[:, :, None], 0.0, 255.0
+        )
+
+        result = texture.copy()
+        pygame.surfarray.blit_array(result, np.rint(blended).astype(np.uint8))
+        result_alpha = pygame.surfarray.pixels_alpha(result)
+        result_alpha[:] = item_alpha.astype(np.uint8)
+        del result_alpha
+        return result
 
     @client_method
     def get_gui_texture(self, gui_scale: float, client = None):

@@ -959,20 +959,25 @@ class Player(Entity):
         self, damage: float, damage_type: type[DamageType]
     ) -> float:
         reduced = super().modify_damage_for_armor(damage, damage_type)
-        if self._damage_type_has_tag(damage_type, DamageTag.BYPASSES_ARMOR):
-            return reduced
+        if not self._damage_type_has_tag(damage_type, DamageTag.BYPASSES_ARMOR):
+            durability_damage = max(1, int(float(damage) / 4.0))
+            changed = False
+            for slot in ("head", "chest", "legs", "feet"):
+                stack = self.equipment[slot]
+                if stack is None or stack.is_empty():
+                    continue
+                changed = stack.hurt_and_break(durability_damage, self) or changed
+            if changed:
+                self._equipment_attribute_signature = None
+                self.sync_inventory()
 
-        durability_damage = max(1, int(float(damage) / 4.0))
-        changed = False
-        for slot in ("head", "chest", "legs", "feet"):
-            stack = self.equipment[slot]
-            if stack is None or stack.is_empty():
-                continue
-            changed = stack.hurt_and_break(durability_damage, self) or changed
-        if changed:
-            self._equipment_attribute_signature = None
-            self.sync_inventory()
-        return reduced
+        from src.server.enchantments import reduce_damage_by_armor_enchantments
+
+        return reduce_damage_by_armor_enchantments(
+            reduced,
+            (self.equipment[slot] for slot in ("head", "chest", "legs", "feet")),
+            damage_type,
+        )
 
     def get_hurt_sound(
         self, damage_type: type[DamageType], actual_damage: float

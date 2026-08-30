@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Callable, List, Dict
 from src.client.game_mode import get_gamemode_by_id
 from src.server.blocks import get_block_by_id
 from src.server.entity import Entity
+from src.server.enchantments import get_enchantment
 from src.server.location import Location
 from src.server.materials import get_material_by_id
 from src.server.player import Player
@@ -37,6 +38,7 @@ class CommandExecutor:
             "weather": self.weather,
             "gamemode": self.switch_gamemode,
             "give": self.give_command,
+            "enchant": self.enchant_command,
             "kick": self.kick_command,
             "locate": self.locate_command,
             "summon": self.summon_command,
@@ -178,6 +180,49 @@ class CommandExecutor:
 
         item_name = getattr(material, "name", item_id)
         return f"Gave {given_items}x {item_name} to {given_players} player(s)"
+
+    def enchant_command(self, args, executor: Player | str):
+        """Apply an enchantment to each target player's selected item."""
+        if len(args) not in (2, 3):
+            raise ValueError("Usage: /enchant <targets> <enchantment> [<level>]")
+        if isinstance(executor, Player) and not executor.is_operator:
+            raise ValueError("You do not have permission to use /enchant")
+
+        targets = self.target_selector(args[0], executor)
+        if not targets:
+            raise ValueError(f"No targets matched: {args[0]}")
+        if any(not isinstance(target, Player) for target in targets):
+            raise ValueError("Only players can be enchanted")
+
+        enchantment = get_enchantment(args[1])
+        if enchantment is None:
+            raise ValueError(f"Unknown enchantment: {args[1]}")
+        try:
+            level = enchantment.validate_level(args[2] if len(args) == 3 else 1)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Level must be between 1 and {enchantment.max_level}"
+            ) from exc
+
+        held_items = []
+        for target in targets:
+            held = target.get_equipped_item("mainhand")
+            if held.is_empty():
+                raise ValueError(f"{target} is not holding an item")
+            if not enchantment.supports(held):
+                raise ValueError(
+                    f"{enchantment.id} cannot be applied to {held.material.name_id}"
+                )
+            held_items.append((target, held))
+
+        for target, held in held_items:
+            held.set_enchantment(enchantment.id, level)
+            target._equipment_attribute_signature = None
+            target.sync_inventory()
+        return (
+            f"Enchanted {len(held_items)} item(s) with "
+            f"{enchantment.id} {level}"
+        )
 
     def kick_command(self, args, executor: Player | str):
         if not args:

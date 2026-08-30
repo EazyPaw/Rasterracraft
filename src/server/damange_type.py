@@ -214,7 +214,11 @@ class OUT_OF_WORLD(DamageType):
     exhaustion = 0.0
     message_id = "outOfWorld"
     scaling = "when_caused_by_living_non_player"
-    tags = (DamageTag.BYPASSES_ARMOR, DamageTag.BYPASSES_COOLDOWN)
+    tags = (
+        DamageTag.BYPASSES_ARMOR,
+        DamageTag.BYPASSES_COOLDOWN,
+        DamageTag.BYPASSES_ENCHANTMENTS,
+    )
 
 
 class PLAYER_ATTACK(DamageType):
@@ -247,7 +251,7 @@ class STARVE(DamageType):
     exhaustion = 0.0
     message_id = "starve"
     scaling = "when_caused_by_living_non_player"
-    tags = (DamageTag.BYPASSES_ARMOR,)
+    tags = (DamageTag.BYPASSES_ARMOR, DamageTag.BYPASSES_ENCHANTMENTS)
 
 
 class STING(DamageType):
