@@ -12,6 +12,7 @@ from src.server.entities.chicken import ChickenSkeleton
 from src.server.entities.cow import CowSkeleton
 from src.server.entities.pig import PigSkeleton
 from src.server.entities.sheep import SheepSkeleton
+from src.server.entities.snow_ball import SnowBallSkeleton
 from src.server.blocks import get_block_by_id
 from src.server.item_class import ItemStack
 from src.server.location import Location, Vector
@@ -186,6 +187,9 @@ class ClientEntity:
         self.wool_color = packet.get("wool_color", "white")
         self.eat_animation_ticks = int(packet.get("eat_animation_ticks", 0))
         self.saddled = bool(packet.get("saddled", False))
+        self.projectile_age = max(0, int(packet.get("projectile_age", 0)))
+        self.owner_uuid = packet.get("owner_uuid")
+        self.in_ground = bool(packet.get("in_ground", False))
         self.breaking = bool(packet.get("breaking", False))
         self.eating = bool(packet.get("eating", False))
         self.break_progress = float(packet.get("break_progress", 0.0))
@@ -245,6 +249,11 @@ class ClientEntity:
             packet.get("eat_animation_ticks", self.eat_animation_ticks)
         )
         self.saddled = bool(packet.get("saddled", self.saddled))
+        self.projectile_age = max(
+            0, int(packet.get("projectile_age", self.projectile_age))
+        )
+        self.owner_uuid = packet.get("owner_uuid", self.owner_uuid)
+        self.in_ground = bool(packet.get("in_ground", self.in_ground))
         self.breaking = bool(packet.get("breaking", self.breaking))
         self.eating = bool(packet.get("eating", self.eating))
         self.break_progress = float(packet.get("break_progress", self.break_progress))
@@ -321,3 +330,5 @@ class ClientEntity:
             self.skeleton = SheepSkeleton(self)
         elif self.entity_id == "primed_tnt":
             self.skeleton = PrimedTNTSkeleton(self)
+        elif self.entity_id == "snowball":
+            self.skeleton = SnowBallSkeleton(self)

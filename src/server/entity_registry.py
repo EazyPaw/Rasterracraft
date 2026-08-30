@@ -115,6 +115,7 @@ def _load_builtin_entities() -> None:
         pig,
         primed_tnt,
         sheep,
+        snow_ball,
         zombie,
     )
 

@@ -7,6 +7,7 @@ from src.server.entity import Entity
 
 class CollectibleEntity(Entity):
     blocks_block_placement = False
+    projectile_collidable = False
     lifetime = 6000
 
     def __init__(self, x: float, y: float, world):

@@ -596,7 +596,12 @@ class DIAMOND(Material):
     _texture_path = "items.diamond"
 
 
-class SNOWBALL(Material): ...
+@register_material
+class SNOWBALL(Material):
+    name_id = "snowball"
+    name = "item.snowball.name"
+    _texture_path = "items.snowball"
+
 
 
 _block_item_types: dict[str, type[BlockItem]] = {}
