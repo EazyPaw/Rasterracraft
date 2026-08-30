@@ -1,6 +1,4 @@
 # Commented and arranged by ChatGPT
-import logging
-import logging
 from typing import TYPE_CHECKING
 
 from src.client.GUI.chat import ChatGUI
@@ -11,9 +9,7 @@ from src.client.GUI.inventory.hotbar import HotBar
 from src.client.GUI.survival_hud import SurvivalHUD
 from src.server.block_class import Block
 from src.server.blocks import AIR
-from src.server.attributes import EATING_SPEED_MODIFIER
 from src.server.entity import Entity
-from src.server.material_class import Food
 from abc import ABC
 
 if TYPE_CHECKING:
@@ -27,6 +23,7 @@ class GameMode(ABC):
 
     def __init__(self, player: "ClientPlayer"):
         self.player = player
+        self._item_use_request_active = False
         self.player.interact_range = 5
         self.player.block_interaction_range = 5
         self.update_gui()
@@ -38,7 +35,45 @@ class GameMode(ABC):
         pass
 
     def right_click_on_block(self, block: Block):
-        pass
+        if self._item_use_request_active:
+            self.player.client.sent_packet(
+                {"__class__": "PlayerAction", "action": "continue_item_use"}
+            )
+            return
+
+        target = self.player.choosing_block
+        packet = {"__class__": "RightClick"}
+        location = getattr(target, "location", None)
+        if location is not None:
+            packet.update(
+                {
+                    "x": int(location.x),
+                    "y": int(location.y),
+                    "z": int(location.z),
+                }
+            )
+            get_context = getattr(
+                self.player.client.render, "get_placement_context", None
+            )
+            context = (
+                get_context(target, self.player) if callable(get_context) else None
+            )
+            if context is not None:
+                packet["context"] = {
+                    "hit_face": context.hit_face,
+                    "ray_direction": list(context.ray_direction),
+                    "target_z": int(context.target_z),
+                    "fore_place": bool(context.fore_place),
+                }
+        self._item_use_request_active = True
+        self.player.client.sent_packet(packet)
+
+    def stop_item_use(self, *, notify_server: bool = True) -> None:
+        if notify_server and self._item_use_request_active:
+            self.player.client.sent_packet(
+                {"__class__": "PlayerAction", "action": "stop_item_use"}
+            )
+        self._item_use_request_active = False
 
     def left_click_on_entity(self, entity: Entity):
         if entity is None or self.player.client.hold_mouse_buttons[0]:
@@ -51,8 +86,14 @@ class GameMode(ABC):
         )
 
     def right_click_on_entity(self, entity: Entity):
-        if entity is None or self.player.client.hold_mouse_buttons[2]:
+        if entity is None:
             return
+        if self._item_use_request_active:
+            self.player.client.sent_packet(
+                {"__class__": "PlayerAction", "action": "continue_item_use"}
+            )
+            return
+        self._item_use_request_active = True
         self.player.client.sent_packet(
             {
                 "__class__": "InteractEntity",
@@ -62,59 +103,6 @@ class GameMode(ABC):
 
     def get_choosing_block(self):
         pass
-
-    def get_block_placement_location(self, block: Block):
-        """统一构造放置上下文，再交给待放置方块解释。"""
-        target = self.player.choosing_block
-        if target is None:
-            return None
-        get_context = getattr(self.player.client.render, "get_placement_context", None)
-        context = get_context(target, self.player) if callable(get_context) else None
-        return block.get_placement_location(
-            target,
-            player=self.player,
-            fore_place=getattr(self.player, "fore_place", False),
-            context=context,
-        )
-
-    def try_use_selected_item_on_block(self) -> bool:
-        target = self.player.choosing_block
-        if target is None:
-            return False
-        stack = self.player.inventory[self.player.selected_slot]
-        if stack.is_empty() or not target.accepts_item_use(stack.material):
-            return False
-
-        if self.player.client.hold_mouse_buttons[2]:
-            return True
-        location = target.location
-        self.player.skeleton.trigger_swing()
-        self.player.client.sent_packet(
-            {
-                "__class__": "UseBlock",
-                "x": location.x,
-                "y": location.y,
-                "z": location.z,
-            }
-        )
-        return True
-
-    def try_open_furnace(self) -> bool:
-        target = self.player.choosing_block
-        if target is None or target.block_id != "furnace":
-            return False
-        if self.player.client.hold_mouse_buttons[2]:
-            return True
-        location = target.location
-        self.player.client.sent_packet(
-            {
-                "__class__": "OpenFurnace",
-                "x": int(location.x),
-                "y": int(location.y),
-                "z": int(location.z),
-            }
-        )
-        return True
 
     def mouse_wheel(self, direction):
         pass
@@ -173,40 +161,7 @@ class CreativeMode(GameMode):
             )
 
     def right_click_on_block(self, block: Block):
-        if self.player.client.hold_mouse_buttons[2]:
-            return
-        if self.try_open_furnace():
-            return
-        if (
-            self.player.choosing_block
-            and self.player.choosing_block.block_id == "crafting_table"
-        ):
-            if self.crafting_table not in self.player.client.render.drawing_GUIs:
-                self.player.client.render.show_gui(self.crafting_table)
-            return
-        if self.player.choosing_block is None:
-            return
-        if self.try_use_selected_item_on_block():
-            return
-        item = self.player.inventory[self.player.selected_slot]
-        # 空手、食物或其它非方块物品对着空气右键不应伪造 AIR 放置包。
-        create_block = getattr(item.material, "create_block", None)
-        if item.is_empty() or not callable(create_block):
-            return
-        new_block = create_block()
-        place_location = self.get_block_placement_location(new_block)
-        if place_location is None:
-            return
-        new_block.location = place_location
-        logging.debug(
-            "Placing block %s at (%s, %s, %s)",
-            new_block.name,
-            place_location.x,
-            place_location.y,
-            place_location.z,
-        )
-        self.player.client.resources_manager.play_sound(new_block.place_sound)
-        self.player.client.sent_packet(new_block, "PlaceBlock")
+        super().right_click_on_block(block)
 
     def get_choosing_block(self):
         block_x, block_y = self.player.client.render.choosing_position
@@ -277,9 +232,6 @@ class SurvivalMode(GameMode):
         self.break_progress = 0.0
         self._breaking_request_active = False
         self.pending_break_target = None
-        self.eat_progress = 0
-        self.eating_slot = None
-        self._eating_request_active = False
         super().__init__(player)
         self.player.flyable = False
         self.inv = Backpack(self.player.client.render)
@@ -371,27 +323,6 @@ class SurvivalMode(GameMode):
         ):
             self.pending_break_target = None
 
-    def reconcile_attribute_predictions(self) -> None:
-        movement = self.player.attributes.get_instance("movement_speed")
-        if self._eating_request_active:
-            movement.add_modifier(
-                EATING_SPEED_MODIFIER,
-                source="prediction:eating",
-                replace=True,
-            )
-        else:
-            movement.remove_modifier(EATING_SPEED_MODIFIER.id)
-
-    def _stop_eating(self, *, notify_server: bool) -> None:
-        if notify_server and self._eating_request_active:
-            self.player.client.sent_packet(
-                {"__class__": "PlayerAction", "action": "stop_eating"}
-            )
-        self._eating_request_active = False
-        self.eating_slot = None
-        self.eat_progress = 0
-        self.reconcile_attribute_predictions()
-
     def left_click_on_block(self, block: Block):
         target = self.player.choosing_block
         if not target.on_left_click(self.player):
@@ -440,77 +371,18 @@ class SurvivalMode(GameMode):
             self.reset_breaking()
 
     def right_click_on_block(self, block: Block):
-        item = self.player.inventory[self.player.selected_slot]
-        if self.try_open_furnace():
-            return
-        if (
-            self.player.choosing_block
-            and self.player.choosing_block.block_id == "crafting_table"
-        ):
-            if self.crafting_table not in self.player.client.render.drawing_GUIs:
-                self.player.client.render.show_gui(self.crafting_table)
-            return
-        if self.try_use_selected_item_on_block():
-            return
-        if isinstance(item.material, Food):
-            self._eat_selected_item(item)
-            return
-
-        if self.player.client.hold_mouse_buttons[2]:
-            return
-
-        location = (
-            self.player.choosing_block.location if self.player.choosing_block else None
-        )
-        create_block = getattr(item.material, "create_block", None)
-        if location is None or item.is_empty() or not callable(create_block):
-            return
-        new_block = create_block()
-        place_location = self.get_block_placement_location(new_block)
-        if place_location is None:
-            return
-        new_block.location = place_location
-        self.player.client.resources_manager.play_sound(new_block.place_sound)
-        self.player.client.sent_packet(new_block, "PlaceBlock")
-
-    def _eat_selected_item(self, item):
-        food = item.material
-        if not isinstance(food, Food) or not food.can_consume(self.player):
-            self._stop_eating(notify_server=True)
-            return
-        slot = self.player.selected_slot
-        if self.eating_slot != slot:
-            self.eating_slot = slot
-            self.eat_progress = 0
-        self.eat_progress += 1
-        if not self._eating_request_active:
-            self._eating_request_active = True
-
-            self.reconcile_attribute_predictions()
-        self.player.client.sent_packet(
-            {
-                "__class__": "PlayerAction",
-                "action": "continue_eating",
-            }
-        )
-        self.player.skeleton.trigger_swing()
-        if self.eat_progress < food.consume_duration_ticks:
-            return
-        self.eating_slot = None
-        self.eat_progress = 0
+        super().right_click_on_block(block)
 
     def tick(self):
         if not self.player.client.hold_mouse_buttons[0]:
             self.reset_breaking(notify_server=True)
-        if not self.player.client.hold_mouse_buttons[2]:
-            self._stop_eating(notify_server=True)
 
     def get_choosing_block(self):
         CreativeMode.get_choosing_block(self)
 
     def mouse_wheel(self, direction):
         if direction != 0:
-            self._stop_eating(notify_server=True)
+            self.stop_item_use(notify_server=True)
         CreativeMode.mouse_wheel(self, direction)
 
     def open_inventory(self):

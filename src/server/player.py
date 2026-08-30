@@ -207,6 +207,108 @@ class Player(Entity):
         self.sync_inventory()
         return True
 
+    def use_held_item(self, *, target=None, context=None) -> bool:
+        """Run the selected stack's server-side right-click behavior."""
+        selected = max(0, min(len(self.inventory) - 1, int(self.selected_slot)))
+        stack = self.inventory[selected]
+        if stack.is_empty():
+            return False
+        callback = getattr(stack.material, "right_click", None)
+        if not callable(callback) or not bool(
+            callback(stack, self, target=target, context=context)
+        ):
+            return False
+        self._equipment_attribute_signature = None
+        self.sync_inventory()
+        return True
+
+    def _block_item_intersects_entity(self, block, location: Location) -> bool:
+        get_shape = getattr(block, "get_collision_box", None)
+        shape = get_shape() if callable(get_shape) else None
+        if not shape:
+            return False
+        entities = list(getattr(self.world, "entities", {}).values())
+        entities.extend(getattr(self.world.server, "players", ()))
+        seen = set()
+        for entity in entities:
+            identity = id(entity)
+            if identity in seen or getattr(entity, "removed", False):
+                continue
+            seen.add(identity)
+            if not getattr(entity, "blocks_block_placement", True):
+                continue
+            if int(getattr(entity, "z", 0)) != int(location.z):
+                continue
+            min_x = float(entity.x)
+            min_y = float(entity.y)
+            max_x = min_x + float(getattr(entity, "width", 1.0))
+            max_y = min_y + float(getattr(entity, "height", 1.0))
+            if any(
+                box.translated(location.x, location.y).overlaps(
+                    min_x, min_y, max_x, max_y
+                )
+                for box in shape
+            ):
+                return True
+        return False
+
+    def place_block_item(self, stack: ItemStack, target, context=None) -> bool:
+        """Resolve and validate block-item placement entirely on the server."""
+        target_location = getattr(target, "location", None)
+        create_block = getattr(stack.material, "create_block", None)
+        if (
+            stack is None
+            or stack.is_empty()
+            or target_location is None
+            or target_location.world is not self.world
+            or not callable(create_block)
+        ):
+            return False
+
+        block = create_block()
+        if block is None:
+            return False
+        place_location = block.get_placement_location(
+            target,
+            player=self,
+            fore_place=bool(getattr(context, "fore_place", False)),
+            context=context,
+        )
+        if place_location is None:
+            return False
+        try:
+            x, y, z = (
+                int(place_location.x),
+                int(place_location.y),
+                int(place_location.z),
+            )
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if (
+            (x, y, z)
+            != (place_location.x, place_location.y, place_location.z)
+            or not 0 <= y < self.world.attribute.MAX_BUILD_HEIGHT
+            or z not in (0, 1)
+            or x // 16 not in self.client_loaded_regions
+            or not self.world.is_chunk_loaded(x // 16)
+            or not self.can_reach_block(x, y, z)
+        ):
+            return False
+
+        location = Location(self.world, x, y, z)
+        if self._block_item_intersects_entity(block, location):
+            return False
+        if block.place_at(location) is False:
+            return False
+        if getattr(self.gamemode, "name_id", "survival") != "creative":
+            stack.reduce_amount(1)
+        server = getattr(self.world, "server", None)
+        if server is not None:
+            server.broadcast_sound(
+                block.place_sound, x + 0.5, y + 0.5, z
+            )
+        return True
+
     def can_reach_block(self, x: int, y: int, z: int) -> bool:
         if self.health <= 0 or z not in (0, 1):
             return False
@@ -255,7 +357,7 @@ class Player(Entity):
 
     def request_breaking(self, x: int, y: int, z: int) -> bool:
         if self.eating:
-            self.clear_eating()
+            self.clear_eating(sync=True)
         world = self.world
         if not (0 <= y < world.attribute.MAX_BUILD_HEIGHT and z in (0, 1)):
             self.clear_breaking()
@@ -481,10 +583,13 @@ class Player(Entity):
             self.sync_experience()
         return amount
 
-    def request_eating(self) -> bool:
+    def request_eating(self, stack: ItemStack | None = None) -> bool:
         if self.breaking_target is not None:
             self.clear_breaking()
         held = self.inventory[self.selected_slot]
+        if stack is not None and stack is not held:
+            self.clear_eating()
+            return False
         material_id = getattr(held.material, "name_id", "air")
         food = held.material
         if held.is_empty() or not isinstance(food, Food) or not food.can_consume(self):
@@ -530,7 +635,7 @@ class Player(Entity):
             self.health += healed
             self.add_exhaustion(6.0 * healed)
 
-    def clear_eating(self) -> None:
+    def clear_eating(self, *, sync: bool = False) -> None:
         was_eating = self.eating
         self.eating = False
         self.replace_attribute_modifiers("state:eating", ())
@@ -539,6 +644,8 @@ class Player(Entity):
         self._eat_progress = 0
         if was_eating:
             self._broadcast_action_state()
+            if sync:
+                self.sync_inventory()
 
     def _mouth_position(self) -> tuple[float, float, int]:
         direction = 1.0 if int(self.facing) == 1 else -1.0
@@ -581,7 +688,7 @@ class Player(Entity):
             return
         current_tick = int(getattr(self.world.server, "server_ticks", 0))
         if current_tick - self._last_eat_action_tick > 2:
-            self.clear_eating()
+            self.clear_eating(sync=True)
             return
         held = self.inventory[self.selected_slot]
         material_id = getattr(held.material, "name_id", "air")
@@ -593,7 +700,7 @@ class Player(Entity):
             or not isinstance(food, Food)
             or not food.can_consume(self)
         ):
-            self.clear_eating()
+            self.clear_eating(sync=True)
             return
         self._eat_progress += 1
         if self._eat_progress % 4 == 0:
@@ -601,12 +708,13 @@ class Player(Entity):
             self._play_eating_sound("random.eat")
         if self._eat_progress < food.consume_duration_ticks:
             return
-        food.on_consume(self)
-        held.reduce_amount(1)
+        if not food.consume(held, self):
+            self.clear_eating(sync=True)
+            return
         if self.food_level >= self.MAX_FOOD_LEVEL:
             self._play_eating_sound("random.burp")
-        self.sync_inventory()
         self.clear_eating()
+        self.sync_inventory()
 
     def record_server_movement(
         self, previous_y: float, was_on_ground: bool, horizontal_distance: float

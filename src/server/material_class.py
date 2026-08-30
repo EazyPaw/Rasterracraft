@@ -101,6 +101,18 @@ class Material:
     def get_anchor(self):
         return {"anchor": (0.5, 0.9), "offset": (0, 0), "scale": 0.5, "rotation": -90}
 
+    def right_click(self, stack, holder, *, target=None, context=None) -> bool:
+        """Use ``stack`` from ``holder`` after block interaction declined it.
+
+        The server is the only caller allowed to turn this result into gameplay
+        state.  Materials which support right-click use override this method.
+        """
+        return False
+
+    def consume(self, stack, consumer) -> bool:
+        """Finish consuming ``stack``. Non-consumable materials return False."""
+        return False
+
 
 class DamageableItem(Material):
     max_stack_size = 1
@@ -142,6 +154,21 @@ class Food(Material):
         if callable(handler):
             handler(self)
 
+    def right_click(self, stack, holder, *, target=None, context=None) -> bool:
+        if stack is None or stack.is_empty() or not self.can_consume(holder):
+            return False
+        request_eating = getattr(holder, "request_eating", None)
+        return callable(request_eating) and bool(request_eating(stack))
+
+    def consume(self, stack, consumer) -> bool:
+        if stack is None or stack.is_empty() or not self.can_consume(consumer):
+            return False
+        self.on_consume(consumer)
+        mode = getattr(getattr(consumer, "gamemode", None), "name_id", "survival")
+        if mode != "creative":
+            stack.reduce_amount(1)
+        return True
+
 
 class BlockItem(Material):
     target_block_id = None
@@ -153,6 +180,10 @@ class BlockItem(Material):
         from src.server.blocks import get_block_by_id
 
         return get_block_by_id(cls.target_block_id)
+
+    def right_click(self, stack, holder, *, target=None, context=None) -> bool:
+        place = getattr(holder, "place_block_item", None)
+        return callable(place) and bool(place(stack, target, context))
 
     @classmethod
     @client_method

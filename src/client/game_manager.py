@@ -26,6 +26,12 @@ class GameManager:
 
     def acquire_game_input(self):
         """让 GUI 独占键鼠输入。"""
+        player = getattr(self.client, "client_player", None)
+        stop_item_use = getattr(
+            getattr(player, "game_mode", None), "stop_item_use", None
+        )
+        if callable(stop_item_use):
+            stop_item_use(notify_server=True)
         self.ing_mouse_lock += 1
         self.client.hold_mouse_buttons = [False, False, False]
 
@@ -159,18 +165,14 @@ class GameManager:
                     player.game_mode.right_click_on_entity(player.choosing_entity)
                     self.client.hold_mouse_buttons[2] = True
                     player.skeleton.trigger_swing()
-                elif (
-                    player.choosing_block is not None
-                    and (loc := player.choosing_block.location) is not None
-                ):
-                    x = loc.x
-                    y = loc.y
-                    self.client.hold_key_map["mouse_right"](
-                        self.client.client_world.get_block(x, y, 0)
-                    )
+                else:
+                    self.client.hold_key_map["mouse_right"](player.choosing_block)
                     self.client.hold_mouse_buttons[2] = True
                     player.skeleton.trigger_swing()
             else:
+                stop_item_use = getattr(player.game_mode, "stop_item_use", None)
+                if callable(stop_item_use):
+                    stop_item_use(notify_server=True)
                 self.client.hold_mouse_buttons[2] = False
 
     def sync_player_camera(self):

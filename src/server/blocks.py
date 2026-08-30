@@ -664,6 +664,18 @@ class CRAFTING_TABLE(Block):
     hardness = 2.5
     preferred_tool = "axe"
 
+    def on_right_click(self, player) -> bool:
+        server = getattr(getattr(self.location, "world", None), "server", None)
+        if server is None:
+            return False
+        player.sync_inventory()
+        server.send_client_socket(
+            player,
+            {"__class__": "CraftingTableOpen", "width": 3, "height": 3},
+            "Forward",
+        )
+        return True
+
 
 class FurnaceInventory(Inventory):
     def __init__(self, furnace):

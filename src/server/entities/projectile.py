@@ -153,7 +153,7 @@ class Projectile(Entity, ABC):
         direction = 1.0 if int(facing) == 1 else -1.0
         return self.shoot(
             direction * math.cos(angle),
-            math.sin(angle),
+            direction * math.sin(angle),
             speed=speed,
             inaccuracy=inaccuracy,
             rng=rng,
@@ -193,6 +193,8 @@ class Projectile(Entity, ABC):
             owner=shooter,
             **kwargs,
         )
+        if hasattr(shooter, 'motion'):
+            projectile.motion += shooter.motion
         projectile.x -= projectile.width * 0.5
         projectile.y -= projectile.height * 0.5
         projectile.shoot_from_rotation(

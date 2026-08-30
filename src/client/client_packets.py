@@ -194,16 +194,6 @@ def decode_packet(packet: dict, client: "Client") -> None:
         handle_result = getattr(game_mode, "handle_break_result", None)
         if callable(handle_result):
             handle_result(x, y, z)
-    elif packet["__class__"] == "PlaceBlock":
-        # {
-
-        # }
-        world = client.client_world
-        if 0 <= packet["y"] < world.y_max:
-            block = get_block_by_id(packet["block_id"])
-            if isinstance(packet.get("nbt"), dict):
-                block.write_nbt(packet["nbt"])
-            world.set_block(block, packet["x"], packet["y"], packet["z"])
     elif packet["__class__"] == "BlockUpdate":
         # {
 
@@ -329,6 +319,12 @@ def decode_packet(packet: dict, client: "Client") -> None:
             ):
                 gui._server_closed = True
                 client.render.close_gui(gui)
+    elif packet["__class__"] == "CraftingTableOpen":
+        player = client.client_player
+        game_mode = getattr(player, "game_mode", None)
+        gui = getattr(game_mode, "crafting_table", None)
+        if gui is not None and gui not in client.render.drawing_GUIs:
+            client.render.show_gui(gui)
     elif packet["__class__"] == "PlayerHurt":
         player = client.client_player
         if player is not None:
@@ -448,19 +444,6 @@ def encode_packet(obj, obj_type=None, args=None) -> dict:
             "y": location.y,
             "z": location.z,
         }
-    elif isinstance(obj, Block) and obj_type == "PlaceBlock":
-        location: Location = obj.location
-        packet = {
-            "__class__": "PlaceBlock",
-            "x": location.x,
-            "y": location.y,
-            "z": location.z,
-            "block_id": obj.block_id,
-        }
-        nbt = obj.parse_nbt()
-        if nbt:
-            packet["nbt"] = nbt
-        return packet
     elif isinstance(obj, dict) and "__class__" in obj:
         # 直传已构建好的数据包（如 ChatMessage）
         return obj

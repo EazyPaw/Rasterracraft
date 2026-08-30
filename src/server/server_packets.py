@@ -3,6 +3,7 @@ import logging
 import math
 
 from src.server.entity import Entity
+from src.server.block_class import PlacementContext
 from src.server.location import Location
 from src.server.inventory import (
     payload_to_stack,
@@ -168,6 +169,105 @@ def _read_block_position(packet: dict) -> tuple[int, int, int] | None:
         return None
 
 
+def _read_placement_context(
+    packet: dict, player: Player, target_z: int
+) -> PlacementContext | None:
+    raw = packet.get("context")
+    if raw is None:
+        return PlacementContext(None, (0.0, 0.0), (0.0, 0.0), target_z, False)
+    if not isinstance(raw, dict):
+        return None
+    hit_face = raw.get("hit_face")
+    if hit_face not in (None, "top", "bottom", "left", "right"):
+        return None
+    try:
+        direction = tuple(
+            float(value) for value in raw.get("ray_direction", (0.0, 0.0))
+        )
+        if len(direction) != 2 or not all(math.isfinite(value) for value in direction):
+            return None
+        context_z = int(raw.get("target_z", target_z))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if context_z not in (0, 1):
+        return None
+    eye = (
+        float(player.x) + float(player.width) * 0.5,
+        float(player.y) + float(getattr(player, "eye_height", player.height * 0.85)),
+    )
+    return PlacementContext(
+        hit_face,
+        eye,
+        direction,
+        context_z,
+        raw.get("fore_place") is True,
+    )
+
+
+def _handle_right_click(packet: dict, player: Player) -> None:
+    if not _allow_action_this_tick(player, "right_click"):
+        return
+    if player.health <= 0:
+        return
+
+    position_keys = ("x", "y", "z")
+    has_position = any(key in packet for key in position_keys)
+    position = _read_block_position(packet) if has_position else None
+    if has_position and position is None:
+        return
+
+    player.clear_breaking()
+    target = None
+    context = None
+    if position is not None:
+        x, y, z = position
+        world = player.world
+        position_loaded = (
+            0 <= y < world.attribute.MAX_BUILD_HEIGHT
+            and z in (0, 1)
+            and x // 16 in player.client_loaded_regions
+            and world.is_chunk_loaded(x // 16)
+        )
+        if position_loaded:
+            context = _read_placement_context(packet, player, z)
+            if context is None:
+                return
+            target = world.get_block(x, y, z)
+            target_is_air = getattr(target, "block_id", "air") == "air"
+
+            # AIR 坐标是方块物品的放置目标，而不是可交互方块。它的最终
+            # 距离会在 Player.place_block_item 中按放置位置再次校验。
+            if not target_is_air:
+                if not _can_player_reach_block(player, x, y, z):
+                    return
+                held = player.inventory[player.selected_slot]
+                item_used_on_block = not held.is_empty() and bool(
+                    target.accepts_item_use(held.material)
+                )
+                handled = bool(target.on_right_click(player))
+                if not handled and not held.is_empty():
+                    handled = bool(target.on_use(player, held.material))
+                    item_used_on_block = handled
+                if handled:
+                    if item_used_on_block:
+                        player.apply_item_event(
+                            held, "on_successful_block_use", target
+                        )
+                    player.clear_eating()
+                    player.sync_inventory()
+                    player.attack_animation_ticks = max(
+                        player.attack_animation_ticks, 6
+                    )
+                    forward_packet_to_others(
+                        player, player, mode="entity_update"
+                    )
+                    return
+
+    if player.use_held_item(target=target, context=context):
+        player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
+        forward_packet_to_others(player, player, mode="entity_update")
+
+
 def _reject_player_move(player: Player) -> None:
 
     player.teleport_to(player.x, player.y)
@@ -183,34 +283,6 @@ def _allow_action_this_tick(player: Player, action: str) -> bool:
         return False
     action_ticks[action] = current_tick
     return True
-
-
-def _block_intersects_entity(world, block, x: int, y: int, z: int) -> bool:
-    get_shape = getattr(block, "get_collision_box", None)
-    shape = get_shape() if callable(get_shape) else None
-    if not shape:
-        return False
-    entities = list(getattr(world, "entities", {}).values())
-    entities.extend(getattr(world.server, "players", ()))
-    seen = set()
-    for entity in entities:
-        identity = id(entity)
-        if identity in seen or getattr(entity, "removed", False):
-            continue
-        seen.add(identity)
-        if not getattr(entity, "blocks_block_placement", True):
-            continue
-        if int(getattr(entity, "z", 0)) != z:
-            continue
-        min_x = float(entity.x)
-        min_y = float(entity.y)
-        max_x = min_x + float(getattr(entity, "width", 1.0))
-        max_y = min_y + float(getattr(entity, "height", 1.0))
-        if any(
-            box.translated(x, y).overlaps(min_x, min_y, max_x, max_y) for box in shape
-        ):
-            return True
-    return False
 
 
 def decode_packet(packet: dict, player: Player):
@@ -325,11 +397,12 @@ def decode_packet(packet: dict, player: Player):
         if action == "abort_breaking":
             player.clear_breaking()
             return
-        if action == "continue_eating":
-            player.request_eating()
+        if action in {"continue_item_use", "continue_eating"}:
+            if player.eating:
+                player.request_eating()
             return
-        if action == "stop_eating":
-            player.clear_eating()
+        if action in {"stop_item_use", "stop_eating"}:
+            player.clear_eating(sync=True)
             return
         if action != "continue_breaking":
             return
@@ -342,54 +415,8 @@ def decode_packet(packet: dict, player: Player):
         if position is not None:
             player.finish_breaking(*position)
 
-    elif packet["__class__"] == "UseBlock":
-        if not _allow_action_this_tick(player, "use_block"):
-            return
-        position = _read_block_position(packet)
-        if position is None:
-            return
-        x, y, z = position
-        world = player.world
-        if not (0 <= y < world.attribute.MAX_BUILD_HEIGHT):
-            return
-        if (
-            x // 16 not in player.client_loaded_regions
-            or not world.is_chunk_loaded(x // 16)
-            or not _can_player_reach_block(player, x, y, z)
-        ):
-            return
-        held = player.inventory[player.selected_slot]
-        if held.is_empty():
-            return
-        block = world.get_block(x, y, z)
-        handled = block.on_right_click(player)
-        if not handled:
-            handled = block.on_use(player, held.material)
-        if not handled:
-            return
-        player.apply_item_event(held, "on_successful_block_use", block)
-        player.clear_eating()
-        player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
-        forward_packet_to_others(player, player, mode="entity_update")
-
-    elif packet["__class__"] == "OpenFurnace":
-        if not _allow_action_this_tick(player, "open_furnace"):
-            return
-        position = _read_block_position(packet)
-        if position is None:
-            return
-        x, y, z = position
-        world = player.world
-        if (
-            not (0 <= y < world.attribute.MAX_BUILD_HEIGHT)
-            or x // 16 not in player.client_loaded_regions
-            or not world.is_chunk_loaded(x // 16)
-            or not _can_player_reach_block(player, x, y, z)
-        ):
-            return
-        furnace = world.get_block(x, y, z)
-        if getattr(furnace, "block_id", None) == "furnace":
-            furnace.open_for(player)
+    elif packet["__class__"] == "RightClick":
+        _handle_right_click(packet, player)
 
     elif packet["__class__"] == "PickupItem":
         from src.server.entities.item import Item
@@ -407,7 +434,7 @@ def decode_packet(packet: dict, player: Player):
             and _can_player_reach_entity(player, target)
         ):
             player._last_attack_tick = current_tick
-            player.clear_eating()
+            player.clear_eating(sync=True)
             player.attack_animation_ticks = player.attack_animation_duration
             player.attack(target)
             forward_packet_to_others(player, player, mode="entity_update")
@@ -417,59 +444,22 @@ def decode_packet(packet: dict, player: Player):
         if target is not None and _can_player_reach_entity(player, target):
             slot = max(0, min(len(player.inventory) - 1, int(player.selected_slot)))
             held = player.inventory[slot]
-            if target.interact(player, held):
+            handled = bool(target.interact(player, held))
+            if handled:
                 player.apply_item_event(
                     held,
                     "on_successful_entity_interaction",
                     target,
                 )
+                player.sync_inventory()
+                player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
+                forward_packet_to_others(player, player, mode="entity_update")
+            elif player.use_held_item():
                 player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
                 forward_packet_to_others(player, player, mode="entity_update")
 
     elif packet["__class__"] == "SelfDamage":
         return
-
-    elif packet["__class__"] == "PlaceBlock":
-        # {
-
-        # }
-        position = _read_block_position(packet)
-        if position is None:
-            return
-        if not _allow_action_this_tick(player, "place_block"):
-            return
-        x, y, z = position
-        world = player.world
-        held = player.inventory[player.selected_slot]
-        create_block = getattr(held.material, "create_block", None)
-        if (
-            0 <= y < world.attribute.MAX_BUILD_HEIGHT
-            and z in (0, 1)
-            and x // 16 in player.client_loaded_regions
-            and world.is_chunk_loaded(x // 16)
-            and _can_player_reach_block(player, x, y, z)
-            and not held.is_empty()
-            and callable(create_block)
-        ):
-            player.clear_eating()
-            block = create_block()
-            if isinstance(packet.get("nbt"), dict):
-                apply_placement_nbt = getattr(block, "apply_placement_nbt", None)
-                if callable(apply_placement_nbt):
-                    try:
-                        apply_placement_nbt(packet["nbt"])
-                    except (TypeError, ValueError):
-                        return
-
-            if _block_intersects_entity(world, block, x, y, z):
-                player.sync_inventory()
-                return
-            if block.place_at(Location(world, x, y, z)) is not False:
-                if getattr(player.gamemode, "name_id", "survival") != "creative":
-                    held.reduce_amount(1)
-                player.sync_inventory()
-                player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
-                forward_packet_to_others(player, player, mode="entity_update")
 
     elif packet["__class__"] == "ChatMessage":
         # 客户端发送的聊天消息
@@ -655,8 +645,6 @@ def decode_packet(packet: dict, player: Player):
         if player.selected_slot != old_slot:
             player.clear_breaking()
             player.clear_eating()
-        player.sync_inventory()
-    elif packet["__class__"] == "ConsumeItem":
         player.sync_inventory()
     elif packet["__class__"] == "RequestRespawn":
         if player.health > 0:

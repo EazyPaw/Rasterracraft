@@ -602,6 +602,33 @@ class SNOWBALL(Material):
     name = "item.snowball.name"
     _texture_path = "items.snowball"
 
+    def right_click(self, stack, holder, *, target=None, context=None) -> bool:
+        if stack is None or stack.is_empty() or getattr(holder, "health", 0) <= 0:
+            return False
+        if (
+            getattr(getattr(holder, "gamemode", None), "name_id", "survival")
+            == "spectator"
+        ):
+            return False
+
+        from src.server.entities.snow_ball import SnowBall
+
+        projectile = SnowBall.from_shooter(holder)
+        holder.world.spawn_entity(projectile)
+        mode = getattr(getattr(holder, "gamemode", None), "name_id", "survival")
+        if mode != "creative":
+            stack.reduce_amount(1)
+        server = getattr(holder.world, "server", None)
+        if server is not None:
+            server.broadcast_sound(
+                "random.bow",
+                float(holder.x) + float(holder.width) * 0.5,
+                float(holder.y)
+                + float(getattr(holder, "eye_height", holder.height * 0.85)),
+                int(getattr(holder, "z", 0)),
+            )
+        return True
+
 
 
 _block_item_types: dict[str, type[BlockItem]] = {}
