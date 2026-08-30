@@ -118,6 +118,7 @@ def decode_packet(packet: dict, client: "Client") -> None:
             client.client_player.name = packet["name"]
         client.client_player.x = packet["x"]
         client.client_player.y = packet["y"]
+        client.client_player.blocking = bool(packet.get("blocking", False))
 
         client.client_player.motion.x = 0
         client.client_player.motion.y = 0
@@ -284,6 +285,7 @@ def decode_packet(packet: dict, client: "Client") -> None:
             for key in ("health", "food_level", "saturation"):
                 if key in packet:
                     setattr(player, key, packet[key])
+            player.blocking = bool(packet.get("blocking", False))
             try:
                 player.selected_slot = max(
                     0, min(8, int(packet.get("selected_slot", 0)))

@@ -254,6 +254,7 @@ def _handle_right_click(packet: dict, player: Player) -> None:
                             held, "on_successful_block_use", target
                         )
                     player.clear_eating()
+                    player.clear_blocking()
                     player.sync_inventory()
                     player.attack_animation_ticks = max(
                         player.attack_animation_ticks, 6
@@ -360,8 +361,10 @@ def decode_packet(packet: dict, player: Player):
         player.motion.x = dx
         player.motion.y = dy
         player.sneaking = packet.get("sneaking") is True
-        player.sprinting = packet.get("sprinting") is True and (
-            mode != "survival" or player.food_level > 6
+        player.sprinting = (
+            not player.blocking
+            and packet.get("sprinting") is True
+            and (mode != "survival" or player.food_level > 6)
         )
         try:
             facing = int(packet.get("facing", player.facing))
@@ -398,11 +401,14 @@ def decode_packet(packet: dict, player: Player):
             player.clear_breaking()
             return
         if action in {"continue_item_use", "continue_eating"}:
-            if player.eating:
+            if player.blocking:
+                player.request_blocking()
+            elif player.eating:
                 player.request_eating()
             return
         if action in {"stop_item_use", "stop_eating"}:
             player.clear_eating(sync=True)
+            player.clear_blocking(sync=True)
             return
         if action != "continue_breaking":
             return
@@ -435,6 +441,7 @@ def decode_packet(packet: dict, player: Player):
         ):
             player._last_attack_tick = current_tick
             player.clear_eating(sync=True)
+            player.clear_blocking(sync=True)
             player.attack_animation_ticks = player.attack_animation_duration
             player.attack(target)
             forward_packet_to_others(player, player, mode="entity_update")
@@ -645,6 +652,7 @@ def decode_packet(packet: dict, player: Player):
         if player.selected_slot != old_slot:
             player.clear_breaking()
             player.clear_eating()
+            player.clear_blocking()
         player.sync_inventory()
     elif packet["__class__"] == "RequestRespawn":
         if player.health > 0:
@@ -665,6 +673,7 @@ def decode_packet(packet: dict, player: Player):
         player.score = 0
         player.clear_breaking()
         player.clear_eating()
+        player.clear_blocking()
         block = player.world.find_top_block(player.spawn_point, 0)
         if block is not None:
             player.teleport_to(0.0, block.location.y + 1)

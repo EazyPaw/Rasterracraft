@@ -143,10 +143,9 @@ class GameManager:
             player = self.client.client_player
             player.choosing_entity = self.client.render.get_hovered_entity()
             if mouse_button[0]:
+                first_left_press = not self.client.hold_mouse_buttons[0]
                 if player.choosing_entity is not None:
                     player.game_mode.left_click_on_entity(player.choosing_entity)
-                    self.client.hold_mouse_buttons[0] = True
-                    player.skeleton.trigger_swing()
                 elif (
                     player.choosing_block is not None
                     and (loc := player.choosing_block.location) is not None
@@ -156,19 +155,20 @@ class GameManager:
                     self.client.hold_key_map["mouse_left"](
                         self.client.client_world.get_block(x, y, 0)
                     )
-                    self.client.hold_mouse_buttons[0] = True
+                if first_left_press and not getattr(
+                    player.game_mode, "_breaking_request_active", False
+                ):
                     player.skeleton.trigger_swing()
+                self.client.hold_mouse_buttons[0] = True
             else:
                 self.client.hold_mouse_buttons[0] = False
             if mouse_button[2]:
                 if player.choosing_entity is not None:
                     player.game_mode.right_click_on_entity(player.choosing_entity)
                     self.client.hold_mouse_buttons[2] = True
-                    player.skeleton.trigger_swing()
                 else:
                     self.client.hold_key_map["mouse_right"](player.choosing_block)
                     self.client.hold_mouse_buttons[2] = True
-                    player.skeleton.trigger_swing()
             else:
                 stop_item_use = getattr(player.game_mode, "stop_item_use", None)
                 if callable(stop_item_use):

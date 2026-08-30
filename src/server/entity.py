@@ -331,6 +331,7 @@ class Entity:
             data["breaking"] = breaking_target is not None
             data["break_progress"] = float(getattr(self, "break_progress", 0.0))
             data["eating"] = bool(getattr(self, "eating", False))
+            data["blocking"] = bool(getattr(self, "blocking", False))
             if breaking_target is not None:
                 data["break_target"] = list(breaking_target[:3])
         data.update(self.get_synced_data())

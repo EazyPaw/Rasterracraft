@@ -373,3 +373,9 @@ EATING_SPEED_MODIFIER = AttributeModifier(
     -0.8,
     AttributeOperation.ADD_MULTIPLIED_TOTAL,
 )
+
+BLOCKING_SPEED_MODIFIER = AttributeModifier(
+    "minecraft:blocking",
+    -0.8,
+    AttributeOperation.ADD_MULTIPLIED_TOTAL,
+)

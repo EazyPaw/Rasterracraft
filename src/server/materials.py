@@ -740,6 +740,10 @@ class Sword(Tool):
     attack_damage_modifier = 4.0
     attack_speed_modifier = -2.4
 
+    def right_click(self, stack, holder, *, target=None, context=None) -> bool:
+        request_blocking = getattr(holder, "request_blocking", None)
+        return callable(request_blocking) and bool(request_blocking(stack))
+
     def on_post_hurt_enemy(self, stack, holder, target) -> bool:
         return self.damage_stack(stack, 1, holder)
 

@@ -49,6 +49,9 @@ class Zombie(Entity):
 
 
 class ZombieSkeleton(PlayerSkeleton):
+    # 僵尸复用玩家的动作计算，但当前模型没有玩家专用的盔甲渲染部件。
+    ARMOR_SOURCE_PARTS = {}
+
     @client_method
     def __init__(self, entity, client=None):
         EntitySkeleton.__init__(self, client, "entity.zombie.zombie", entity)
@@ -78,6 +81,9 @@ class ZombieSkeleton(PlayerSkeleton):
         self._build_zombie_body()
         self._apply_pose(instant=True)
         self.conv_size()
+
+    def _update_armor_textures(self):
+        """僵尸没有盔甲渲染层，不进入 PlayerSkeleton 的盔甲缓存流程。"""
 
     def _build_zombie_body(self):
         self._part_textures = {

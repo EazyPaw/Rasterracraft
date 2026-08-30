@@ -192,6 +192,7 @@ class ClientEntity:
         self.in_ground = bool(packet.get("in_ground", False))
         self.breaking = bool(packet.get("breaking", False))
         self.eating = bool(packet.get("eating", False))
+        self.blocking = bool(packet.get("blocking", False))
         self.break_progress = float(packet.get("break_progress", 0.0))
         raw_break_target = packet.get("break_target")
         self.break_target = (
@@ -260,6 +261,7 @@ class ClientEntity:
         self.in_ground = bool(packet.get("in_ground", self.in_ground))
         self.breaking = bool(packet.get("breaking", self.breaking))
         self.eating = bool(packet.get("eating", self.eating))
+        self.blocking = bool(packet.get("blocking", self.blocking))
         self.break_progress = float(packet.get("break_progress", self.break_progress))
         if "break_target" in packet:
             raw_break_target = packet.get("break_target")

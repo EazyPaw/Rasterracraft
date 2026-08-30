@@ -3,7 +3,7 @@ import math as _math
 import random as _random
 
 from src.client.game_mode import SurvivalMode
-from src.server.attributes import EATING_SPEED_MODIFIER
+from src.server.attributes import BLOCKING_SPEED_MODIFIER, EATING_SPEED_MODIFIER
 from src.server.damange_type import DamageType, FALL, GENERIC, STARVE
 from src.server.entity import Entity
 from src.server.experience import (
@@ -98,6 +98,10 @@ class Player(Entity):
         self._eating_material_id: str | None = None
         self._eat_progress = 0
         self._last_eat_action_tick = -10_000
+        self.blocking = False
+        self._blocking_slot: int | None = None
+        self._blocking_material_id: str | None = None
+        self._last_block_action_tick = -10_000
         self._last_move_tick = -1
         self.attack_strength_ticker = 20
         self._last_attribute_attack_tick: int | None = None
@@ -209,6 +213,7 @@ class Player(Entity):
             "health": float(self.health),
             "food_level": int(self.food_level),
             "saturation": float(self.saturation),
+            "blocking": bool(self.blocking),
             "attributes": self.attributes.sync_snapshot(),
         }
 
@@ -377,6 +382,8 @@ class Player(Entity):
     def request_breaking(self, x: int, y: int, z: int) -> bool:
         if self.eating:
             self.clear_eating(sync=True)
+        if self.blocking:
+            self.clear_blocking(sync=True)
         world = self.world
         if not (0 <= y < world.attribute.MAX_BUILD_HEIGHT and z in (0, 1)):
             self.clear_breaking()
@@ -605,6 +612,8 @@ class Player(Entity):
     def request_eating(self, stack: ItemStack | None = None) -> bool:
         if self.breaking_target is not None:
             self.clear_breaking()
+        if self.blocking:
+            self.clear_blocking()
         held = self.inventory[self.selected_slot]
         if stack is not None and stack is not held:
             self.clear_eating()
@@ -665,6 +674,76 @@ class Player(Entity):
             self._broadcast_action_state()
             if sync:
                 self.sync_inventory()
+
+    def _held_sword_matches_blocking_state(self) -> bool:
+        try:
+            held = self.inventory[self.selected_slot]
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return False
+        if held.is_empty() or getattr(held.material, "tool_type", None) != "sword":
+            return False
+        return (
+            self.selected_slot == self._blocking_slot
+            and getattr(held.material, "name_id", "air")
+            == self._blocking_material_id
+        )
+
+    def request_blocking(self, stack: ItemStack | None = None) -> bool:
+        if self.health <= 0:
+            self.clear_blocking()
+            return False
+        if self.breaking_target is not None:
+            self.clear_breaking()
+        if self.eating:
+            self.clear_eating()
+        held = self.inventory[self.selected_slot]
+        if (
+            (stack is not None and stack is not held)
+            or held.is_empty()
+            or getattr(held.material, "tool_type", None) != "sword"
+        ):
+            self.clear_blocking()
+            return False
+
+        material_id = getattr(held.material, "name_id", "air")
+        if (
+            not self.blocking
+            or self._blocking_slot != self.selected_slot
+            or self._blocking_material_id != material_id
+        ):
+            self.clear_blocking()
+            self.blocking = True
+            self._blocking_slot = self.selected_slot
+            self._blocking_material_id = material_id
+            self.replace_attribute_modifiers(
+                "state:blocking", (("movement_speed", BLOCKING_SPEED_MODIFIER),)
+            )
+            self._broadcast_action_state()
+        self._last_block_action_tick = int(
+            getattr(self.world.server, "server_ticks", 0)
+        )
+        return True
+
+    def clear_blocking(self, *, sync: bool = False) -> None:
+        was_blocking = self.blocking
+        self.blocking = False
+        self.replace_attribute_modifiers("state:blocking", ())
+        self._blocking_slot = None
+        self._blocking_material_id = None
+        if was_blocking:
+            self._broadcast_action_state()
+            if sync:
+                self.sync_inventory()
+
+    def tick_blocking(self) -> None:
+        if not self.blocking:
+            return
+        current_tick = int(getattr(self.world.server, "server_ticks", 0))
+        if (
+            current_tick - self._last_block_action_tick > 2
+            or not self._held_sword_matches_blocking_state()
+        ):
+            self.clear_blocking(sync=True)
 
     def _mouth_position(self) -> tuple[float, float, int]:
         direction = 1.0 if int(self.facing) == 1 else -1.0
@@ -842,6 +921,7 @@ class Player(Entity):
         self._tick_survival_state()
         self.tick_breaking()
         self.tick_eating()
+        self.tick_blocking()
         for container_id, container in tuple(self.open_inventory_containers.items()):
             if getattr(container, "furnace", None) is None:
                 continue
@@ -958,6 +1038,10 @@ class Player(Entity):
     def modify_damage_for_armor(
         self, damage: float, damage_type: type[DamageType]
     ) -> float:
+        if self.blocking and self._held_sword_matches_blocking_state() and not (
+            self._damage_type_has_tag(damage_type, DamageTag.BYPASSES_ARMOR)
+        ):
+            damage *= 0.5
         reduced = super().modify_damage_for_armor(damage, damage_type)
         if not self._damage_type_has_tag(damage_type, DamageTag.BYPASSES_ARMOR):
             durability_damage = max(1, int(float(damage) / 4.0))
@@ -996,6 +1080,8 @@ class Player(Entity):
         source,
     ) -> None:
         super().on_damage_applied(actual_damage, raw_damage, damage_type, source)
+        if self.health <= 0 and self.blocking:
+            self.clear_blocking(sync=True)
         self.add_exhaustion(getattr(damage_type, "exhaustion", 0.0))
         server = getattr(self.world, "server", None)
         if server is None:
@@ -1747,6 +1833,7 @@ class Player(Entity):
         self._last_move_tick = -1
         self.clear_breaking()
         self.clear_eating()
+        self.clear_blocking()
         self._teleport_id += 1
         self._pending_teleport_id = self._teleport_id
         self.world.server.send_client_socket(self, self, "Teleport")

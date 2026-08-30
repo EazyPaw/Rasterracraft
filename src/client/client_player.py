@@ -35,6 +35,7 @@ class ClientPlayer(Entity):
         self.health = self.max_health
         self.food_level = 20
         self.saturation = 5.0
+        self.blocking = False
         self.hurt_time = 0
         self.dead = False
         self.experience = 0
@@ -110,6 +111,9 @@ class ClientPlayer(Entity):
                 keys[pygame.K_LSHIFT] or keys[pygame.K_s]
             ) and not self.flying
             self.swimming_up = keys[pygame.K_SPACE] and not self.flying
+
+        if self.blocking:
+            self.sprinting = False
 
         super().move_update()
         self._update_survival_state()

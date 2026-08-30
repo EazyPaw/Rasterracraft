@@ -70,6 +70,11 @@ class BodyPart:
         self.target_flip_x = False
 
         self.render_scale = 1.0
+        # Optional high-resolution scaling along an authored visual axis. Sword
+        # pixels are diagonal inside their square canvas, so the blade must be
+        # aligned before scaling instead of blindly compressing the canvas X axis.
+        self.local_axis_scale = 1.0
+        self.local_axis_alignment_angle = 0.0
 
         # base_texture 是缩放后的贴图；texture 是在 base_texture 基础上旋转后的贴图。
         self.base_texture = self.original_texture
@@ -80,6 +85,8 @@ class BodyPart:
         self.size = self.original_texture.get_size()
         # 用这个 key 避免每帧重复缩放/旋转同一张贴图。
         self._last_transform_key = None
+        self._local_axis_cache_key = None
+        self._local_axis_cache = None
         self._render_pivot = pivot
 
     def set_source_texture(self, texture: pygame.Surface):
@@ -88,6 +95,7 @@ class BodyPart:
             return
         self.original_texture = texture.copy()
         self._last_transform_key = None
+        self._local_axis_cache_key = None
 
     def set_overlay_texture(self, texture: pygame.Surface | None):
         """Set a texture rendered additively after the base texture's world tint."""
@@ -95,6 +103,7 @@ class BodyPart:
             texture.copy() if texture is not None else None
         )
         self._last_transform_key = None
+        self._local_axis_cache_key = None
 
     @staticmethod
     def _clip_overlay_to_base_alpha(
@@ -130,6 +139,46 @@ class BodyPart:
         self.show = self.target_show
         self.flip_x = self.target_flip_x
 
+    @staticmethod
+    def _point_after_rotation(
+        point: pygame.Vector2,
+        source_size: tuple[int, int],
+        target_size: tuple[int, int],
+        angle: float,
+    ) -> pygame.Vector2:
+        offset = pygame.Vector2(point) - pygame.Vector2(source_size) * 0.5
+        return pygame.Vector2(target_size) * 0.5 + offset.rotate(-angle)
+
+    @classmethod
+    def _scale_surface_along_axis(
+        cls,
+        surface: pygame.Surface,
+        point: pygame.Vector2,
+        scale_x: float,
+        alignment_angle: float,
+    ) -> tuple[pygame.Surface, pygame.Vector2]:
+        aligned = pygame.transform.rotate(surface, alignment_angle)
+        mapped_point = cls._point_after_rotation(
+            point, surface.get_size(), aligned.get_size(), alignment_angle
+        )
+
+        aligned_width = aligned.get_width()
+        scaled_width = max(1, round(aligned_width * scale_x))
+        actual_scale_x = scaled_width / aligned_width
+        scaled = pygame.transform.scale(
+            aligned, (scaled_width, aligned.get_height())
+        )
+        mapped_point.x *= actual_scale_x
+
+        restored = pygame.transform.rotate(scaled, -alignment_angle)
+        mapped_point = cls._point_after_rotation(
+            mapped_point,
+            scaled.get_size(),
+            restored.get_size(),
+            -alignment_angle,
+        )
+        return restored, mapped_point
+
     def rebuild_texture(self, scale: float):
         """按当前渲染缩放和实体大小生成最终贴图。"""
         effective_scale = scale * self.render_scale
@@ -141,39 +190,86 @@ class BodyPart:
             round(self.angle, 2),
             self.flip_x,
             round(self.render_scale, 4),
+            round(self.local_axis_scale, 4),
+            round(self.local_axis_alignment_angle, 2),
             round(self.pivot[0], 4),
             round(self.pivot[1], 4),
         )
         if key == self._last_transform_key:
             return
 
-        base = pygame.transform.scale(self.original_texture, (width, height))
-        if self.flip_x:
-            base = pygame.transform.flip(base, True, False)
+        prepared_key = (
+            id(self.original_texture),
+            id(self.original_overlay_texture),
+            width,
+            height,
+            self.flip_x,
+            round(self.local_axis_scale, 4),
+            round(self.local_axis_alignment_angle, 2),
+            round(self.pivot[0], 4),
+            round(self.pivot[1], 4),
+        )
+        if prepared_key != self._local_axis_cache_key:
+            base = pygame.transform.scale(self.original_texture, (width, height))
+            overlay = (
+                pygame.transform.scale(
+                    self.original_overlay_texture, (width, height)
+                )
+                if self.original_overlay_texture is not None
+                else None
+            )
+            pivot_x = self.pivot[0] * effective_scale
+            pivot = pygame.Vector2(pivot_x, self.pivot[1] * effective_scale)
+            if self.flip_x:
+                base = pygame.transform.flip(base, True, False)
+                if overlay is not None:
+                    overlay = pygame.transform.flip(overlay, True, False)
+                pivot.x = base.get_width() - pivot.x
 
+            if self.local_axis_scale != 1.0:
+                base, pivot = self._scale_surface_along_axis(
+                    base,
+                    pivot,
+                    self.local_axis_scale,
+                    self.local_axis_alignment_angle,
+                )
+                content_rect = base.get_bounding_rect(min_alpha=1)
+                if content_rect.width > 0 and content_rect.height > 0:
+                    base = base.subsurface(content_rect).copy()
+                    pivot -= pygame.Vector2(content_rect.topleft)
+                    if overlay is not None:
+                        overlay, _ = self._scale_surface_along_axis(
+                            overlay,
+                            pygame.Vector2(),
+                            self.local_axis_scale,
+                            self.local_axis_alignment_angle,
+                        )
+                        overlay = overlay.subsurface(content_rect).copy()
+
+            self._local_axis_cache_key = prepared_key
+            self._local_axis_cache = (base, overlay, tuple(pivot))
+
+        base, overlay, pivot = self._local_axis_cache
         self.base_texture = base
+        self.base_overlay_texture = overlay
+        self._render_pivot = pivot
         self.texture = pygame.transform.rotate(base, self.angle)
-        if self.original_overlay_texture is None:
-            self.base_overlay_texture = None
+        if overlay is None:
             self.overlay_texture = None
         else:
-            overlay = pygame.transform.scale(
-                self.original_overlay_texture, (width, height)
-            )
-            if self.flip_x:
-                overlay = pygame.transform.flip(overlay, True, False)
-            self.base_overlay_texture = overlay
             self.overlay_texture = pygame.transform.rotate(overlay, self.angle)
             self._clip_overlay_to_base_alpha(self.texture, self.overlay_texture)
         self.size = self.texture.get_size()
-        # 如果贴图被水平翻转，pivot 的 x 坐标也要镜像，否则关节会错位。
-        self._render_pivot = (
-            base.get_width() - self.pivot[0] * effective_scale
-            if self.flip_x
-            else self.pivot[0] * effective_scale,
-            self.pivot[1] * effective_scale,
-        )
         self._last_transform_key = key
+
+    def get_rotated_pivot_offset(self) -> pygame.Vector2:
+        """Return the rendered pivot offset after the part's local transforms."""
+        source_center = pygame.Vector2(
+            self.base_texture.get_width() * 0.5,
+            self.base_texture.get_height() * 0.5,
+        )
+        pivot_from_center = pygame.Vector2(self._render_pivot) - source_center
+        return pivot_from_center.rotate(-self.angle)
 
     def draw(
         self,
@@ -190,18 +286,10 @@ class BodyPart:
 
         anchor_world = (entity_pos[0] + self.anchor[0], entity_pos[1] + self.anchor[1])
         anchor_screen = pygame.Vector2(render.trans_world_location(anchor_world))
-        pivot = pygame.Vector2(self._render_pivot)
-
-        source_center = pygame.Vector2(
-            self.base_texture.get_width() * 0.5,
-            self.base_texture.get_height() * 0.5,
-        )
-
         # pygame.transform.rotate 会围绕贴图中心旋转，但我们需要围绕关节 pivot 旋转。
         # 这里先算出"pivot 相对贴图中心"的向量，旋转后再反推出整张贴图的左上角。
         # 注意：Pygame 的屏幕 y 轴向下，所以这里用 -self.angle 来匹配世界坐标的视觉方向。
-        pivot_from_center = pivot - source_center
-        rotated_pivot_from_center = pivot_from_center.rotate(-self.angle)
+        rotated_pivot_from_center = self.get_rotated_pivot_offset()
         rotated_center = pygame.Vector2(
             self.texture.get_width() * 0.5,
             self.texture.get_height() * 0.5,
@@ -332,13 +420,7 @@ class EntitySkeleton(ABC):
         if not part.show:
             return
         anchor = pygame.Vector2(anchor_screen)
-        pivot = pygame.Vector2(part._render_pivot)
-        source_center = pygame.Vector2(
-            part.base_texture.get_width() * 0.5,
-            part.base_texture.get_height() * 0.5,
-        )
-        pivot_from_center = pivot - source_center
-        rotated_pivot_from_center = pivot_from_center.rotate(-part.angle)
+        rotated_pivot_from_center = part.get_rotated_pivot_offset()
         rotated_center = pygame.Vector2(
             part.texture.get_width() * 0.5,
             part.texture.get_height() * 0.5,
@@ -761,7 +843,16 @@ class PlayerSkeleton(EntitySkeleton):
         texture_state_key = None
         if stack is not None and not stack.is_empty():
             texture_state_key = stack.get_texture_state_key(self.client)
-        key = (item_id, bool(stack and not stack.is_empty()), texture_state_key)
+        blocking = bool(
+            getattr(self.entity, "blocking", False)
+            and getattr(getattr(stack, "material", None), "tool_type", None) == "sword"
+        )
+        key = (
+            item_id,
+            bool(stack and not stack.is_empty()),
+            texture_state_key,
+            blocking,
+        )
         part = self.body["held_item"]
         if key != self._held_item_key:
             texture = None
@@ -806,6 +897,7 @@ class PlayerSkeleton(EntitySkeleton):
             self._held_item_scale = item_scale
             self._held_item_rotation = item_rotation
             part.render_scale = item_scale
+            part.local_axis_scale = 0.5 if blocking else 1.0
             right_pivot = (
                 texture.get_width() * anchor[0],
                 texture.get_height() * anchor[1],
@@ -833,6 +925,9 @@ class PlayerSkeleton(EntitySkeleton):
         if self._held_item_texture_side != self.facing:
             part.set_source_texture(self._held_item_textures[self.facing])
             part.set_overlay_texture(self._held_item_glint_textures[self.facing])
+            part.local_axis_alignment_angle = (
+                45.0 if self.facing == self.RIGHT else -45.0
+            )
             self._held_item_pivot = self._held_item_pivots[self.facing]
             self._held_item_texture_side = self.facing
 
@@ -864,6 +959,17 @@ class PlayerSkeleton(EntitySkeleton):
 
     # ---------- 内部动画更新 ----------
 
+    def _is_moving_for_animation(
+        self, horizontal_speed: float, normal_threshold: float = 0.025
+    ) -> bool:
+        # 格挡把实际移速压到正常的 20%；仍沿用普通阈值会把行走误判成站立。
+        threshold = (
+            0.005
+            if getattr(self.entity, "blocking", False)
+            else normal_threshold
+        )
+        return abs(horizontal_speed) > threshold
+
     def _update_animation_clocks(self):
         """更新动画计时器，并根据速度决定行走动画快慢。"""
         now = time.perf_counter()
@@ -879,7 +985,7 @@ class PlayerSkeleton(EntitySkeleton):
             abs(getattr(self.entity.motion, "x", 0.0)), abs(dx) / max(dt, 0.001)
         )
         # 走得越快，摆臂摆腿频率越高
-        if horizontal_speed > 0.015:
+        if self._is_moving_for_animation(horizontal_speed, 0.015):
             self.walk_time += dt * (7.0 + min(horizontal_speed, 1.2) * 3.0)
         else:
             self.walk_time += dt * 2.2
@@ -914,7 +1020,9 @@ class PlayerSkeleton(EntitySkeleton):
 
     def _part_smoothness(self, part: BodyPart) -> float:
         motion_x = getattr(getattr(self.entity, "motion", None), "x", 0.0)
-        if part.name in ("front_leg", "back_leg") and abs(motion_x) <= 0.025:
+        if part.name in ("front_leg", "back_leg") and not (
+            self._is_moving_for_animation(motion_x)
+        ):
             return 0.12
         return 0.28
 
@@ -980,6 +1088,9 @@ class PlayerSkeleton(EntitySkeleton):
         if self._swing_time >= 0:
             self._blend_attack_pose(direction, angles)
 
+        if getattr(self.entity, "blocking", False):
+            angles["front_arm_angle"] += direction * 45.0
+
         # 4. 计算锚点并写入全部部件
         self._write_pose(angles, instant, facing_changed)
 
@@ -988,7 +1099,7 @@ class PlayerSkeleton(EntitySkeleton):
     def _calc_walk_angles(self, direction: int) -> dict:
         """行走/站立/idle 姿态"""
         motion_x = getattr(self.entity.motion, "x", 0.0)
-        moving = abs(motion_x) > 0.025
+        moving = self._is_moving_for_animation(motion_x)
 
         cycle = math.sin(self.walk_time)
         counter_cycle = math.sin(self.walk_time + math.pi)
@@ -1069,7 +1180,7 @@ class PlayerSkeleton(EntitySkeleton):
 
         motion = getattr(self.entity, "motion", None)
         motion_x = getattr(motion, "x", 0.0) if motion else 0.0
-        moving = abs(motion_x) > 0.025
+        moving = self._is_moving_for_animation(motion_x)
 
         mouse_angle = self._calc_head_mouse_angle(direction)
 
@@ -1109,7 +1220,7 @@ class PlayerSkeleton(EntitySkeleton):
         base["head_angle"] = direction * -10.0
 
         motion_x = getattr(self.entity.motion, "x", 0.0)
-        moving = abs(motion_x) > 0.025
+        moving = self._is_moving_for_animation(motion_x)
         cycle = math.sin(self.walk_time)
         counter_cycle = math.sin(self.walk_time + math.pi)
 
