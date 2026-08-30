@@ -44,7 +44,7 @@ class Client:
         self._shutdown_started = False
         self.version = "0.0.1 SNAPSHOT - Minecraft 1.8.9"
 
-        self.language = "zh_CN"
+        self.language = "en_US"
         self.fore_place_switch_mode = "switch"
 
         self.client_world = client_world.ClientWorld(self)

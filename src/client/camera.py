@@ -15,7 +15,6 @@ class Camera:
         self.x = 0
         self.y = 0
         self.mode = CameraMode(mode)
-        # 鼠标到达屏幕边缘时，镜头最多向该方向偏移视口的 12%。
         self.mouse_lead_strength = 0.05
         # 单独保存引导量，供屏幕固定绘制的主玩家使用。
         self.lead_x = 0.0

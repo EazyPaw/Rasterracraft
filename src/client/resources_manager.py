@@ -247,17 +247,17 @@ class ResourcesManager:
             self.textures[ckey] = self.missing_texture
             return self.missing_texture
 
-    def get_texture_animation_key(self, key: str, cft=False, gta=False):
-        self.get_texture_img(key, cft=cft, gta=gta)
-        cache_key = (key, cft, gta)
+    def get_texture_animation_key(self, key: str, cft=False, gta=False, flip=False):
+        self.get_texture_img(key, cft=cft, gta=gta, flip=flip)
+        cache_key = (key, cft, gta, flip)
         texture = self.textures.get(cache_key)
         if not isinstance(texture, dict):
             return None
         return cache_key, self._get_animation_frame_index(texture)
 
-    def is_texture_animated(self, key: str, cft=False, gta=False) -> bool:
-        self.get_texture_img(key, cft=cft, gta=gta)
-        return isinstance(self.textures.get((key, cft, gta)), dict)
+    def is_texture_animated(self, key: str, cft=False, gta=False, flip=False) -> bool:
+        self.get_texture_img(key, cft=cft, gta=gta, flip=flip)
+        return isinstance(self.textures.get((key, cft, gta, flip)), dict)
 
     def _get_animation_frame_index(self, animation_data: dict) -> int:
         frame_indices = animation_data.get("frame_indices")
