@@ -317,6 +317,16 @@ class Entity:
                 }
             except (AttributeError, TypeError, ValueError, IndexError):
                 pass
+            equipment = getattr(self, "equipment", None)
+            if isinstance(equipment, dict):
+                data["equipment_data"] = {
+                    str(slot): {
+                        "id": stack.material.name_id,
+                        "amount": int(getattr(stack, "amount", 0)),
+                        "nbt": getattr(stack, "nbt", {}),
+                    }
+                    for slot, stack in equipment.items()
+                }
             breaking_target = getattr(self, "breaking_target", None)
             data["breaking"] = breaking_target is not None
             data["break_progress"] = float(getattr(self, "break_progress", 0.0))

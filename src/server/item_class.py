@@ -299,13 +299,25 @@ class ItemStack:
     @client_method
     def get_texture(self, scale: float, client, shadow=False, multiply=1):
         animation_key = self.material.get_texture_animation_key()
-        cache_key = (round(scale, 4), shadow, multiply, animation_key)
+        variant_getter = getattr(self.material, "get_texture_variant_key", None)
+        variant_key = variant_getter(self) if callable(variant_getter) else None
+        cache_key = (
+            round(scale, 4),
+            shadow,
+            multiply,
+            animation_key,
+            variant_key,
+        )
         if cache_key in self.material.texture_cache:
             return self.material.texture_cache[cache_key]
 
         px_scale = max(1, int(round(client.render.gui_scale)))
 
-        res = self.material.get_texture(scale)
+        stack_texture_getter = getattr(self.material, "get_stack_texture", None)
+        if callable(stack_texture_getter):
+            res = stack_texture_getter(self, scale, client=client)
+        else:
+            res = self.material.get_texture(scale, client=client)
         if shadow and res is not None:
             # 创建带阴影的最终纹理
             width = res.get_width()

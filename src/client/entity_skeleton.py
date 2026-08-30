@@ -376,6 +376,19 @@ class PlayerSkeleton(EntitySkeleton):
     # 玩家视觉模型高度（格），与碰撞体高度分离，保证模型在屏幕上有合理的大小。
     VISUAL_HEIGHT_BLOCKS = 1.8
 
+    # 盔甲不是一套独立骨架；每个渲染层都必须锁定到对应肢体的最终姿态。
+    ARMOR_SOURCE_PARTS = {
+        "armor_chest_back_arm": "back_arm",
+        "armor_leggings_back_leg": "back_leg",
+        "armor_boots_back_leg": "back_leg",
+        "armor_leggings_body": "body",
+        "armor_chest_body": "body",
+        "armor_leggings_front_leg": "front_leg",
+        "armor_boots_front_leg": "front_leg",
+        "armor_chest_front_arm": "front_arm",
+        "armor_head": "head",
+    }
+
     @client_method
     def __init__(self, player, *, pinned: bool = True, client=None):
         super().__init__(client, "entity.steve", player)
@@ -410,6 +423,10 @@ class PlayerSkeleton(EntitySkeleton):
         self._held_item_textures: dict[int, pygame.Surface] = {}
         self._held_item_pivots: dict[int, tuple[float, float]] = {}
         self._held_item_texture_side = None
+        self._armor_key = None
+        self._armor_texture_side = None
+        self._armor_part_textures = {}
+        self._armor_part_visible = {}
         self._build_player_body()
         self._apply_pose(instant=True)
         self.conv_size()
@@ -443,6 +460,7 @@ class PlayerSkeleton(EntitySkeleton):
         }
         textures = self._part_textures[self.RIGHT]
         empty_item = pygame.Surface((1, 1), pygame.SRCALPHA)
+        empty_armor = pygame.Surface((1, 1), pygame.SRCALPHA)
         self.body = {
             # anchor 只是初始化值，真正姿态会在 _apply_pose() 中按玩家高度重算。
             # pivot 的单位是皮肤像素：手脚 pivot=(2,0) 表示从顶部中点挂在肩膀/髋部。
@@ -466,7 +484,86 @@ class PlayerSkeleton(EntitySkeleton):
             "head_overlay": BodyPart(
                 "head_overlay", textures["head_overlay"], (0.50, 1.50), (4, 8), layer=6
             ),
+            "armor_chest_back_arm": BodyPart(
+                "armor_chest_back_arm",
+                empty_armor,
+                (0.50, 1.50),
+                (2, 0),
+                layer=0.5,
+                show=False,
+            ),
+            "armor_leggings_back_leg": BodyPart(
+                "armor_leggings_back_leg",
+                empty_armor,
+                (0.50, 0.75),
+                (2, 0),
+                layer=1.3,
+                show=False,
+            ),
+            "armor_boots_back_leg": BodyPart(
+                "armor_boots_back_leg",
+                empty_armor,
+                (0.50, 0.75),
+                (2, 0),
+                layer=1.6,
+                show=False,
+            ),
+            "armor_leggings_body": BodyPart(
+                "armor_leggings_body",
+                empty_armor,
+                (0.50, 1.50),
+                (2, 0),
+                layer=2.3,
+                show=False,
+            ),
+            "armor_chest_body": BodyPart(
+                "armor_chest_body",
+                empty_armor,
+                (0.50, 1.50),
+                (2, 0),
+                layer=2.6,
+                show=False,
+            ),
+            "armor_leggings_front_leg": BodyPart(
+                "armor_leggings_front_leg",
+                empty_armor,
+                (0.50, 0.75),
+                (2, 0),
+                layer=3.3,
+                show=False,
+            ),
+            "armor_boots_front_leg": BodyPart(
+                "armor_boots_front_leg",
+                empty_armor,
+                (0.50, 0.75),
+                (2, 0),
+                layer=3.6,
+                show=False,
+            ),
+            "armor_chest_front_arm": BodyPart(
+                "armor_chest_front_arm",
+                empty_armor,
+                (0.50, 1.50),
+                (2, 0),
+                layer=4.5,
+                show=False,
+            ),
+            "armor_head": BodyPart(
+                "armor_head", empty_armor, (0.50, 1.50), (4, 8), layer=7, show=False
+            ),
         }
+        for name, render_scale in {
+            "armor_head": 1.15,
+            "armor_leggings_back_leg": 1.05,
+            "armor_leggings_body": 1.05,
+            "armor_leggings_front_leg": 1.05,
+            "armor_chest_back_arm": 1.20,
+            "armor_chest_body": 1.20,
+            "armor_chest_front_arm": 1.20,
+            "armor_boots_back_leg": 1.20,
+            "armor_boots_front_leg": 1.20,
+        }.items():
+            self.body[name].render_scale = render_scale
 
     def _set_facing_textures(self):
         """根据当前朝向切换左右侧面的皮肤切片。"""
@@ -475,6 +572,106 @@ class PlayerSkeleton(EntitySkeleton):
         for name, texture in self._part_textures[self.facing].items():
             self.body[name].set_source_texture(texture)
         self._current_texture_side = self.facing
+
+    def _armor_layer(self, stack, layer: int) -> pygame.Surface | None:
+        if stack is None or stack.is_empty():
+            return None
+        texture_name = getattr(stack.material, "armor_texture", None)
+        if texture_name is None:
+            return None
+        texture = self.client.resources_manager.get_texture_img(
+            f"models.armor.{texture_name}_layer_{layer}"
+        ).copy()
+        if texture_name != "leather":
+            return texture
+
+        color_getter = getattr(stack.material, "get_dye_color", None)
+        color = color_getter(stack) if callable(color_getter) else 0xA06540
+        texture.fill(
+            ((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF, 255),
+            special_flags=pygame.BLEND_RGBA_MULT,
+        )
+        overlay = self.client.resources_manager.get_texture_img(
+            f"models.armor.leather_layer_{layer}_overlay"
+        )
+        texture.blit(overlay, (0, 0))
+        return texture
+
+    @staticmethod
+    def _combine_armor_crops(entries, rect) -> pygame.Surface:
+        result = pygame.Surface((rect[2], rect[3]), pygame.SRCALPHA)
+        for texture in entries:
+            if texture is not None:
+                result.blit(texture.subsurface(rect), (0, 0))
+        return result
+
+    def _update_armor_textures(self):
+        equipment = getattr(self.entity, "equipment", {})
+        key = tuple(
+            (
+                slot,
+                getattr(getattr(equipment.get(slot), "material", None), "name_id", "air"),
+                repr(getattr(equipment.get(slot), "nbt", {})),
+            )
+            for slot in ("head", "chest", "legs", "feet")
+        )
+        if key != self._armor_key:
+            layers = {
+                (slot, layer): self._armor_layer(equipment.get(slot), layer)
+                for slot, layer in (
+                    ("head", 1),
+                    ("chest", 1),
+                    ("legs", 2),
+                    ("feet", 1),
+                )
+            }
+            base_parts = {
+                "armor_head": self._combine_armor_crops(
+                    (layers[("head", 1)],), (0, 8, 8, 8)
+                ),
+                "armor_chest_body": self._combine_armor_crops(
+                    (layers[("chest", 1)],), (16, 20, 4, 12)
+                ),
+                "armor_chest_front_arm": self._combine_armor_crops(
+                    (layers[("chest", 1)],), (40, 20, 4, 12)
+                ),
+                "armor_chest_back_arm": self._combine_armor_crops(
+                    (layers[("chest", 1)],), (40, 20, 4, 12)
+                ),
+                "armor_leggings_body": self._combine_armor_crops(
+                    (layers[("legs", 2)],), (16, 20, 4, 12)
+                ),
+                "armor_leggings_front_leg": self._combine_armor_crops(
+                    (layers[("legs", 2)],), (0, 20, 4, 12)
+                ),
+                "armor_leggings_back_leg": self._combine_armor_crops(
+                    (layers[("legs", 2)],), (0, 20, 4, 12)
+                ),
+                "armor_boots_front_leg": self._combine_armor_crops(
+                    (layers[("feet", 1)],), (0, 20, 4, 12)
+                ),
+                "armor_boots_back_leg": self._combine_armor_crops(
+                    (layers[("feet", 1)],), (0, 20, 4, 12)
+                ),
+            }
+            self._armor_part_textures = {
+                self.RIGHT: base_parts,
+                self.LEFT: {
+                    name: pygame.transform.flip(texture, True, False)
+                    for name, texture in base_parts.items()
+                },
+            }
+            self._armor_part_visible = {
+                name: bool(texture.get_bounding_rect().width)
+                for name, texture in base_parts.items()
+            }
+            self._armor_key = key
+            self._armor_texture_side = None
+
+        if self._armor_texture_side != self.facing:
+            for name, texture in self._armor_part_textures.get(self.facing, {}).items():
+                self.body[name].set_source_texture(texture)
+            self._armor_texture_side = self.facing
 
     def _update_held_item_texture(self):
         stack = None
@@ -628,12 +825,31 @@ class PlayerSkeleton(EntitySkeleton):
 
         self._apply_pose(instant=sneaking_changed)
         super().update()
+        self._sync_armor_parts_to_body()
 
     def _part_smoothness(self, part: BodyPart) -> float:
         motion_x = getattr(getattr(self.entity, "motion", None), "x", 0.0)
         if part.name in ("front_leg", "back_leg") and abs(motion_x) <= 0.025:
             return 0.12
         return 0.28
+
+    def _sync_armor_parts_to_body(self):
+        """让盔甲使用肢体平滑后的实际姿态，避免两套缓动产生逐帧错位。"""
+        for armor_name, source_name in self.ARMOR_SOURCE_PARTS.items():
+            armor = self.body[armor_name]
+            source = self.body[source_name]
+            equipped = self._armor_part_visible.get(armor_name, False)
+
+            armor.anchor = source.anchor
+            armor.target_anchor = source.target_anchor
+            armor.pivot = source.pivot
+            armor.target_pivot = source.target_pivot
+            armor.angle = source.angle
+            armor.target_angle = source.target_angle
+            armor.show = equipped and source.show
+            armor.target_show = equipped and source.target_show
+            armor.flip_x = source.flip_x
+            armor.target_flip_x = source.target_flip_x
 
     def _pose_part(
         self,
@@ -655,6 +871,7 @@ class PlayerSkeleton(EntitySkeleton):
         direction = self._facing_sign()
         self._set_facing_textures()
         self._update_held_item_texture()
+        self._update_armor_textures()
 
         # 1. 行走/站立基础姿态
         angles = self._calc_walk_angles(direction)
@@ -955,6 +1172,19 @@ class PlayerSkeleton(EntitySkeleton):
             flip_x=False,
         )
 
+        for armor_name, source_name in self.ARMOR_SOURCE_PARTS.items():
+            source = self.body[source_name]
+            self.body[armor_name].set_pose(
+                Pose(
+                    source.target_anchor,
+                    source.target_pivot,
+                    source.target_angle,
+                    self._armor_part_visible.get(armor_name, False)
+                    and source.target_show,
+                    False,
+                )
+            )
+
         if instant:
             for part in self.body.values():
                 part.anchor = part.target_anchor
@@ -962,3 +1192,4 @@ class PlayerSkeleton(EntitySkeleton):
                 part.angle = part.target_angle
                 part.show = part.target_show
                 part.flip_x = part.target_flip_x
+            self._sync_armor_parts_to_body()

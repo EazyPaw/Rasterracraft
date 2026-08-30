@@ -203,6 +203,10 @@ class ClientEntity:
         self.initial_fuse = int(packet.get("initial_fuse", self.fuse))
         self.name = packet.get("name", self.uuid[:8])
         self.block = None
+        self.equipment = {
+            slot: ItemStack(get_material_by_id("air"), 0)
+            for slot in ("offhand", "head", "chest", "legs", "feet")
+        }
         self.skeleton = None
         self.apply_packet(packet, initial=True)
 
@@ -296,6 +300,17 @@ class ClientEntity:
                 int(held_item_data.get("amount", 0)),
                 held_item_data.get("nbt", {}),
             )
+        equipment_data = packet.get("equipment_data")
+        if isinstance(equipment_data, dict):
+            for slot in self.equipment:
+                entry = equipment_data.get(slot)
+                if not isinstance(entry, dict):
+                    continue
+                self.equipment[slot] = ItemStack(
+                    get_material_by_id(entry.get("id", "air")),
+                    int(entry.get("amount", 0)),
+                    entry.get("nbt", {}),
+                )
         self._ensure_skeleton()
         if (
             self.entity_id == "player"

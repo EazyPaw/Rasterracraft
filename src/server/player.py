@@ -15,6 +15,7 @@ from src.server.item_class import EmptyItemStack, ItemStack
 from src.server.location import Location, decide_x_or_loc
 from src.server.material_class import Food
 from src.server.particles import ITEM, SPRINT_STEP
+from src.server.tags import DamageTag
 from src.server.world_class import World
 
 
@@ -169,12 +170,30 @@ class Player(Entity):
         if slot == "mainhand":
             self.inventory[self.selected_slot] = stack
         elif slot in self.equipment:
+            if not self._is_valid_equipment_stack(slot, stack):
+                raise ValueError(f"item cannot be equipped in slot: {slot}")
             self.equipment[slot] = stack
         else:
             raise ValueError(f"unknown equipment slot: {slot}")
         self._equipment_attribute_signature = None
         if sync:
             self.sync_inventory()
+
+    @staticmethod
+    def _equipment_slot_for_stack(stack: ItemStack) -> str | None:
+        if stack is None or stack.is_empty():
+            return None
+        slot = getattr(stack.material, "equipment_slot", None)
+        return str(slot).lower().replace("_", "") if slot is not None else None
+
+    @classmethod
+    def _is_valid_equipment_stack(cls, slot: str, stack: ItemStack) -> bool:
+        slot = str(slot).lower().replace("_", "")
+        if stack is None or stack.is_empty():
+            return True
+        if slot == "offhand":
+            return True
+        return cls._equipment_slot_for_stack(stack) == slot
 
     def inventory_packet(self) -> dict:
         self.refresh_attribute_modifiers()
@@ -936,6 +955,25 @@ class Player(Entity):
         self.attributes.replace_source("equipment", entries)
         self._equipment_attribute_signature = signature
 
+    def modify_damage_for_armor(
+        self, damage: float, damage_type: type[DamageType]
+    ) -> float:
+        reduced = super().modify_damage_for_armor(damage, damage_type)
+        if self._damage_type_has_tag(damage_type, DamageTag.BYPASSES_ARMOR):
+            return reduced
+
+        durability_damage = max(1, int(float(damage) / 4.0))
+        changed = False
+        for slot in ("head", "chest", "legs", "feet"):
+            stack = self.equipment[slot]
+            if stack is None or stack.is_empty():
+                continue
+            changed = stack.hurt_and_break(durability_damage, self) or changed
+        if changed:
+            self._equipment_attribute_signature = None
+            self.sync_inventory()
+        return reduced
+
     def get_hurt_sound(
         self, damage_type: type[DamageType], actual_damage: float
     ) -> str | None:
@@ -1031,8 +1069,9 @@ class Player(Entity):
     def unregister_inventory_container(self, container_id: str) -> None:
         self.open_inventory_containers.pop(str(container_id), None)
 
-    @staticmethod
-    def _container_can_place(container, slot, stack: ItemStack) -> bool:
+    def _container_can_place(self, container, slot, stack: ItemStack) -> bool:
+        if container is self.equipment:
+            return self._is_valid_equipment_stack(str(slot), stack)
         callback = getattr(container, "can_place", None)
         return not callable(callback) or bool(callback(int(slot), stack))
 
@@ -1069,12 +1108,6 @@ class Player(Entity):
 
     def container_click(self, container_id: str, slot, button: int) -> None:
         container = self.get_inventory_container(container_id)
-        if (
-            container is self.equipment
-            and getattr(self.gamemode, "name_id", "survival") != "creative"
-        ):
-            self.sync_inventory()
-            return
         if isinstance(container, Inventory) or container is self.equipment:
             self._click_container(container, slot, int(button))
             if container is self.equipment:
@@ -1156,6 +1189,13 @@ class Player(Entity):
         if screen == "crafting_table":
             return self.crafting_grid, tuple(range(9))
         if screen == "inventory":
+            stack = self.inventory[source_slot]
+            equipment_slot = self._equipment_slot_for_stack(stack)
+            if (
+                equipment_slot in {"head", "chest", "legs", "feet"}
+                and self.equipment[equipment_slot].is_empty()
+            ):
+                return self.equipment, (equipment_slot,)
             if source_slot < 9:
                 return self.inventory, self.MAIN_TOP_LEFT_ORDER
             return self.inventory, self.HOTBAR_LEFT_ORDER
@@ -1173,6 +1213,24 @@ class Player(Entity):
         source_container_id = str(source_container_id)
         screen = str(screen)
         source = self.get_inventory_container(source_container_id)
+        if source is self.equipment:
+            source_slot = str(source_slot)
+            if source_slot not in self.equipment:
+                self.sync_inventory()
+                return
+            reference = self.equipment[source_slot]
+            if reference.is_empty():
+                self.sync_inventory()
+                return
+            moved = self.inventory.insert_stack(
+                reference, self.PLAYER_JAVA_RECEIVE_ORDER
+            )
+            if reference.amount <= 0:
+                self.equipment[source_slot] = EmptyItemStack()
+            if moved:
+                self._equipment_attribute_signature = None
+            self.sync_inventory()
+            return
         try:
             source_slot = int(source_slot)
         except (TypeError, ValueError):
@@ -1196,6 +1254,20 @@ class Player(Entity):
             screen,
             crafting_size,
         )
+        if destination is self.equipment:
+            target_slot = target_slots[0] if target_slots else None
+            if (
+                target_slot is None
+                or not self.equipment[target_slot].is_empty()
+                or not self._is_valid_equipment_stack(target_slot, reference)
+            ):
+                self.sync_inventory()
+                return
+            self.equipment[target_slot] = reference
+            source[source_slot] = EmptyItemStack()
+            self._equipment_attribute_signature = None
+            self.sync_inventory()
+            return
         if not isinstance(destination, Inventory):
             self.sync_inventory()
             return

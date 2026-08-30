@@ -1,4 +1,6 @@
 # Commented and arranged by ChatGPT
+from copy import deepcopy
+
 import pygame
 
 from src.server.material_class import DamageableItem, Material, BlockItem, Food
@@ -362,6 +364,331 @@ class FLINT_AND_STEEL(DamageableItem):
 
     def on_successful_block_use(self, stack, holder, block) -> bool:
         return self.damage_stack(stack, 1, holder)
+
+
+class Armor(DamageableItem):
+    """Minecraft-style wearable armor backed by equipment attributes."""
+
+    equipment_slot = "head"
+    defense = 0.0
+    toughness = 0.0
+    armor_texture = "iron"
+
+    @classmethod
+    def get_default_attribute_modifiers(cls):
+        modifiers = [
+            {
+                "type": "minecraft:armor",
+                "id": f"minecraft:armor.{cls.equipment_slot}",
+                "amount": cls.defense,
+                "operation": "add_value",
+                "slot": cls.equipment_slot,
+            }
+        ]
+        if cls.toughness:
+            modifiers.append(
+                {
+                    "type": "minecraft:armor_toughness",
+                    "id": f"minecraft:armor_toughness.{cls.equipment_slot}",
+                    "amount": cls.toughness,
+                    "operation": "add_value",
+                    "slot": cls.equipment_slot,
+                }
+            )
+        return tuple(modifiers)
+
+    def right_click(self, stack, holder, *, target=None, context=None) -> bool:
+        """Equip from the selected hand when the matching armor slot is empty."""
+        equipment = getattr(holder, "equipment", None)
+        slot = self.equipment_slot
+        if not isinstance(equipment, dict) or slot not in equipment:
+            return False
+        worn = equipment[slot]
+        if worn is not None and not worn.is_empty():
+            return False
+
+        from src.server.item_class import ItemStack
+
+        equipment[slot] = ItemStack(stack.material, 1, deepcopy(stack.nbt))
+        stack.reduce_amount(1)
+        holder._equipment_attribute_signature = None
+        return True
+
+
+class LeatherArmor(Armor):
+    armor_texture = "leather"
+    default_color = 0xA06540
+
+    @classmethod
+    def get_dye_color(cls, stack) -> int:
+        color = cls.default_color
+        nbt = getattr(stack, "nbt", {})
+        raw_color = nbt.get("minecraft:dyed_color")
+        if isinstance(raw_color, dict):
+            raw_color = raw_color.get("rgb")
+        if raw_color is None and isinstance(nbt.get("display"), dict):
+            raw_color = nbt["display"].get("color")
+        try:
+            if raw_color is not None:
+                color = int(raw_color) & 0xFFFFFF
+        except (TypeError, ValueError):
+            pass
+        return color
+
+    def get_texture_variant_key(self, stack):
+        return self.get_dye_color(stack)
+
+    @client_method
+    def get_stack_texture(self, stack, size: float, client):
+        """Tint the dyeable icon, then draw its undyed overlay on top."""
+        base = client.resources_manager.get_texture_img(self._texture_path)
+        overlay = client.resources_manager.get_texture_img(
+            f"{self._texture_path}_overlay"
+        )
+        color = self.get_dye_color(stack)
+        cache = type(self).__dict__.get("_dyed_texture_cache")
+        if cache is None:
+            cache = {}
+            type(self)._dyed_texture_cache = cache
+        key = (round(float(size), 4), color, base, overlay)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+
+        combined = base.copy()
+        combined.fill(
+            ((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF, 255),
+            special_flags=pygame.BLEND_RGBA_MULT,
+        )
+        combined.blit(overlay, (0, 0))
+        scaled = pygame.transform.scale(
+            combined,
+            (
+                max(1, round(combined.get_width() * float(size))),
+                max(1, round(combined.get_height() * float(size))),
+            ),
+        )
+        cache[key] = scaled
+        if len(cache) > 64:
+            cache.pop(next(iter(cache)))
+        return scaled
+
+
+class ChainmailArmor(Armor):
+    armor_texture = "chainmail"
+
+
+class IronArmor(Armor):
+    armor_texture = "iron"
+
+
+class GoldenArmor(Armor):
+    armor_texture = "gold"
+
+
+class DiamondArmor(Armor):
+    armor_texture = "diamond"
+    toughness = 2.0
+
+
+@register_material
+class LEATHER_HELMET(LeatherArmor):
+    name_id = "leather_helmet"
+    name = "item.helmetCloth.name"
+    _texture_path = "items.leather_helmet"
+    equipment_slot = "head"
+    defense = 1.0
+    max_damage = 55
+
+
+@register_material
+class LEATHER_CHESTPLATE(LeatherArmor):
+    name_id = "leather_chestplate"
+    name = "item.chestplateCloth.name"
+    _texture_path = "items.leather_chestplate"
+    equipment_slot = "chest"
+    defense = 3.0
+    max_damage = 80
+
+
+@register_material
+class LEATHER_LEGGINGS(LeatherArmor):
+    name_id = "leather_leggings"
+    name = "item.leggingsCloth.name"
+    _texture_path = "items.leather_leggings"
+    equipment_slot = "legs"
+    defense = 2.0
+    max_damage = 75
+
+
+@register_material
+class LEATHER_BOOTS(LeatherArmor):
+    name_id = "leather_boots"
+    name = "item.bootsCloth.name"
+    _texture_path = "items.leather_boots"
+    equipment_slot = "feet"
+    defense = 1.0
+    max_damage = 65
+
+
+@register_material
+class CHAINMAIL_HELMET(ChainmailArmor):
+    name_id = "chainmail_helmet"
+    name = "item.helmetChain.name"
+    _texture_path = "items.chainmail_helmet"
+    equipment_slot = "head"
+    defense = 2.0
+    max_damage = 165
+
+
+@register_material
+class CHAINMAIL_CHESTPLATE(ChainmailArmor):
+    name_id = "chainmail_chestplate"
+    name = "item.chestplateChain.name"
+    _texture_path = "items.chainmail_chestplate"
+    equipment_slot = "chest"
+    defense = 5.0
+    max_damage = 240
+
+
+@register_material
+class CHAINMAIL_LEGGINGS(ChainmailArmor):
+    name_id = "chainmail_leggings"
+    name = "item.leggingsChain.name"
+    _texture_path = "items.chainmail_leggings"
+    equipment_slot = "legs"
+    defense = 4.0
+    max_damage = 225
+
+
+@register_material
+class CHAINMAIL_BOOTS(ChainmailArmor):
+    name_id = "chainmail_boots"
+    name = "item.bootsChain.name"
+    _texture_path = "items.chainmail_boots"
+    equipment_slot = "feet"
+    defense = 1.0
+    max_damage = 195
+
+
+@register_material
+class IRON_HELMET(IronArmor):
+    name_id = "iron_helmet"
+    name = "item.helmetIron.name"
+    _texture_path = "items.iron_helmet"
+    equipment_slot = "head"
+    defense = 2.0
+    max_damage = 165
+
+
+@register_material
+class IRON_CHESTPLATE(IronArmor):
+    name_id = "iron_chestplate"
+    name = "item.chestplateIron.name"
+    _texture_path = "items.iron_chestplate"
+    equipment_slot = "chest"
+    defense = 6.0
+    max_damage = 240
+
+
+@register_material
+class IRON_LEGGINGS(IronArmor):
+    name_id = "iron_leggings"
+    name = "item.leggingsIron.name"
+    _texture_path = "items.iron_leggings"
+    equipment_slot = "legs"
+    defense = 5.0
+    max_damage = 225
+
+
+@register_material
+class IRON_BOOTS(IronArmor):
+    name_id = "iron_boots"
+    name = "item.bootsIron.name"
+    _texture_path = "items.iron_boots"
+    equipment_slot = "feet"
+    defense = 2.0
+    max_damage = 195
+
+
+@register_material
+class GOLDEN_HELMET(GoldenArmor):
+    name_id = "golden_helmet"
+    name = "item.helmetGold.name"
+    _texture_path = "items.gold_helmet"
+    equipment_slot = "head"
+    defense = 2.0
+    max_damage = 77
+
+
+@register_material
+class GOLDEN_CHESTPLATE(GoldenArmor):
+    name_id = "golden_chestplate"
+    name = "item.chestplateGold.name"
+    _texture_path = "items.gold_chestplate"
+    equipment_slot = "chest"
+    defense = 5.0
+    max_damage = 112
+
+
+@register_material
+class GOLDEN_LEGGINGS(GoldenArmor):
+    name_id = "golden_leggings"
+    name = "item.leggingsGold.name"
+    _texture_path = "items.gold_leggings"
+    equipment_slot = "legs"
+    defense = 3.0
+    max_damage = 105
+
+
+@register_material
+class GOLDEN_BOOTS(GoldenArmor):
+    name_id = "golden_boots"
+    name = "item.bootsGold.name"
+    _texture_path = "items.gold_boots"
+    equipment_slot = "feet"
+    defense = 1.0
+    max_damage = 91
+
+
+@register_material
+class DIAMOND_HELMET(DiamondArmor):
+    name_id = "diamond_helmet"
+    name = "item.helmetDiamond.name"
+    _texture_path = "items.diamond_helmet"
+    equipment_slot = "head"
+    defense = 3.0
+    max_damage = 363
+
+
+@register_material
+class DIAMOND_CHESTPLATE(DiamondArmor):
+    name_id = "diamond_chestplate"
+    name = "item.chestplateDiamond.name"
+    _texture_path = "items.diamond_chestplate"
+    equipment_slot = "chest"
+    defense = 8.0
+    max_damage = 528
+
+
+@register_material
+class DIAMOND_LEGGINGS(DiamondArmor):
+    name_id = "diamond_leggings"
+    name = "item.leggingsDiamond.name"
+    _texture_path = "items.diamond_leggings"
+    equipment_slot = "legs"
+    defense = 6.0
+    max_damage = 495
+
+
+@register_material
+class DIAMOND_BOOTS(DiamondArmor):
+    name_id = "diamond_boots"
+    name = "item.bootsDiamond.name"
+    _texture_path = "items.diamond_boots"
+    equipment_slot = "feet"
+    defense = 3.0
+    max_damage = 429
 
 
 class Tool(DamageableItem):

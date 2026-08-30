@@ -41,6 +41,19 @@ class Backpack(GUI):
     crafting_output_offset = (154, 28)
     quick_move_screen = "inventory"
     inventory_offset = (7, 83)
+    equipment_offsets = (
+        ("head", (7, 7)),
+        ("chest", (7, 25)),
+        ("legs", (7, 43)),
+        ("feet", (7, 61)),
+        ("offhand", (77, 61)),
+    )
+    equipment_empty_icons = {
+        "head": "items.empty_armor_slot_helmet",
+        "chest": "items.empty_armor_slot_chestplate",
+        "legs": "items.empty_armor_slot_leggings",
+        "feet": "items.empty_armor_slot_boots",
+    }
 
     def __init__(self, render):
         super().__init__(render)
@@ -78,6 +91,7 @@ class Backpack(GUI):
         self.crafting_result = None
         self.crafting_inputs = []
         self._pressed_keys = set()
+        self._equipment_icon_cache = {}
 
     @property
     def inventory(self):
@@ -111,11 +125,17 @@ class Backpack(GUI):
     def _is_crafting_slot(slot):
         return isinstance(slot, tuple) and len(slot) == 2 and slot[0] == "crafting"
 
+    @staticmethod
+    def _is_equipment_slot(slot):
+        return isinstance(slot, tuple) and len(slot) == 2 and slot[0] == "equipment"
+
     def _slot_descriptor(self, slot):
         if isinstance(slot, int):
             return "inventory", slot
         if self._is_crafting_slot(slot):
             return "crafting", slot[1]
+        if self._is_equipment_slot(slot):
+            return "equipment", slot[1]
         return None
 
     def _send_quick_move(self, slot, *, all_matching=False):
@@ -152,13 +172,32 @@ class Backpack(GUI):
     def _get_slot_stack(self, slot):
         if self._is_crafting_slot(slot):
             return self.crafting_slots[slot[1]]
+        if self._is_equipment_slot(slot):
+            return self.render.client.client_player.equipment[slot[1]]
         return self.inventory[slot]
 
     def _set_slot_stack(self, slot, stack):
         if self._is_crafting_slot(slot):
             self.crafting_slots[slot[1]] = stack
+        elif self._is_equipment_slot(slot):
+            self.render.client.client_player.equipment[slot[1]] = stack
         else:
             self.inventory[slot] = stack
+
+    def _equipment_positions(self):
+        texture = self.get_texture(self.render.gui_scale, self.render.client)
+        gui_x = (self.render.SCREEN_WIDTH - texture.get_width()) // 2
+        gui_y = (self.render.SCREEN_HEIGHT - texture.get_height()) // 2
+        scale = self.render.gui_scale
+        for slot, (offset_x, offset_y) in self.equipment_offsets:
+            yield slot, (gui_x + offset_x * scale, gui_y + offset_y * scale)
+
+    def _equipment_slot_at_pos(self, pos):
+        size = self.slot_size * self.render.gui_scale
+        for slot, (slot_x, slot_y) in self._equipment_positions():
+            if slot_x <= pos[0] <= slot_x + size and slot_y <= pos[1] <= slot_y + size:
+                return ("equipment", slot)
+        return None
 
     def _craft_positions(self):
         texture = self.get_texture(self.render.gui_scale, self.render.client)
@@ -207,6 +246,9 @@ class Backpack(GUI):
         crafting_slot = self._craft_slot_at_pos(pos)
         if crafting_slot is not None:
             return crafting_slot
+        equipment_slot = self._equipment_slot_at_pos(pos)
+        if equipment_slot is not None:
+            return equipment_slot
         return self._slot_at_pos(pos)
 
     def _handle_crafting_click(self, target, button):
@@ -292,6 +334,63 @@ class Backpack(GUI):
             self.selecting_solt = hovered_target
             self.selecting_item = self.crafting_result
 
+    def _draw_equipment(self):
+        mouse = (self.render.mouse_x, self.render.mouse_y)
+        size = self.slot_size * self.render.gui_scale
+        scale = self.render.gui_scale
+        for slot, pos in self._equipment_positions():
+            target = ("equipment", slot)
+            stack = self.render.client.client_player.equipment[slot]
+            hovered = (
+                pos[0] <= mouse[0] <= pos[0] + size
+                and pos[1] <= mouse[1] <= pos[1] + size
+            )
+            if hovered:
+                self.render.blit(
+                    self.selection_texture,
+                    (pos[0] + scale, pos[1] + scale),
+                )
+                self.selecting_solt = target
+                self.selecting_item = stack
+
+            if self._is_empty(stack):
+                icon_path = self.equipment_empty_icons.get(slot)
+                if icon_path is not None:
+                    cache_key = (icon_path, round(float(scale), 4))
+                    icon = self._equipment_icon_cache.get(cache_key)
+                    if icon is None:
+                        original = self.render.client.resources_manager.get_texture_img(
+                            icon_path
+                        )
+                        icon = pygame.transform.scale(
+                            original,
+                            (
+                                max(1, round(original.get_width() * scale)),
+                                max(1, round(original.get_height() * scale)),
+                            ),
+                        )
+                        self._equipment_icon_cache[cache_key] = icon
+                    self.render.blit(
+                        icon,
+                        (
+                            pos[0] + (size - icon.get_width()) / 2,
+                            pos[1] + (size - icon.get_height()) / 2,
+                        ),
+                    )
+                continue
+
+            texture_item = stack.get_gui_texture(scale)
+            if texture_item is None:
+                continue
+            self.render.blit(
+                texture_item,
+                (
+                    pos[0] + (size - texture_item.get_width()) / 2,
+                    pos[1] + (size - texture_item.get_height()) / 2,
+                ),
+            )
+            stack.draw_durability_bar(self.render, pos[0], pos[1], size)
+
     def _split_stack(self, item, amount):
         """
         从物品堆中分离出指定数量的新堆。
@@ -367,6 +466,10 @@ class Backpack(GUI):
         if source is None:
             source = self.dragging_item
         if self._is_empty(source):
+            return 0
+        # Equipment slots are authoritative single-click targets. They do not
+        # participate in the client-side drag preview used by normal slots.
+        if self._is_equipment_slot(slot):
             return 0
 
         target = self._get_slot_stack(slot)
@@ -848,6 +951,7 @@ class Backpack(GUI):
                             )
 
         # ---- 第3步：绘制悬停说明与鼠标上的拖拽物品 ----
+        self._draw_equipment()
         self._draw_crafting()
         if self._is_empty(self.dragging_item) and not self._is_empty(
             self.selecting_item

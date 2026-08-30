@@ -60,18 +60,30 @@ class ItemTooltip:
         namespace = str(getattr(material, "name_space_key", "minecraft") or "minecraft")
         return f"{namespace}:{item_id}"
 
-    def _attack_damage_lines(self, stack) -> list[Text]:
+    def _attribute_lines(self, stack) -> list[Text]:
         get_modifiers = getattr(stack, "get_attribute_modifiers", None)
         if not callable(get_modifiers):
             return []
 
         lines = []
-        attribute_name = transkey(
-            "attribute.name.generic.attackDamage", client=self.render.client
-        )
-        for attribute_id, modifier in get_modifiers("mainhand"):
-            if normalize_id(attribute_id) != "minecraft:attack_damage":
+        material = getattr(stack, "material", None)
+        equipment_slot = getattr(material, "equipment_slot", "mainhand")
+        names = {
+            "minecraft:attack_damage": "attribute.name.generic.attackDamage",
+            "minecraft:armor": "attribute.name.generic.armor",
+            "minecraft:armor_toughness": "attribute.name.generic.armorToughness",
+        }
+        for attribute_id, modifier in get_modifiers(equipment_slot):
+            normalized_id = normalize_id(attribute_id)
+            translation_key = names.get(normalized_id)
+            if translation_key is None:
                 continue
+            attribute_name = transkey(translation_key, client=self.render.client)
+            if attribute_name == translation_key:
+                attribute_name = {
+                    "minecraft:armor": "Armor",
+                    "minecraft:armor_toughness": "Armor Toughness",
+                }.get(normalized_id, attribute_name)
             amount = float(modifier.amount)
             operation = modifier.operation
             if operation is not AttributeOperation.ADD_VALUE:
@@ -95,6 +107,10 @@ class ItemTooltip:
             )
         return lines
 
+    def _attack_damage_lines(self, stack) -> list[Text]:
+        """Compatibility helper retained for callers of the former method."""
+        return self._attribute_lines(stack)
+
     def get_lines(self, stack) -> list[str | Text]:
         lines: list[str | Text] = [self._translated_name(stack)]
         lore = stack.get_lore()
@@ -104,7 +120,7 @@ class ItemTooltip:
                     lines.extend(self._split_line(entry))
                 else:
                     lines.extend(self._split_line(str(entry)))
-        attribute_lines = self._attack_damage_lines(stack)
+        attribute_lines = self._attribute_lines(stack)
         if attribute_lines:
             lines.append("")
             lines.extend(attribute_lines)

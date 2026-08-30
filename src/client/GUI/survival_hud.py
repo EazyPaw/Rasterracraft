@@ -78,6 +78,25 @@ class SurvivalHUD(HotBar):
             elif units > 0:
                 self.render.blit(half, (px, y))
 
+    def _draw_armor(self, value: float, x: int, y: int) -> bool:
+        """Draw the vanilla ten-icon armor bar and report whether it was visible."""
+        value = max(0.0, min(20.0, float(value)))
+        if value <= 0.0:
+            return False
+        empty = self._icon("armor_empty")
+        half = self._icon("armor_half")
+        full = self._icon("armor_full")
+        spacing = empty.get_width() - 4
+        for index in range(10):
+            px = x + index * spacing
+            self.render.blit(empty, (px, y))
+            units = value - index * 2.0
+            if units >= 2.0:
+                self.render.blit(full, (px, y))
+            elif units > 0.0:
+                self.render.blit(half, (px, y))
+        return True
+
     # ------------------------------------------------------------------
     #  主绘制方法
     # ------------------------------------------------------------------
@@ -128,9 +147,17 @@ class SurvivalHUD(HotBar):
         )
         self._draw_meter(player.food_level, 20, hunger_x, meter_y, food=True)
 
+        try:
+            armor_value = player.get_attribute_value("armor")
+        except (AttributeError, KeyError, TypeError, ValueError):
+            armor_value = 0.0
+        armor_y = meter_y - icon_w - round(self.render.gui_scale)
+        armor_visible = self._draw_armor(armor_value, health_x, armor_y)
+
         # ---- 经验条（填充条 + 等级数字） ----
         self._draw_experience(player, bar_x, bar_y)
-        self.draw_item_name(meter_y - round(self.render.gui_scale * 3))
+        top_meter_y = armor_y if armor_visible else meter_y
+        self.draw_item_name(top_meter_y - round(self.render.gui_scale * 3))
 
     # ------------------------------------------------------------------
     #  经验条
