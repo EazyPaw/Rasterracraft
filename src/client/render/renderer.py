@@ -85,9 +85,23 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self._world_surface: pygame.Surface | None = None
         self._gui_surface: pygame.Surface | None = None
         self._status_effect_shader: StatusEffectShader | None = None
+        self._shader_is_offscreen = False
         self._frame_uses_gui_layer = False
-        self._shader_preferred = os.environ.get("PYCRAFT_DISABLE_SHADERS") != "1"
-        self._configure_display((self.SCREEN_WIDTH, self.SCREEN_HEIGHT))
+        shader_mode = os.environ.get("PYCRAFT_SHADER_MODE", "auto").strip().lower()
+        if os.environ.get("PYCRAFT_DISABLE_SHADERS") == "1":
+            shader_mode = "off"
+        if shader_mode not in {"auto", "always", "off"}:
+            logging.warning(
+                "Unknown PYCRAFT_SHADER_MODE=%r; using auto", shader_mode
+            )
+            shader_mode = "auto"
+        self._shader_mode = shader_mode
+        self._shader_failed = False
+        self._frame_effect_strengths = (0.0, 0.0, 0.0)
+        self._configure_display(
+            (self.SCREEN_WIDTH, self.SCREEN_HEIGHT),
+            use_shader=shader_mode == "always",
+        )
         pygame.display.set_caption("Rasterracraft - 0.0.1 SNAPSHOT")
         self.icon: pygame.Surface = pygame.image.load("icon.png").convert_alpha()
         pygame.display.set_icon(self.icon)
@@ -207,17 +221,26 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.MAX_BLOCK_SECTION_PREFETCH_PER_FRAME: int = 2
         self._last_block_cache_cam: tuple[float, float] | None = None
         self.biome_debug_colors: dict[str, tuple[int, int, int]] = {}
+        self.ENTITY_CULL_MARGIN_BLOCKS: float = 3.0
 
-    def _configure_display(self, size: tuple[int, int]) -> None:
+    def _configure_display(
+        self, size: tuple[int, int], *, use_shader: bool | None = None
+    ) -> None:
         """Create an OpenGL post-process display, with a software fallback."""
         width = max(1, int(size[0]))
         height = max(1, int(size[1]))
+        if use_shader is None:
+            use_shader = self._shader_mode == "always"
+        use_shader = bool(use_shader) and self._shader_mode != "off"
+        use_shader = use_shader and not self._shader_failed
+
         old_shader = self._status_effect_shader
         self._status_effect_shader = None
+        self._shader_is_offscreen = False
         if old_shader is not None:
             old_shader.release()
 
-        if self._shader_preferred:
+        if use_shader:
             try:
                 self._window_surface = pygame.display.set_mode(
                     (width, height),
@@ -241,7 +264,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 logging.warning(
                     "GLSL renderer unavailable; using software effects: %s", exc
                 )
-                self._shader_preferred = False
+                self._shader_failed = True
                 try:
                     pygame.display.quit()
                     pygame.display.init()
@@ -255,16 +278,62 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self._gui_surface = None
         self.screen = self._world_surface
         self.blit = self.screen.blit
+        if self._shader_mode == "auto" and not self._shader_failed:
+            try:
+                self._world_surface = pygame.Surface((width, height), 0, 32)
+                self._gui_surface = pygame.Surface(
+                    (width, height), pygame.SRCALPHA, 32
+                )
+                self._status_effect_shader = StatusEffectShader(
+                    self._world_surface,
+                    self._gui_surface,
+                    offscreen=True,
+                )
+                self._shader_is_offscreen = True
+                logging.info("Offscreen GLSL status-effect compositor ready")
+            except Exception as exc:
+                logging.warning(
+                    "Offscreen GLSL unavailable; using software effects: %s", exc
+                )
+                self._shader_failed = True
+                self._world_surface = self._window_surface
+                self._gui_surface = None
 
     @property
     def shader_effects_enabled(self) -> bool:
         return self._status_effect_shader is not None
 
+    @property
+    def shader_mode(self) -> str:
+        """Return the startup-selected ``auto``, ``always``, or ``off`` mode."""
+        return self._shader_mode
+
+    def set_shader_mode(self, mode: str) -> None:
+        """Validate a mode request; backend changes apply on the next launch.
+
+        SDL/Pygame cannot safely replace a live software display with an OpenGL
+        display while ModernGL resources and other game threads are active.
+        Backend-changing choices therefore take effect on the next launch.
+        """
+        normalized = str(mode).strip().lower()
+        if normalized not in {"auto", "always", "off"}:
+            raise ValueError("shader mode must be 'auto', 'always', or 'off'")
+        if normalized == self._shader_mode:
+            return
+        raise RuntimeError(
+            "changing shader mode requires a restart; "
+            "set PYCRAFT_SHADER_MODE before launching"
+        )
+
     def _set_draw_surface(self, surface: pygame.Surface) -> None:
         self.screen = surface
         self.blit = surface.blit
 
-    def _begin_world_layer(self) -> None:
+    def _begin_world_layer(self, effects_required: bool = False) -> None:
+        if self._shader_is_offscreen and not effects_required:
+            if self._window_surface is not None:
+                self._set_draw_surface(self._window_surface)
+            return
         if self._world_surface is not None:
             self._set_draw_surface(self._world_surface)
 
@@ -296,25 +365,36 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             night_vision_strength = 0.0
         return nausea_strength, blindness_strength, night_vision_strength
 
-    def _present_shader_frame(self) -> None:
+    def _present_shader_frame(
+        self, strengths: tuple[float, float, float] | None = None
+    ) -> None:
         shader = self._status_effect_shader
         if shader is None:
             return
-        nausea, blindness, night_vision = self._status_effect_strengths()
+        nausea, blindness, night_vision = strengths or self._status_effect_strengths()
         shader.set_uniforms(
             pygame.time.get_ticks() / 1000.0,
             nausea,
             blindness,
             night_vision,
         )
-        shader.present(include_gui=self._frame_uses_gui_layer)
-        self._begin_world_layer()
+        processed = shader.present(include_gui=self._frame_uses_gui_layer)
+        if processed is not None and self._window_surface is not None:
+            self._window_surface.blit(processed, (0, 0))
+            self._set_draw_surface(self._window_surface)
+        else:
+            self._begin_world_layer()
 
     def capture_frame_surface(self) -> pygame.Surface:
         shader = self._status_effect_shader
         if shader is None:
             return self.screen.copy()
         nausea, blindness, night_vision = self._status_effect_strengths()
+        if self._shader_is_offscreen and not any(
+            value > 0.001 for value in (nausea, blindness, night_vision)
+        ):
+            surface = self._window_surface or self.screen
+            return surface.copy()
         shader.set_uniforms(
             pygame.time.get_ticks() / 1000.0,
             nausea,
@@ -678,7 +758,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 elif event.type == pygame.VIDEORESIZE:
                     # 窗口大小变化：重建所有尺寸相关的资源
                     self.SCREEN_WIDTH, self.SCREEN_HEIGHT = event.size
-                    self._configure_display(event.size)
+                    self._configure_display(
+                        event.size, use_shader=self._shader_mode == "always"
+                    )
                     pygame.display.set_caption("Rasterracraft - 0.0.1 SNAPSHOT")
                     pygame.display.set_icon(self.icon)
                     self.sky_cache_key = None
@@ -716,17 +798,29 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 break
 
             try:
-                self._begin_world_layer()
+                shader_frame_presented = False
+                self._frame_effect_strengths = (
+                    self._status_effect_strengths()
+                    if self.client.in_game and self.client.client_player is not None
+                    else (0.0, 0.0, 0.0)
+                )
+                effects_required = any(
+                    value > 0.001 for value in self._frame_effect_strengths
+                )
+                self._begin_world_layer(effects_required)
                 if self.client.in_game and self.client.client_player is not None:
                     # ---- 游戏内渲染流程 ----
                     self.draw_sky()  # 天空背景（来自 SkyMixin）
                     self.camera.update()
-                    self.draw_entities(z_filter=1)
+                    background_entities, foreground_entities = (
+                        self._collect_visible_entities()
+                    )
+                    self.draw_entities(z_filter=1, entities=background_entities)
                     self.draw_block()  # 方块绘制（来自 BlockRenderMixin）
                     if self.debug:
                         self.draw_biome_debug_overlay()
                     self.draw_precipitation()
-                    self.draw_entities(z_filter=0)
+                    self.draw_entities(z_filter=0, entities=foreground_entities)
 
                     self.client.particle_manager.draw(self, z_filter=1)
                     self.client.particle_manager.draw(self, z_filter=0)
@@ -734,13 +828,27 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.draw_destroy_progress()
                     self.client.client_player.skeleton.update()
                     self.draw_player()
-                    self._frame_uses_gui_layer = (
-                        self.shader_effects_enabled
-                        and any(value > 0.001 for value in self._status_effect_strengths())
+                    offscreen_effect_frame = (
+                        self._shader_is_offscreen
+                        and self.shader_effects_enabled
+                        and effects_required
                     )
+                    if offscreen_effect_frame:
+                        # The standalone compositor only needs the world.  Draw
+                        # the unaffected GUI straight onto the processed window
+                        # afterwards, avoiding a second alpha Surface upload and
+                        # a full-screen shader blend.  Pygame and GLSL alpha
+                        # compositing differ by at most one 8-bit color step.
+                        self._frame_uses_gui_layer = False
+                        self._present_shader_frame(self._frame_effect_strengths)
+                        shader_frame_presented = True
+                    else:
+                        self._frame_uses_gui_layer = (
+                            self.shader_effects_enabled and effects_required
+                        )
                     if self._frame_uses_gui_layer:
                         self._begin_gui_layer()
-                    else:
+                    elif not offscreen_effect_frame:
                         self.draw_status_effect_overlay()
                     self.draw_gui()
 
@@ -765,8 +873,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self._frame_uses_gui_layer = False
                     self.draw_gui()
 
-                if self.shader_effects_enabled:
-                    self._present_shader_frame()
+                if self.shader_effects_enabled and (
+                    not self._shader_is_offscreen or effects_required
+                ) and not shader_frame_presented:
+                    self._present_shader_frame(self._frame_effect_strengths)
                 pygame.display.flip()
                 clock.tick(250)
 
@@ -847,22 +957,72 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         if getattr(self, "show_entity_hitboxes", False):
             self.draw_skeleton_hitbox(player, player.skeleton)
 
-    def draw_entities(self, z_filter: int | None = None) -> None:
-        """绘制服务端同步的非本地实体。"""
-        entities = self.client_world.iter_entities()
+    def _entity_is_visible(self, entity) -> bool:
+        """Cheap world-space culling with room for limbs, armor, and interpolation."""
+        block_size = self.block_size
+        if block_size <= 0:
+            return True
+        margin = self.ENTITY_CULL_MARGIN_BLOCKS
+        half_width = self.SCREEN_WIDTH / (2.0 * block_size)
+        half_height = self.SCREEN_HEIGHT / (2.0 * block_size)
+        view_left = self.camera.x + 0.5 - half_width - margin
+        view_right = self.camera.x + 0.5 + half_width + margin
+        view_bottom = self.camera.y - 0.5 - half_height - margin
+        view_top = self.camera.y - 0.5 + half_height + margin
+        try:
+            left = float(entity.x)
+            bottom = float(entity.y)
+            right = left + max(0.0, float(getattr(entity, "width", 0.0)))
+            top = bottom + max(0.0, float(getattr(entity, "height", 0.0)))
+        except (TypeError, ValueError, OverflowError):
+            return True
+        return not (
+            right < view_left
+            or left > view_right
+            or top < view_bottom
+            or bottom > view_top
+        )
+
+    @staticmethod
+    def _entity_uses_depth_layer(entity) -> bool:
+        return entity.entity_id in {
+            "falling_block",
+            "item",
+            "experience_orb",
+            "zombie",
+            "primed_tnt",
+            "chicken",
+            "cow",
+            "pig",
+            "sheep",
+        }
+
+    def _collect_visible_entities(self) -> tuple[list, list]:
+        """Snapshot, cull, sort, and partition entities once for both draw passes."""
+        entities = [
+            entity
+            for entity in self.client_world.iter_entities()
+            if self._entity_is_visible(entity)
+        ]
         entities.sort(key=lambda entity: entity.y)
+        background = []
+        foreground = []
         for entity in entities:
-            if entity.entity_id in (
-                "falling_block",
-                "item",
-                "experience_orb",
-                "zombie",
-                "primed_tnt",
-                "chicken",
-                "cow",
-                "pig",
-                "sheep",
-            ):
+            if self._entity_uses_depth_layer(entity) and entity.z == 1:
+                background.append(entity)
+            else:
+                foreground.append(entity)
+        return background, foreground
+
+    def draw_entities(
+        self, z_filter: int | None = None, *, entities=None
+    ) -> None:
+        """绘制服务端同步的非本地实体。"""
+        if entities is None:
+            entities = self.client_world.iter_entities()
+            entities.sort(key=lambda entity: entity.y)
+        for entity in entities:
+            if self._entity_uses_depth_layer(entity):
                 if entity.z != z_filter:
                     continue
             elif z_filter == 1:

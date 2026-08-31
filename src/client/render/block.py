@@ -468,13 +468,16 @@ class BlockRenderMixin:
             can_tile_section = (
                 first_block is not None
                 and first_block.block_id != "air"
-                and not first_block.has_transparent_pixels
                 and first_block.render_offset_blocks == (0.0, 0.0)
             )
             first_tex = (
                 first_block.get_texture(block_size) if can_tile_section else None
             )
-            if first_tex is None or first_tex.get_height() != block_size:
+            if (
+                first_tex is None
+                or first_tex.get_width() != block_size
+                or first_tex.get_height() > block_size
+            ):
                 can_tile_section = False
 
             if can_tile_section:
@@ -508,7 +511,7 @@ class BlockRenderMixin:
                             or b0.block_id != first_block_id
                             or b1 is None
                             or b1.block_id != "air"
-                            or b0.has_transparent_pixels
+                            or b0.render_offset_blocks != (0.0, 0.0)
                             or id(b0.get_texture(block_size)) != first_tex_id
                         ):
                             can_tile_section = False

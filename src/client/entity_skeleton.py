@@ -184,6 +184,16 @@ class BodyPart:
         effective_scale = scale * self.render_scale
         width = max(1, round(self.original_texture.get_width() * effective_scale))
         height = max(1, round(self.original_texture.get_height() * effective_scale))
+        # 普通肢体的 pivot 只改变贴图相对关节的位置，不改变缩放/旋转后的
+        # 像素。把它从像素变换键中拿掉，避免大量实体在姿态插值期间仅因
+        # pivot 小幅变化就重复 scale + rotate。沿局部轴压缩的手持物仍走
+        # 完整键，因为该路径需要同步映射 pivot。
+        simple_pivot = self.local_axis_scale == 1.0
+        pivot_key = (
+            None
+            if simple_pivot
+            else (round(self.pivot[0], 4), round(self.pivot[1], 4))
+        )
         key = (
             width,
             height,
@@ -192,10 +202,14 @@ class BodyPart:
             round(self.render_scale, 4),
             round(self.local_axis_scale, 4),
             round(self.local_axis_alignment_angle, 2),
-            round(self.pivot[0], 4),
-            round(self.pivot[1], 4),
+            pivot_key,
         )
         if key == self._last_transform_key:
+            if simple_pivot:
+                pivot_x = self.pivot[0] * effective_scale
+                if self.flip_x:
+                    pivot_x = self.base_texture.get_width() - pivot_x
+                self._render_pivot = (pivot_x, self.pivot[1] * effective_scale)
             return
 
         prepared_key = (
@@ -206,8 +220,7 @@ class BodyPart:
             self.flip_x,
             round(self.local_axis_scale, 4),
             round(self.local_axis_alignment_angle, 2),
-            round(self.pivot[0], 4),
-            round(self.pivot[1], 4),
+            pivot_key,
         )
         if prepared_key != self._local_axis_cache_key:
             base = pygame.transform.scale(self.original_texture, (width, height))
@@ -250,6 +263,11 @@ class BodyPart:
             self._local_axis_cache = (base, overlay, tuple(pivot))
 
         base, overlay, pivot = self._local_axis_cache
+        if simple_pivot:
+            pivot_x = self.pivot[0] * effective_scale
+            if self.flip_x:
+                pivot_x = base.get_width() - pivot_x
+            pivot = (pivot_x, self.pivot[1] * effective_scale)
         self.base_texture = base
         self.base_overlay_texture = overlay
         self._render_pivot = pivot

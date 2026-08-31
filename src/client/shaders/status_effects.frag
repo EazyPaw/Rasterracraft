@@ -5,6 +5,7 @@ in vec2 fragmentTexCoord;
 uniform sampler2D imageTexture;
 uniform sampler2D guiTexture;
 uniform float guiStrength;
+uniform float readbackTopDown;
 uniform vec2 resolution;
 uniform float timeSeconds;
 uniform float nauseaStrength;
@@ -82,8 +83,16 @@ vec3 applyBlindness(vec3 color, vec2 uv) {
 
 void main() {
     // Direct Surface uploads are top-to-bottom while OpenGL texture coordinates
-    // are bottom-to-top, so invert Y here without copying/flipping the Surface.
-    vec2 uv = vec2(fragmentTexCoord.x, 1.0 - fragmentTexCoord.y);
+    // are bottom-to-top.  A window framebuffer is displayed bottom-to-top, while
+    // glReadPixels returns its bottom row first.  In offscreen mode, sampling Y
+    // directly makes that readback buffer top-to-bottom already and avoids a
+    // second full-frame CPU flip/copy.
+    float textureY = mix(
+        1.0 - fragmentTexCoord.y,
+        fragmentTexCoord.y,
+        readbackTopDown
+    );
+    vec2 uv = vec2(fragmentTexCoord.x, textureY);
     vec3 worldColor = sampleNausea(uv);
     worldColor = applyNightVision(worldColor);
     worldColor = applyBlindness(worldColor, uv);
