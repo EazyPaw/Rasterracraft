@@ -23,6 +23,31 @@ from src.server.utils import client_method
 from src.server.inventory import Inventory
 
 
+_BLOCK_REGISTRY: dict[str, type[Block]] = {}
+
+
+def register_block(cls=None, /):
+    """Register a block class by its ``block_id``.
+
+    Used as ``@register_block`` in the same way materials and entities are
+    registered. Duplicate IDs fail immediately during module import instead
+    of silently replacing a class in a lazy subclass scan.
+    """
+    if cls is None:
+        return lambda block_cls: register_block(block_cls)
+
+    block_id = getattr(cls, "block_id", None)
+    if block_id is None:
+        raise ValueError(f"{cls.__name__} must define block_id")
+    block_id = str(block_id)
+    existing = _BLOCK_REGISTRY.get(block_id)
+    if existing is not None and existing is not cls:
+        raise ValueError(f"Duplicate block registration: {block_id}")
+    _BLOCK_REGISTRY[block_id] = cls
+    return cls
+
+
+@register_block
 class AIR(Block):
     block_id = "air"
     name = "tile.air.name"
@@ -70,6 +95,7 @@ class TillableBlockMixin:
         return True
 
 
+@register_block
 class STONE(Block):
     block_id = "stone"
     name = "tile.stone.stone.name"
@@ -80,6 +106,7 @@ class STONE(Block):
     drops = (BlockDrop(COBBLESTONE_ITEM),)
 
 
+@register_block
 class COBBLESTONE(Block):
     block_id = "cobblestone"
     name = "tile.stonebrick.name"
@@ -89,6 +116,7 @@ class COBBLESTONE(Block):
     requires_correct_tool = True
 
 
+@register_block
 class OBSIDIAN(Block):
     block_id = "obsidian"
     name = "tile.obsidian.name"
@@ -100,6 +128,7 @@ class OBSIDIAN(Block):
     required_tool_tier = "diamond"
 
 
+@register_block
 class GRANITE(Block):
     block_id = "granite"
     name = "tile.stone.granite.name"
@@ -108,6 +137,7 @@ class GRANITE(Block):
     requires_correct_tool = True
 
 
+@register_block
 class DIORITE(Block):
     block_id = "diorite"
     name = "tile.stone.diorite.name"
@@ -116,6 +146,7 @@ class DIORITE(Block):
     requires_correct_tool = True
 
 
+@register_block
 class ANDESITE(Block):
     block_id = "andesite"
     name = "tile.stone.andesite.name"
@@ -124,6 +155,7 @@ class ANDESITE(Block):
     requires_correct_tool = True
 
 
+@register_block
 class BEDROCK(Block):
     block_id = "bedrock"
     name = "tile.bedrock.name"
@@ -133,6 +165,7 @@ class BEDROCK(Block):
     blast_resistance = 3_600_000.0
 
 
+@register_block
 class DIRT(TillableBlockMixin, Block):
     block_id = "dirt"
     name = "tile.dirt.name"
@@ -142,6 +175,7 @@ class DIRT(TillableBlockMixin, Block):
     preferred_tool = "shovel"
 
 
+@register_block
 class COARSE_DIRT(Block):
     block_id = "coarse_dirt"
     name = "tile.dirt.coarse.name"
@@ -151,6 +185,7 @@ class COARSE_DIRT(Block):
     preferred_tool = "shovel"
 
 
+@register_block
 class PODZOL(Block):
     block_id = "podzol"
     name = "tile.dirt.podzol.name"
@@ -161,6 +196,7 @@ class PODZOL(Block):
     Tags = [BlockTag.GRASS_BLOCKS]
 
 
+@register_block
 class GRASS_BLOCK(TillableBlockMixin, Block):
     block_id = "grass_block"
     name = "tile.grass.name"
@@ -234,6 +270,7 @@ class GRASS_BLOCK(TillableBlockMixin, Block):
         )
 
 
+@register_block
 class FARMLAND(Block):
     block_id = "farmland"
     name = "tile.farmland.name"
@@ -367,6 +404,7 @@ class FARMLAND(Block):
         return False
 
 
+@register_block
 class WHEAT(Crop):
     block_id = "wheat"
     _texture_path = "blocks.wheat"
@@ -404,6 +442,7 @@ class RootCrop(Crop):
         return self.get_drops(None)
 
 
+@register_block
 class CARROTS(RootCrop):
     block_id = "carrots"
     _texture_path = "blocks.carrots"
@@ -411,6 +450,7 @@ class CARROTS(RootCrop):
     produce_material_type = CARROT_ITEM
 
 
+@register_block
 class POTATOES(RootCrop):
     block_id = "potatoes"
     _texture_path = "blocks.potatoes"
@@ -438,6 +478,7 @@ class SeedDroppingGrass:
         return self.get_drops(None)
 
 
+@register_block
 class SHORT_GRASS(SeedDroppingGrass, GrassStain):
     block_id = "short_grass"
     name = "tile.tallgrass.grass.name"
@@ -493,6 +534,7 @@ class DoublePlantTopMixin:
             self._remove_double_plant_neighbor(bottom.location)
 
 
+@register_block
 class TALL_GRASS(DoublePlantBottomMixin, SeedDroppingGrass, GrassStain):
     block_id = "tall_grass"
     name = "tile.doublePlant.grass.name"
@@ -500,6 +542,7 @@ class TALL_GRASS(DoublePlantBottomMixin, SeedDroppingGrass, GrassStain):
     top_block_id = "tall_grass_top"
 
 
+@register_block
 class TALL_GRASS_TOP(DoublePlantTopMixin, SeedDroppingGrass, GrassStain):
     block_id = "tall_grass_top"
     name = "tile.doublePlant.grass.name"
@@ -507,6 +550,7 @@ class TALL_GRASS_TOP(DoublePlantTopMixin, SeedDroppingGrass, GrassStain):
     bottom_block_id = "tall_grass"
 
 
+@register_block
 class LARGE_FERN(DoublePlantBottomMixin, SeedDroppingGrass, GrassStain):
     block_id = "large_fern"
     name = "tile.doublePlant.fern.name"
@@ -514,6 +558,7 @@ class LARGE_FERN(DoublePlantBottomMixin, SeedDroppingGrass, GrassStain):
     top_block_id = "large_fern_top"
 
 
+@register_block
 class LARGE_FERN_TOP(DoublePlantTopMixin, SeedDroppingGrass, GrassStain):
     block_id = "large_fern_top"
     name = "tile.doublePlant.fern.name"
@@ -521,6 +566,7 @@ class LARGE_FERN_TOP(DoublePlantTopMixin, SeedDroppingGrass, GrassStain):
     bottom_block_id = "large_fern"
 
 
+@register_block
 class SUNFLOWER(DoublePlantBottomMixin, Plant):
     block_id = "sunflower"
     name = "tile.doublePlant.sunflower.name"
@@ -528,6 +574,7 @@ class SUNFLOWER(DoublePlantBottomMixin, Plant):
     top_block_id = "sunflower_top"
 
 
+@register_block
 class SUNFLOWER_TOP(DoublePlantTopMixin, Plant):
     block_id = "sunflower_top"
     name = "tile.doublePlant.sunflower.name"
@@ -561,6 +608,7 @@ class SUNFLOWER_TOP(DoublePlantTopMixin, Plant):
         return final
 
 
+@register_block
 class ROSE_BUSH(DoublePlantBottomMixin, Plant):
     block_id = "rose_bush"
     name = "tile.doublePlant.rose.name"
@@ -568,6 +616,7 @@ class ROSE_BUSH(DoublePlantBottomMixin, Plant):
     top_block_id = "rose_bush_top"
 
 
+@register_block
 class ROSE_BUSH_TOP(DoublePlantTopMixin, Plant):
     block_id = "rose_bush_top"
     name = "tile.doublePlant.rose.name"
@@ -575,6 +624,7 @@ class ROSE_BUSH_TOP(DoublePlantTopMixin, Plant):
     bottom_block_id = "rose_bush"
 
 
+@register_block
 class PEONY(DoublePlantBottomMixin, Plant):
     block_id = "peony"
     name = "tile.doublePlant.paeonia.name"
@@ -582,6 +632,7 @@ class PEONY(DoublePlantBottomMixin, Plant):
     top_block_id = "peony_top"
 
 
+@register_block
 class PEONY_TOP(DoublePlantTopMixin, Plant):
     block_id = "peony_top"
     name = "tile.doublePlant.paeonia.name"
@@ -589,6 +640,7 @@ class PEONY_TOP(DoublePlantTopMixin, Plant):
     bottom_block_id = "peony"
 
 
+@register_block
 class LILAC(DoublePlantBottomMixin, Plant):
     block_id = "lilac"
     name = "tile.doublePlant.syringa.name"
@@ -596,6 +648,7 @@ class LILAC(DoublePlantBottomMixin, Plant):
     top_block_id = "lilac_top"
 
 
+@register_block
 class LILAC_TOP(DoublePlantTopMixin, Plant):
     block_id = "lilac_top"
     name = "tile.doublePlant.syringa.name"
@@ -603,6 +656,7 @@ class LILAC_TOP(DoublePlantTopMixin, Plant):
     bottom_block_id = "lilac"
 
 
+@register_block
 class OAK_PLANK(Block):
     block_id = "oak_planks"
     name = "tile.wood.oak.name"
@@ -612,6 +666,7 @@ class OAK_PLANK(Block):
     preferred_tool = "axe"
 
 
+@register_block
 class BIRCH_PLANK(Block):
     block_id = "birch_planks"
     name = "tile.wood.birch.name"
@@ -621,6 +676,7 @@ class BIRCH_PLANK(Block):
     preferred_tool = "axe"
 
 
+@register_block
 class SPRUCE_PLANK(Block):
     block_id = "spruce_planks"
     name = "tile.wood.spruce.name"
@@ -630,6 +686,7 @@ class SPRUCE_PLANK(Block):
     preferred_tool = "axe"
 
 
+@register_block
 class JUNGLE_PLANK(Block):
     block_id = "jungle_planks"
     name = "tile.wood.jungle.name"
@@ -639,6 +696,7 @@ class JUNGLE_PLANK(Block):
     preferred_tool = "axe"
 
 
+@register_block
 class ACACIA_PLANK(Block):
     block_id = "acacia_planks"
     name = "tile.wood.acacia.name"
@@ -648,6 +706,7 @@ class ACACIA_PLANK(Block):
     preferred_tool = "axe"
 
 
+@register_block
 class DARK_OAK_PLANK(Block):
     block_id = "dark_oak_planks"
     name = "tile.wood.big_oak.name"
@@ -657,6 +716,7 @@ class DARK_OAK_PLANK(Block):
     preferred_tool = "axe"
 
 
+@register_block
 class CRAFTING_TABLE(Block):
     block_id = "crafting_table"
     name = "tile.workbench.name"
@@ -704,6 +764,7 @@ class FurnaceInventory(Inventory):
             self.furnace.on_output_taken(int(amount), player)
 
 
+@register_block
 class FURNACE(Block):
     block_id = "furnace"
     name = "tile.furnace.name"
@@ -1056,6 +1117,7 @@ class FURNACE(Block):
         self.close_all_viewers()
 
 
+@register_block
 class GLOWSTONE(Block):
     block_id = "glowstone"
     name = "tile.lightgem.name"
@@ -1067,6 +1129,7 @@ class GLOWSTONE(Block):
     preferred_tool = "pickaxe"
 
 
+@register_block
 class GLASS(Block):
     block_id = "glass"
     name = "tile.glass.name"
@@ -1079,90 +1142,105 @@ class GLASS(Block):
     drops = ()
 
 
+@register_block
 class POPPY(Plant):
     block_id = "poppy"
     name = "tile.flower2.poppy.name"
     _texture_path = "blocks.flower_rose"
 
 
+@register_block
 class DANDELION(Plant):
     block_id = "dandelion"
     name = "tile.flower1.dandelion.name"
     _texture_path = "blocks.flower_dandelion"
 
 
+@register_block
 class OAK_LEAVES(Leaves):
     block_id = "oak_leaves"
     name = "tile.leaves.oak.name"
     _texture_path = "blocks.leaves_oak"
 
 
+@register_block
 class OAK_LOG(Log):
     block_id = "oak_log"
     name = "tile.log.oak.name"
     _texture_path = "blocks.log_oak"
 
 
+@register_block
 class BIRCH_LEAVES(Leaves):
     block_id = "birch_leaves"
     name = "tile.leaves.birch.name"
     _texture_path = "blocks.leaves_birch"
 
 
+@register_block
 class BIRCH_LOG(Log):
     block_id = "birch_log"
     name = "tile.log.birch.name"
     _texture_path = "blocks.log_birch"
 
 
+@register_block
 class SPRUCE_LEAVES(Leaves):
     block_id = "spruce_leaves"
     name = "tile.leaves.spruce.name"
     _texture_path = "blocks.leaves_spruce"
 
 
+@register_block
 class SPRUCE_LOG(Log):
     block_id = "spruce_log"
     name = "tile.log.spruce.name"
     _texture_path = "blocks.log_spruce"
 
 
+@register_block
 class JUNGLE_LEAVES(Leaves):
     block_id = "jungle_leaves"
     name = "tile.leaves.jungle.name"
     _texture_path = "blocks.leaves_jungle"
 
 
+@register_block
 class JUNGLE_LOG(Log):
     block_id = "jungle_log"
     name = "tile.log.jungle.name"
     _texture_path = "blocks.log_jungle"
 
 
+@register_block
 class ACACIA_LEAVES(Leaves):
     block_id = "acacia_leaves"
     name = "tile.leaves.acacia.name"
     _texture_path = "blocks.leaves_acacia"
 
 
+@register_block
 class ACACIA_LOG(Log):
     block_id = "acacia_log"
     name = "tile.log.acacia.name"
     _texture_path = "blocks.log_acacia"
 
 
+@register_block
 class DARK_OAK_LEAVES(Leaves):
     block_id = "dark_oak_leaves"
     name = "tile.leaves.big_oak.name"
     _texture_path = "blocks.leaves_big_oak"
 
 
+@register_block
 class DARK_OAK_LOG(Log):
     block_id = "dark_oak_log"
     name = "tile.log.big_oak.name"
     _texture_path = "blocks.log_big_oak"
 
 
+@register_block
 class SAND(GravityBlock):
     block_id = "sand"
     name = "tile.sand.name"
@@ -1172,6 +1250,7 @@ class SAND(GravityBlock):
     preferred_tool = "shovel"
 
 
+@register_block
 class RED_SAND(GravityBlock):
     block_id = "red_sand"
     name = "tile.sand.red.name"
@@ -1181,6 +1260,7 @@ class RED_SAND(GravityBlock):
     preferred_tool = "shovel"
 
 
+@register_block
 class SANDSTONE(Block):
     block_id = "sandstone"
     name = "tile.sandStone.name"
@@ -1190,6 +1270,7 @@ class SANDSTONE(Block):
     requires_correct_tool = True
 
 
+@register_block
 class RED_SANDSTONE(Block):
     block_id = "red_sandstone"
     name = "tile.redSandStone.name"
@@ -1199,6 +1280,7 @@ class RED_SANDSTONE(Block):
     requires_correct_tool = True
 
 
+@register_block
 class GRAVEL(GravityBlock):
     block_id = "gravel"
     name = "tile.gravel.name"
@@ -1208,6 +1290,7 @@ class GRAVEL(GravityBlock):
     preferred_tool = "shovel"
 
 
+@register_block
 class CLAY(Block):
     block_id = "clay"
     name = "tile.clay.name"
@@ -1217,6 +1300,7 @@ class CLAY(Block):
     preferred_tool = "shovel"
 
 
+@register_block
 class HARDENED_CLAY(Block):
     block_id = "hardened_clay"
     name = "tile.clayHardened.name"
@@ -1226,6 +1310,7 @@ class HARDENED_CLAY(Block):
     requires_correct_tool = True
 
 
+@register_block
 class SNOW(BottomSupport):
     block_id = "snow"
     name = "tile.snow.name"
@@ -1274,6 +1359,7 @@ class SNOW(BottomSupport):
         return final_texture
 
 
+@register_block
 class SNOW_BLOCK(Block):
     block_id = "snow_block"
     name = "tile.snow.name"
@@ -1283,6 +1369,7 @@ class SNOW_BLOCK(Block):
     preferred_tool = "shovel"
 
 
+@register_block
 class ICE(Block):
     block_id = "ice"
     name = "tile.ice.name"
@@ -1293,6 +1380,7 @@ class ICE(Block):
     preferred_tool = "pickaxe"
 
 
+@register_block
 class WATER(FluidBlock):
     block_id = "water"
     name = "tile.water.name"
@@ -1306,6 +1394,7 @@ class WATER(FluidBlock):
     source_sound = "liquid.water"
 
 
+@register_block
 class LAVA(FluidBlock):
     block_id = "lava"
     name = "tile.lava.name"
@@ -1326,6 +1415,7 @@ class LAVA(FluidBlock):
     source_sound = "liquid.lavapop"
 
 
+@register_block
 class SUGAR_CANE(Plant):
     block_id = "sugar_cane"
     name = "tile.reeds.name"
@@ -1347,18 +1437,21 @@ class SUGAR_CANE(Plant):
         self.location.world.break_block(self.location)
 
 
+@register_block
 class FERN(SeedDroppingGrass, GrassStain):
     block_id = "fern"
     name = "tile.tallgrass.fern.name"
     _texture_path = "blocks.fern"
 
 
+@register_block
 class DEAD_BUSH(Plant):
     block_id = "dead_bush"
     name = "tile.deadbush.name"
     _texture_path = "blocks.deadbush"
 
 
+@register_block
 class CACTUS(Block):
     block_id = "cactus"
     name = "tile.cactus.name"
@@ -1373,6 +1466,7 @@ class CACTUS(Block):
             self.location.world.break_block(self.location)
 
 
+@register_block
 class BROWN_MUSHROOM(Plant):
     block_id = "brown_mushroom"
     name = "tile.mushroom.name"
@@ -1382,6 +1476,7 @@ class BROWN_MUSHROOM(Plant):
         pass
 
 
+@register_block
 class RED_MUSHROOM(Plant):
     block_id = "red_mushroom"
     name = "tile.mushroom.name"
@@ -1391,6 +1486,7 @@ class RED_MUSHROOM(Plant):
         pass
 
 
+@register_block
 class VINE(GrassStain):
     block_id = "vine"
     name = "tile.vine.name"
@@ -1402,6 +1498,7 @@ class VINE(GrassStain):
         pass
 
 
+@register_block
 class COAL_ORE(Block):
     block_id = "coal_ore"
     name = "tile.oreCoal.name"
@@ -1412,6 +1509,7 @@ class COAL_ORE(Block):
     drops = (BlockDrop(materials.COAL),)
 
 
+@register_block
 class IRON_ORE(Block):
     block_id = "iron_ore"
     name = "tile.oreIron.name"
@@ -1422,6 +1520,7 @@ class IRON_ORE(Block):
     required_tool_tier = "stone"
 
 
+@register_block
 class GOLD_ORE(Block):
     block_id = "gold_ore"
     name = "tile.oreGold.name"
@@ -1432,6 +1531,7 @@ class GOLD_ORE(Block):
     required_tool_tier = "iron"
 
 
+@register_block
 class DIAMOND_ORE(Block):
     block_id = "diamond_ore"
     name = "tile.oreDiamond.name"
@@ -1443,6 +1543,7 @@ class DIAMOND_ORE(Block):
     drops = (BlockDrop(materials.DIAMOND),)
 
 
+@register_block
 class EMERALD_ORE(Block):
     block_id = "emerald_ore"
     name = "tile.oreEmerald.name"
@@ -1453,6 +1554,7 @@ class EMERALD_ORE(Block):
     required_tool_tier = "iron"
 
 
+@register_block
 class LAPIS_ORE(Block):
     block_id = "lapis_ore"
     name = "tile.oreLapis.name"
@@ -1463,6 +1565,7 @@ class LAPIS_ORE(Block):
     required_tool_tier = "stone"
 
 
+@register_block
 class REDSTONE_ORE(Block):
     block_id = "redstone_ore"
     name = "tile.oreRedstone.name"
@@ -1473,30 +1576,35 @@ class REDSTONE_ORE(Block):
     required_tool_tier = "iron"
 
 
+@register_block
 class BLUE_ORCHID(Plant):
     block_id = "blue_orchid"
     name = "tile.flower2.blueOrchid.name"
     _texture_path = "blocks.flower_blue_orchid"
 
 
+@register_block
 class ALLIUM(Plant):
     block_id = "allium"
     name = "tile.flower2.allium.name"
     _texture_path = "blocks.flower_allium"
 
 
+@register_block
 class AZURE_BLUET(Plant):
     block_id = "azure_bluet"
     name = "tile.flower2.houstonia.name"
     _texture_path = "blocks.flower_houstonia"
 
 
+@register_block
 class OXEYE_DAISY(Plant):
     block_id = "oxeye_daisy"
     name = "tile.flower2.oxeyeDaisy.name"
     _texture_path = "blocks.flower_oxeye_daisy"
 
 
+@register_block
 class DIAMOND_BLOCK(Block):
     block_id = "diamond_block"
     name = "tile.blockDiamond.name"
@@ -1507,6 +1615,7 @@ class DIAMOND_BLOCK(Block):
     required_tool_tier = "iron"
 
 
+@register_block
 class TORCH(ParticleEmitterBlock):
     block_id = "torch"
     name = "tile.torch.name"
@@ -1724,12 +1833,14 @@ class TORCH(ParticleEmitterBlock):
         return oriented
 
 
+@register_block
 class OAK_SLAB(SLABS):
     block_id = "oak_slab"
     name = "tile.woodSlab.name"
     _texture_path = "blocks.planks_oak"
 
 
+@register_block
 class TNT(Block):
     block_id = "tnt"
     name = "tile.tnt.name"
@@ -1770,30 +1881,35 @@ class TNT(Block):
         return False
 
 
+@register_block
 class MYCELIUM(Block):
     block_id = "mycelium"
     name = "tile.mycel.name"
     _texture_path = "blocks.mycelium_side"
 
 
+@register_block
 class MUSHROOM_STEM(Block):
     block_id = "mushroom_stem"
     name = "tile.mushroom.name"
     _texture_path = "blocks.mushroom_block_skin_stem"
 
 
+@register_block
 class RED_MUSHROOM_BLOCK(Block):
     block_id = "red_mushroom_block"
     name = "tile.mushroom.name"
     _texture_path = "blocks.mushroom_block_skin_red"
 
 
+@register_block
 class BROWN_MUSHROOM_BLOCK(Block):
     block_id = "brown_mushroom_block"
     name = "tile.mushroom.name"
     _texture_path = "blocks.mushroom_block_skin_brown"
 
 
+@register_block
 class FIRE(Block):
     block_id = "fire"
     name = "tile.fire.name"
@@ -1815,36 +1931,9 @@ class FIRE(Block):
 #     name = "tile.chest.name"
 
 
-# ---- block_id → Block 子类 缓存 ----
-_BLOCK_REGISTRY: dict[str, type] = None  # None = 尚未构建
-
-
-def _build_block_id_cache() -> dict[str, type]:
-    """遍历 Block 的所有子类，构建 block_id → 子类 的映射（仅执行一次）。"""
-    cache: dict[str, type] = {}
-
-    def collect(cls):
-        for subclass in cls.__subclasses__():
-            bid = getattr(subclass, "block_id", None)
-            if bid is not None:
-                cache[bid] = subclass
-            collect(subclass)
-
-    collect(Block)
-    return cache
-
-
 def get_block_by_id(block_id: str) -> Block:
-    """
-    根据 block_id 获取方块实例。
-
-    首次调用时自动遍历 Block 子类树构建缓存，后续调用为 O(1) 查表。
-    """
-    global _BLOCK_REGISTRY
-    if _BLOCK_REGISTRY is None:
-        _BLOCK_REGISTRY = _build_block_id_cache()
-
-    cls = _BLOCK_REGISTRY.get(block_id)
+    """Return a new block instance registered under ``block_id``."""
+    cls = _BLOCK_REGISTRY.get(str(block_id))
     if cls is not None:
         return cls()
     logging.error(f"Unknown block ID: {block_id}")
@@ -1852,15 +1941,9 @@ def get_block_by_id(block_id: str) -> Block:
 
 
 def has_block_id(block_id: str) -> bool:
-    global _BLOCK_REGISTRY
-    if _BLOCK_REGISTRY is None:
-        _BLOCK_REGISTRY = _build_block_id_cache()
     return str(block_id) in _BLOCK_REGISTRY
 
 
 def get_registered_block_ids() -> tuple[str, ...]:
     """Return every currently registered block id in definition order."""
-    global _BLOCK_REGISTRY
-    if _BLOCK_REGISTRY is None:
-        _BLOCK_REGISTRY = _build_block_id_cache()
     return tuple(_BLOCK_REGISTRY)

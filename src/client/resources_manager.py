@@ -53,6 +53,7 @@ class ResourcesManager:
         self._fallback_lang_map = {}
         self.load_lang("en_US", target=self._fallback_lang_map)
         self.load_lang(self.client.language)
+        self.warned_lang_key = []
 
         missing_surface = pygame.Surface((16, 16), pygame.SRCALPHA)
         missing_surface.fill((0, 0, 0, 255))
@@ -90,7 +91,9 @@ class ResourcesManager:
         elif key in self._fallback_lang_map:
             text = self._fallback_lang_map[key]
         else:
-            logging.warning(f"Invalid language key: '{key}'")
+            if key not in self.warned_lang_key:
+                logging.warning(f"Invalid language key: '{key}'")
+                self.warned_lang_key.append(key)
             text = key
         if args:
             try:

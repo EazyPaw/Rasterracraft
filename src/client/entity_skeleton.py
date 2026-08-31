@@ -49,7 +49,7 @@ class BodyPart:
         anchor: tuple[float, float],
         pivot: tuple[float, float],
         angle: float = 0.0,
-        layer: int = 0,
+        layer: int | float = 0,
         show: bool = True,
     ):
         self.name = name
@@ -609,7 +609,7 @@ class PlayerSkeleton(EntitySkeleton):
                 "front_arm", textures["front_arm"], (0.50, 1.50), (2, 0), layer=4
             ),
             "held_item": BodyPart(
-                "held_item", empty_item, (0.50, 1.05), (0.5, 0.5), layer=3, show=False
+                "held_item", empty_item, (0.50, 1.05), (0.5, 0.5), layer=3.7, show=False
             ),
             "head": BodyPart("head", textures["head"], (0.50, 1.50), (4, 8), layer=5),
             "head_overlay": BodyPart(
