@@ -488,7 +488,8 @@ class Client:
         if not self.current_save_id or self.render.screen is None:
             return
         try:
-            screen = self.render.screen.copy()
+            capture = getattr(self.render, "capture_frame_surface", None)
+            screen = capture() if callable(capture) else self.render.screen.copy()
             width, height = screen.get_size()
             side = min(width, height)
             crop = pygame.Rect((width - side) // 2, (height - side) // 2, side, side)

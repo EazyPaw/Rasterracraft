@@ -4,3 +4,4 @@ msgpack==1.1.2
 noise==1.2.2
 numpy==2.4.4
 pygame-ce==2.5.7
+pygame_shaders==2.0.2

@@ -20,6 +20,7 @@ import pygame
 
 from src.client.GUI.gui import GUI
 from src.client.camera import Camera
+from src.client.status_effect_shader import StatusEffectShader
 from src.server.biome import get_biome_by_id
 from src.server.block_class import PlacementContext
 from src.server.text import (
@@ -79,10 +80,14 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         # ---- 屏幕与窗口 ----
         self.SCREEN_WIDTH: int = 800
         self.SCREEN_HEIGHT: int = 600
-        self.screen: pygame.Surface = pygame.display.set_mode(
-            (self.SCREEN_WIDTH, self.SCREEN_HEIGHT),
-            pygame.RESIZABLE,
-        )
+        self.screen: pygame.Surface
+        self._window_surface: pygame.Surface | None = None
+        self._world_surface: pygame.Surface | None = None
+        self._gui_surface: pygame.Surface | None = None
+        self._status_effect_shader: StatusEffectShader | None = None
+        self._frame_uses_gui_layer = False
+        self._shader_preferred = os.environ.get("PYCRAFT_DISABLE_SHADERS") != "1"
+        self._configure_display((self.SCREEN_WIDTH, self.SCREEN_HEIGHT))
         pygame.display.set_caption("Rasterracraft - 0.0.1 SNAPSHOT")
         self.icon: pygame.Surface = pygame.image.load("icon.png").convert_alpha()
         pygame.display.set_icon(self.icon)
@@ -202,6 +207,121 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.MAX_BLOCK_SECTION_PREFETCH_PER_FRAME: int = 2
         self._last_block_cache_cam: tuple[float, float] | None = None
         self.biome_debug_colors: dict[str, tuple[int, int, int]] = {}
+
+    def _configure_display(self, size: tuple[int, int]) -> None:
+        """Create an OpenGL post-process display, with a software fallback."""
+        width = max(1, int(size[0]))
+        height = max(1, int(size[1]))
+        old_shader = self._status_effect_shader
+        self._status_effect_shader = None
+        if old_shader is not None:
+            old_shader.release()
+
+        if self._shader_preferred:
+            try:
+                self._window_surface = pygame.display.set_mode(
+                    (width, height),
+                    pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE,
+                )
+                # The world is always opaque.  Giving this software target a
+                # per-pixel alpha channel makes Pygame take slower blend paths
+                # for the hundreds of world/entity blits performed each frame.
+                self._world_surface = pygame.Surface((width, height), 0, 32)
+                self._gui_surface = pygame.Surface(
+                    (width, height), pygame.SRCALPHA, 32
+                )
+                self.screen = self._world_surface
+                self.blit = self.screen.blit
+                self._status_effect_shader = StatusEffectShader(
+                    self._world_surface, self._gui_surface
+                )
+                logging.info("GLSL status-effect renderer enabled")
+                return
+            except Exception as exc:
+                logging.warning(
+                    "GLSL renderer unavailable; using software effects: %s", exc
+                )
+                self._shader_preferred = False
+                try:
+                    pygame.display.quit()
+                    pygame.display.init()
+                except pygame.error:
+                    pass
+
+        self._window_surface = pygame.display.set_mode(
+            (width, height), pygame.RESIZABLE
+        )
+        self._world_surface = self._window_surface
+        self._gui_surface = None
+        self.screen = self._world_surface
+        self.blit = self.screen.blit
+
+    @property
+    def shader_effects_enabled(self) -> bool:
+        return self._status_effect_shader is not None
+
+    def _set_draw_surface(self, surface: pygame.Surface) -> None:
+        self.screen = surface
+        self.blit = surface.blit
+
+    def _begin_world_layer(self) -> None:
+        if self._world_surface is not None:
+            self._set_draw_surface(self._world_surface)
+
+    def _begin_gui_layer(self) -> None:
+        if self._gui_surface is None:
+            return
+        self._gui_surface.fill((0, 0, 0, 0))
+        self._set_draw_surface(self._gui_surface)
+
+    def _status_effect_strengths(self) -> tuple[float, float, float]:
+        player = self.client.client_player
+        effects = getattr(player, "active_effects", {}) if player is not None else {}
+        nausea = effects.get("nausea")
+        blindness = effects.get("blindness")
+        night_vision = effects.get("night_vision")
+        nausea_strength = (
+            min(1.0, 0.68 + 0.08 * nausea.amplifier) if nausea is not None else 0.0
+        )
+        blindness_strength = (
+            min(1.0, 0.88 + 0.04 * blindness.amplifier)
+            if blindness is not None
+            else 0.0
+        )
+        night_vision_strength = 1.0 if night_vision is not None else 0.0
+        if night_vision is not None and 0 < night_vision.duration < 200:
+            pulse = (_math.sin(pygame.time.get_ticks() * 0.012) + 1.0) * 0.5
+            night_vision_strength = 0.55 + pulse * 0.45
+        if blindness is not None:
+            night_vision_strength = 0.0
+        return nausea_strength, blindness_strength, night_vision_strength
+
+    def _present_shader_frame(self) -> None:
+        shader = self._status_effect_shader
+        if shader is None:
+            return
+        nausea, blindness, night_vision = self._status_effect_strengths()
+        shader.set_uniforms(
+            pygame.time.get_ticks() / 1000.0,
+            nausea,
+            blindness,
+            night_vision,
+        )
+        shader.present(include_gui=self._frame_uses_gui_layer)
+        self._begin_world_layer()
+
+    def capture_frame_surface(self) -> pygame.Surface:
+        shader = self._status_effect_shader
+        if shader is None:
+            return self.screen.copy()
+        nausea, blindness, night_vision = self._status_effect_strengths()
+        shader.set_uniforms(
+            pygame.time.get_ticks() / 1000.0,
+            nausea,
+            blindness,
+            night_vision,
+        )
+        return shader.capture_surface(include_gui=self._frame_uses_gui_layer)
 
     # ===================== 世界渲染缩放 =====================
 
@@ -558,7 +678,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 elif event.type == pygame.VIDEORESIZE:
                     # 窗口大小变化：重建所有尺寸相关的资源
                     self.SCREEN_WIDTH, self.SCREEN_HEIGHT = event.size
-                    self.screen = pygame.display.set_mode(event.size, pygame.RESIZABLE)
+                    self._configure_display(event.size)
+                    pygame.display.set_caption("Rasterracraft - 0.0.1 SNAPSHOT")
+                    pygame.display.set_icon(self.icon)
                     self.sky_cache_key = None
                     self.stars = self.generate_stars()
                     self.celestial_cache.clear()
@@ -594,6 +716,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 break
 
             try:
+                self._begin_world_layer()
                 if self.client.in_game and self.client.client_player is not None:
                     # ---- 游戏内渲染流程 ----
                     self.draw_sky()  # 天空背景（来自 SkyMixin）
@@ -611,7 +734,14 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.draw_destroy_progress()
                     self.client.client_player.skeleton.update()
                     self.draw_player()
-                    self.draw_status_effect_overlay()
+                    self._frame_uses_gui_layer = (
+                        self.shader_effects_enabled
+                        and any(value > 0.001 for value in self._status_effect_strengths())
+                    )
+                    if self._frame_uses_gui_layer:
+                        self._begin_gui_layer()
+                    else:
+                        self.draw_status_effect_overlay()
                     self.draw_gui()
 
                     # 帧率统计（每秒更新一次）
@@ -632,8 +762,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     # ---- 非游戏状态：黑屏 + GUI ----
                     self.stop_weather_audio()
                     self.screen.fill((0, 0, 0))
+                    self._frame_uses_gui_layer = False
                     self.draw_gui()
 
+                if self.shader_effects_enabled:
+                    self._present_shader_frame()
                 pygame.display.flip()
                 clock.tick(250)
 

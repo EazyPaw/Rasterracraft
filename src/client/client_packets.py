@@ -57,7 +57,15 @@ def _set_equipment(player, payload) -> None:
 
 
 def _apply_local_attribute_snapshot(player, payload) -> None:
+    # Snapshot application removes and re-adds modifiers. Preserve absorption
+    # across that transient max_absorption=0 state, then clamp once atomically.
+    absorption_amount = max(0.0, float(getattr(player, "absorption_amount", 0.0)))
     player.attributes.apply_sync_snapshot(payload)
+    try:
+        maximum_absorption = player.get_attribute_value("max_absorption")
+    except (AttributeError, KeyError, TypeError, ValueError):
+        maximum_absorption = 0.0
+    player.absorption_amount = min(absorption_amount, maximum_absorption)
     reconcile = getattr(
         getattr(player, "game_mode", None),
         "reconcile_attribute_predictions",
