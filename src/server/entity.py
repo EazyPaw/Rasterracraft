@@ -16,6 +16,12 @@ from src.server.attributes import (
     AttributeModifier,
     SPRINTING_SPEED_MODIFIER,
 )
+from src.server.status_effects import (
+    INFINITE_DURATION,
+    StatusEffectInstance,
+    get_status_effect,
+    merge_effect,
+)
 
 
 class Entity:
@@ -71,6 +77,9 @@ class Entity:
         self.swimming_up = False
         self._jumped_this_tick = False
         self.fire_ticks = 0
+        self.active_effects: dict[str, StatusEffectInstance] = {}
+        self.absorption_amount = 0.0
+        self._status_effect_ages: dict[str, int] = {}
         self.last_damage_type = None
         self.last_damage_source = None
         self.last_hurt_damage = 0.0
@@ -94,6 +103,236 @@ class Entity:
     def _on_attribute_dirty(self, instance) -> None:
         if instance.definition.id == "minecraft:max_health" and hasattr(self, "health"):
             self.health = max(0.0, min(float(self.health), instance.value))
+        elif instance.definition.id == "minecraft:max_absorption" and hasattr(
+            self, "absorption_amount"
+        ):
+            self.absorption_amount = max(
+                0.0, min(float(self.absorption_amount), instance.value)
+            )
+
+    def get_status_effect(self, effect_id: str) -> StatusEffectInstance | None:
+        effect = get_status_effect(effect_id)
+        return self.active_effects.get(effect.id) if effect is not None else None
+
+    def has_status_effect(self, effect_id: str) -> bool:
+        return self.get_status_effect(effect_id) is not None
+
+    def status_effects_payload(self) -> list[dict]:
+        return [
+            instance.to_dict(include_hidden=False)
+            for instance in self.active_effects.values()
+        ]
+
+    def _replace_status_effect_modifiers(
+        self, effect_id: str, instance: StatusEffectInstance | None
+    ) -> None:
+        effect = get_status_effect(effect_id)
+        entries = (
+            ()
+            if effect is None or instance is None
+            else effect.attribute_modifiers(instance.amplifier)
+        )
+        self.attributes.replace_source(f"status_effect:{effect_id}", entries)
+        if effect_id == "absorption":
+            maximum = self.get_attribute_value("max_absorption")
+            self.absorption_amount = max(
+                0.0, min(float(self.absorption_amount), maximum)
+            )
+
+    def add_status_effect(self, instance: StatusEffectInstance) -> bool:
+        effect = get_status_effect(instance.effect_id)
+        if effect is None or instance.duration == 0:
+            return False
+        incoming = instance.copy(effect_id=effect.id)
+        current = self.active_effects.get(effect.id)
+        old_amplifier = current.amplifier if current is not None else None
+        if current is None:
+            merged, changed = incoming, True
+        else:
+            merged, changed = merge_effect(current, incoming)
+        if not changed:
+            return False
+        self.active_effects[effect.id] = merged
+        self._status_effect_ages.setdefault(effect.id, 0)
+        if old_amplifier != merged.amplifier:
+            self._replace_status_effect_modifiers(effect.id, merged)
+            self._status_effect_ages[effect.id] = 0
+            if effect.id == "absorption":
+                self.absorption_amount = self.get_attribute_value("max_absorption")
+        self._on_status_effects_changed()
+        return True
+
+    def remove_status_effect(self, effect_id: str) -> bool:
+        effect = get_status_effect(effect_id)
+        if effect is None or self.active_effects.pop(effect.id, None) is None:
+            return False
+        self._status_effect_ages.pop(effect.id, None)
+        self._replace_status_effect_modifiers(effect.id, None)
+        self._on_status_effects_changed()
+        return True
+
+    def clear_status_effects(self) -> int:
+        effect_ids = tuple(self.active_effects)
+        if not effect_ids:
+            return 0
+        for effect_id in effect_ids:
+            self.active_effects.pop(effect_id, None)
+            self._replace_status_effect_modifiers(effect_id, None)
+        self._status_effect_ages.clear()
+        self._on_status_effects_changed()
+        return len(effect_ids)
+
+    def _on_status_effects_changed(self) -> None:
+        pass
+
+    @staticmethod
+    def _tick_hidden_effects(instance: StatusEffectInstance | None) -> None:
+        while instance is not None:
+            if instance.duration > 0:
+                instance.duration -= 1
+            instance = instance.hidden_effect
+
+    def _apply_periodic_status_effect(
+        self, instance: StatusEffectInstance, age: int
+    ) -> bool:
+        effect_id = instance.effect_id
+        amplifier = instance.amplifier
+        duration = instance.duration
+        intervals = {
+            "regeneration": max(1, 50 >> amplifier),
+            "poison": max(1, 25 >> amplifier),
+            "wither": max(1, 40 >> amplifier),
+        }
+        interval = intervals.get(effect_id)
+        due = interval is not None and (
+            (duration != INFINITE_DURATION and duration % interval == 0)
+            or (duration == INFINITE_DURATION and age % interval == 0)
+        )
+        if effect_id == "hunger":
+            add_exhaustion = getattr(self, "add_exhaustion", None)
+            if callable(add_exhaustion):
+                add_exhaustion(0.005 * (amplifier + 1))
+            return False
+        if not due:
+            return False
+        old_health = float(self.health)
+        if effect_id == "regeneration" and self.health < self.max_health:
+            self.health = min(float(self.max_health), float(self.health) + 1.0)
+        elif effect_id == "poison" and self.health > 1.0:
+            from src.server.damange_type import MAGIC
+
+            self.apply_damage(min(1.0, float(self.health) - 1.0), MAGIC)
+        elif effect_id == "wither" and self.health > 0.0:
+            from src.server.damange_type import WITHER
+
+            self.apply_damage(1.0, WITHER)
+        return float(self.health) != old_health
+
+    def tick_status_effects(self) -> bool:
+        health_changed = False
+        visible_changed = False
+        for effect_id, instance in tuple(self.active_effects.items()):
+            age = self._status_effect_ages.get(effect_id, 0)
+            health_changed = (
+                self._apply_periodic_status_effect(instance, age) or health_changed
+            )
+            self._status_effect_ages[effect_id] = age + 1
+            self._tick_hidden_effects(instance.hidden_effect)
+            if instance.duration > 0:
+                instance.duration -= 1
+            if instance.duration == 0:
+                promoted = instance.hidden_effect
+                while promoted is not None and promoted.duration == 0:
+                    promoted = promoted.hidden_effect
+                if promoted is None:
+                    self.active_effects.pop(effect_id, None)
+                    self._status_effect_ages.pop(effect_id, None)
+                    self._replace_status_effect_modifiers(effect_id, None)
+                else:
+                    self.active_effects[effect_id] = promoted
+                    self._status_effect_ages[effect_id] = 0
+                    self._replace_status_effect_modifiers(effect_id, promoted)
+                visible_changed = True
+        if visible_changed:
+            self._on_status_effects_changed()
+        self._spawn_status_effect_particle()
+        return health_changed
+
+    def _spawn_status_effect_particle(self) -> None:
+        visible = [
+            instance
+            for instance in self.active_effects.values()
+            if instance.show_particles
+        ]
+        if not visible:
+            return
+        age = max(
+            (
+                self._status_effect_ages.get(instance.effect_id, 0)
+                for instance in visible
+            ),
+            default=0,
+        )
+        ambient = all(instance.ambient for instance in visible)
+        if age % (20 if ambient else 10):
+            return
+        colored = [
+            (definition.color, instance.amplifier + 1)
+            for instance in visible
+            if (definition := get_status_effect(instance.effect_id)) is not None
+        ]
+        total_weight = sum(weight for _color, weight in colored)
+        if not total_weight:
+            return
+        red = (
+            sum(((color >> 16) & 255) * weight for color, weight in colored)
+            // total_weight
+        )
+        green = (
+            sum(((color >> 8) & 255) * weight for color, weight in colored)
+            // total_weight
+        )
+        blue = (
+            sum((color & 255) * weight for color, weight in colored)
+            // total_weight
+        )
+        from src.server.particles import MOB_EFFECT
+
+        spawner = getattr(self.world, "spawn_particle", None)
+        if callable(spawner):
+            spawner(
+                MOB_EFFECT(
+                    self.x + self.width * 0.5,
+                    self.y + self.height * 0.5,
+                    getattr(self, "z", 0),
+                    motion=(0.0, 0.012),
+                    data={
+                        "color": (red << 16) | (green << 8) | blue,
+                        "ambient": ambient,
+                        "position_spread": (self.width * 0.45, self.height * 0.45),
+                        "motion_spread": (0.006, 0.008),
+                    },
+                )
+            )
+
+    def restore_status_effects(self, payload) -> None:
+        self.clear_status_effects()
+        if not isinstance(payload, list):
+            return
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                instance = StatusEffectInstance.from_dict(entry)
+            except (TypeError, ValueError):
+                continue
+            effect = get_status_effect(instance.effect_id)
+            if effect is None or instance.duration == 0:
+                continue
+            self.active_effects[effect.id] = instance
+            self._status_effect_ages[effect.id] = 0
+            self._replace_status_effect_modifiers(effect.id, instance)
+        self._on_status_effects_changed()
 
     def refresh_attribute_modifiers(self) -> None:
         sprinting = bool(getattr(self, "sprinting", False))
@@ -283,6 +522,8 @@ class Entity:
             "on_ground": self.on_ground,
             "health": self.health,
             "max_health": self.max_health,
+            "absorption_amount": self.absorption_amount,
+            "active_effects": self.status_effects_payload(),
             "attributes": self.attributes.sync_snapshot(),
             "hurt_time": self.hurt_time,
             "aggressive": self.get_target() is not None,
@@ -363,6 +604,11 @@ class Entity:
             "sneaking": bool(self.sneaking),
             "sprinting": bool(self.sprinting),
             "fire_ticks": max(0, int(self.fire_ticks)),
+            "absorption_amount": float(self.absorption_amount),
+            "active_effects": [
+                instance.to_dict(include_hidden=True)
+                for instance in self.active_effects.values()
+            ],
             "no_ai": bool(self.no_ai),
             "silent": bool(self.silent),
             "persistence_required": bool(self.persistence_required),
@@ -385,6 +631,7 @@ class Entity:
         except (TypeError, ValueError):
             pass
         self.attributes.load_persistent_data(data.get("attributes", []))
+        self.restore_status_effects(data.get("active_effects", []))
         self.health = max(
             0.0, min(self.max_health, float(data.get("health", self.health)))
         )
@@ -393,6 +640,13 @@ class Entity:
         self.sneaking = bool(data.get("sneaking", self.sneaking))
         self.sprinting = bool(data.get("sprinting", self.sprinting))
         self.fire_ticks = max(0, int(data.get("fire_ticks", self.fire_ticks)))
+        self.absorption_amount = max(
+            0.0,
+            min(
+                self.get_attribute_value("max_absorption"),
+                float(data.get("absorption_amount", self.absorption_amount)),
+            ),
+        )
         self.no_ai = bool(data.get("no_ai", self.no_ai))
         self.silent = bool(data.get("silent", self.silent))
         self.persistence_required = bool(
@@ -973,6 +1227,7 @@ class Entity:
 
     def update(self):
         self.tick_damage_state()
+        self.tick_status_effects()
         if self.health <= 0:
             self.die()
             return
@@ -1085,6 +1340,11 @@ class Entity:
         if raw_damage <= 0 or not self.can_take_damage(damage_type):
             return 0.0
 
+        if self.has_status_effect("fire_resistance") and self._damage_type_has_tag(
+            damage_type, DamageTag.IS_FIRE
+        ):
+            return 0.0
+
         bypasses_cooldown = self._damage_type_has_tag(
             damage_type, DamageTag.BYPASSES_COOLDOWN
         )
@@ -1100,9 +1360,17 @@ class Entity:
             self.hurt_time = 10
 
         reduced_damage = self.modify_damage_for_armor(damage_to_process, damage_type)
+        resistance = self.get_status_effect("resistance")
+        if resistance is not None and not self._damage_type_has_tag(
+            damage_type, DamageTag.BYPASSES_EFFECTS
+        ):
+            reduced_damage *= max(0.0, 1.0 - 0.2 * (resistance.amplifier + 1))
+        absorbed = min(max(0.0, reduced_damage), self.absorption_amount)
+        self.absorption_amount -= absorbed
+        reduced_damage = max(0.0, reduced_damage - absorbed)
         old_health = float(self.health)
         self.health = max(0.0, old_health - reduced_damage)
-        actual_damage = old_health - self.health
+        actual_damage = absorbed + old_health - self.health
         if actual_damage <= 0:
             return 0.0
 

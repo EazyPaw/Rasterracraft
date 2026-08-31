@@ -373,6 +373,30 @@ class HEART(TextureParticle):
     linear_drag = 0.01
 
 
+class MOB_EFFECT(TextureParticle):
+    particle_id = "minecraft:mob_effect"
+    name = "mob_effect"
+    _texture_paths = tuple(f"particle.effect_{i}" for i in range(8))
+    lifetime_ticks = (18, 28)
+    size = (0.28, 0.42)
+    gravity = -0.001
+    linear_drag = 0.015
+    rotation_speed_range = (-2.0, 2.0)
+
+    @client_method
+    def setup_client_state(self, manager: "ParticleManager", *, client=None, **kwargs):
+        if not super().setup_client_state(manager, client=client, **kwargs):
+            return False
+        try:
+            color = int(self.data.get("color", 0xFFFFFF))
+        except (TypeError, ValueError):
+            color = 0xFFFFFF
+        rgb = ((color >> 16) & 255, (color >> 8) & 255, color & 255)
+        self.texture = client.resources_manager.stain_grayscale(self.texture, rgb)
+        self.texture.set_alpha(180 if not self.data.get("ambient") else 110)
+        return True
+
+
 class FragmentParticle(Particle):
     """从方块或物品现有贴图切片的可复用碎屑粒子。"""
 

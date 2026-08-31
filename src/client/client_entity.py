@@ -19,6 +19,7 @@ from src.server.location import Location, Vector
 from src.server.materials import get_material_by_id
 from src.server.utils import client_method
 from src.server.attributes import AttributeMap
+from src.server.status_effects import StatusEffectInstance, get_status_effect
 from src.server.experience import experience_orb_icon
 
 
@@ -171,6 +172,8 @@ class ClientEntity:
         self.on_ground = bool(packet.get("on_ground", False))
         self.health = float(packet.get("health", 20))
         self.max_health = float(packet.get("max_health", 20))
+        self.absorption_amount = float(packet.get("absorption_amount", 0.0))
+        self.active_effects = {}
         self.attributes = AttributeMap()
         self.hurt_time = int(packet.get("hurt_time", 0))
         self.aggressive = bool(packet.get("aggressive", False))
@@ -231,6 +234,22 @@ class ClientEntity:
         self.on_ground = bool(packet.get("on_ground", self.on_ground))
         self.health = float(packet.get("health", self.health))
         self.max_health = float(packet.get("max_health", self.max_health))
+        self.absorption_amount = float(
+            packet.get("absorption_amount", self.absorption_amount)
+        )
+        if "active_effects" in packet:
+            effects = {}
+            for entry in packet.get("active_effects", []):
+                if not isinstance(entry, dict):
+                    continue
+                try:
+                    instance = StatusEffectInstance.from_dict(entry)
+                except (TypeError, ValueError):
+                    continue
+                effect = get_status_effect(instance.effect_id)
+                if effect is not None and instance.duration != 0:
+                    effects[effect.id] = instance
+            self.active_effects = effects
         if "attributes" in packet:
             self.attributes.apply_sync_snapshot(packet["attributes"])
         self.hurt_time = int(packet.get("hurt_time", self.hurt_time))

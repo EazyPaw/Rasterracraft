@@ -30,6 +30,7 @@ def encode_packet(obj, obj_type, args) -> dict:
             "uuid": str(obj.uuid),
             "name": obj.name,
             "health": obj.health,
+            "absorption_amount": getattr(obj, "absorption_amount", 0.0),
             "hurt_time": obj.hurt_time,
             "last_hurt_damage": obj.last_hurt_damage,
             "food_level": getattr(obj, "food_level", 20),
@@ -46,6 +47,7 @@ def encode_packet(obj, obj_type, args) -> dict:
                 slot: stack_to_payload(stack) for slot, stack in obj.equipment.items()
             },
             "attributes": obj.attributes.sync_snapshot(),
+            "active_effects": obj.status_effects_payload(),
         }
         return packet
     elif isinstance(obj, Entity) and obj_type in ("EntitySpawn", "EntityUpdate"):
@@ -657,7 +659,9 @@ def decode_packet(packet: dict, player: Player):
     elif packet["__class__"] == "RequestRespawn":
         if player.health > 0:
             return
+        player.clear_status_effects()
         player.health = player.max_health
+        player.absorption_amount = 0.0
         player.hurt_time = 0
         player.last_hurt_damage = 0.0
         player.last_damage_source = None

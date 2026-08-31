@@ -97,6 +97,45 @@ class SurvivalHUD(HotBar):
                 self.render.blit(half, (px, y))
         return True
 
+    def _draw_health(self, player, x: int, y: int) -> int:
+        """Draw scalable health rows plus absorption hearts; return the top y."""
+        container = self._icon("heart.container")
+        variant = ""
+        effects = getattr(player, "active_effects", {})
+        if "wither" in effects:
+            variant = "withered_"
+        elif "poison" in effects:
+            variant = "poisoned_"
+        full = self._icon(f"heart.{variant}full" if variant else "heart.full")
+        half = self._icon(f"heart.{variant}half" if variant else "heart.half")
+        absorbing_full = self._icon("heart.absorbing_full")
+        absorbing_half = self._icon("heart.absorbing_half")
+        spacing = container.get_width() - 4
+        row_step = container.get_height() + max(1, round(self.render.gui_scale))
+        normal_hearts = max(10, math.ceil(max(1.0, float(player.max_health)) / 2.0))
+        absorption = max(0.0, float(getattr(player, "absorption_amount", 0.0)))
+        absorption_hearts = math.ceil(absorption / 2.0)
+        total_hearts = normal_hearts + absorption_hearts
+        for index in range(total_hearts):
+            row, column = divmod(index, 10)
+            px = x + column * spacing
+            py = y - row * row_step
+            self.render.blit(container, (px, py))
+            if index < normal_hearts:
+                units = float(player.health) - index * 2.0
+                if units >= 2.0:
+                    self.render.blit(full, (px, py))
+                elif units > 0.0:
+                    self.render.blit(half, (px, py))
+            else:
+                units = absorption - (index - normal_hearts) * 2.0
+                if units >= 2.0:
+                    self.render.blit(absorbing_full, (px, py))
+                elif units > 0.0:
+                    self.render.blit(absorbing_half, (px, py))
+        rows = max(1, math.ceil(total_hearts / 10.0))
+        return y - (rows - 1) * row_step
+
     # ------------------------------------------------------------------
     #  主绘制方法
     # ------------------------------------------------------------------
@@ -142,21 +181,19 @@ class SurvivalHUD(HotBar):
         health_x = bar_x - (icon_w - self.render.gui_scale * 9)
         hunger_x = bar_x + hotbar.get_width() - icon_w * 9
 
-        self._draw_meter(
-            player.health, player.max_health, health_x, meter_y, food=False
-        )
+        health_top_y = self._draw_health(player, health_x, meter_y)
         self._draw_meter(player.food_level, 20, hunger_x, meter_y, food=True)
 
         try:
             armor_value = player.get_attribute_value("armor")
         except (AttributeError, KeyError, TypeError, ValueError):
             armor_value = 0.0
-        armor_y = meter_y - icon_w - round(self.render.gui_scale)
+        armor_y = health_top_y - icon_w - round(self.render.gui_scale)
         armor_visible = self._draw_armor(armor_value, health_x, armor_y)
 
         # ---- 经验条（填充条 + 等级数字） ----
         self._draw_experience(player, bar_x, bar_y)
-        top_meter_y = armor_y if armor_visible else meter_y
+        top_meter_y = armor_y if armor_visible else health_top_y
         self.draw_item_name(top_meter_y - round(self.render.gui_scale * 3))
 
     # ------------------------------------------------------------------

@@ -15,6 +15,12 @@ from src.server.materials import get_material_by_id
 from src.server.player import Player
 from src.server.text import Text, TextColor
 from src.server.biome import BIOME_PROFILES
+from src.server.status_effects import (
+    INFINITE_DURATION,
+    STATUS_EFFECTS,
+    StatusEffectInstance,
+    get_status_effect,
+)
 
 if TYPE_CHECKING:
     from src.server.server_main import Server
@@ -39,6 +45,7 @@ class CommandExecutor:
             "gamemode": self.switch_gamemode,
             "give": self.give_command,
             "enchant": self.enchant_command,
+            "effect": self.effect_command,
             "kick": self.kick_command,
             "locate": self.locate_command,
             "summon": self.summon_command,
@@ -180,6 +187,102 @@ class CommandExecutor:
 
         item_name = getattr(material, "name", item_id)
         return f"Gave {given_items}x {item_name} to {given_players} player(s)"
+
+    @staticmethod
+    def _parse_effect_boolean(value: str) -> bool:
+        value = str(value).strip().lower()
+        if value == "true":
+            return True
+        if value == "false":
+            return False
+        raise ValueError("hideParticles must be true or false")
+
+    def effect_command(self, args, executor: Player | str):
+        """Execute Java-style ``/effect give`` and ``/effect clear``."""
+        if isinstance(executor, Player) and not executor.is_operator:
+            raise ValueError("You do not have permission to use /effect")
+        if not args or args[0] not in {"give", "clear"}:
+            raise ValueError(
+                "Usage: /effect give <targets> <effect> [seconds|infinite] "
+                "[amplifier] [hideParticles] | /effect clear [targets] [effect]"
+            )
+
+        action = args[0]
+        if action == "clear":
+            if len(args) > 3:
+                raise ValueError("Usage: /effect clear [targets] [effect]")
+            target_token = args[1] if len(args) >= 2 else "@s"
+            targets = self.target_selector(target_token, executor)
+            if not targets:
+                raise ValueError(f"No targets matched: {target_token}")
+            effect = None
+            if len(args) == 3:
+                effect = get_status_effect(args[2])
+                if effect is None:
+                    raise ValueError(f"Unknown effect: {args[2]}")
+            changed = 0
+            for target in targets:
+                if effect is None:
+                    changed += target.clear_status_effects()
+                elif target.remove_status_effect(effect.id):
+                    changed += 1
+            if changed == 0:
+                raise ValueError("No effects were cleared")
+            return f"Cleared {changed} effect(s) from {len(targets)} target(s)"
+
+        if not 3 <= len(args) <= 6:
+            raise ValueError(
+                "Usage: /effect give <targets> <effect> [seconds|infinite] "
+                "[amplifier] [hideParticles]"
+            )
+        target_token = args[1]
+        targets = self.target_selector(target_token, executor)
+        if not targets:
+            raise ValueError(f"No targets matched: {target_token}")
+        effect = get_status_effect(args[2])
+        if effect is None:
+            available = ", ".join(STATUS_EFFECTS)
+            raise ValueError(f"Unknown effect: {args[2]}. Available: {available}")
+
+        seconds_token = args[3].lower() if len(args) >= 4 else "30"
+        if seconds_token == "infinite":
+            duration = INFINITE_DURATION
+        else:
+            try:
+                seconds = int(seconds_token)
+            except ValueError as exc:
+                raise ValueError(f"Invalid duration: {seconds_token}") from exc
+            if not 1 <= seconds <= 1_000_000:
+                raise ValueError("Duration must be between 1 and 1000000 seconds")
+            duration = seconds * 20
+
+        try:
+            amplifier = int(args[4]) if len(args) >= 5 else 0
+        except ValueError as exc:
+            raise ValueError(f"Invalid amplifier: {args[4]}") from exc
+        if not 0 <= amplifier <= 255:
+            raise ValueError("Amplifier must be between 0 and 255")
+        hide_particles = (
+            self._parse_effect_boolean(args[5]) if len(args) >= 6 else False
+        )
+        instance = StatusEffectInstance(
+            effect.id,
+            duration,
+            amplifier,
+            ambient=False,
+            show_particles=not hide_particles,
+            show_icon=not hide_particles,
+        )
+        changed = sum(target.add_status_effect(instance) for target in targets)
+        if changed == 0:
+            raise ValueError("Could not apply the requested effect")
+        duration_text = (
+            "infinite" if duration == INFINITE_DURATION else f"{duration // 20}s"
+        )
+        return (
+            f"Applied {effect.id} {amplifier + 1} to {changed} target(s) "
+            f"for {duration_text}"
+        )
 
     def enchant_command(self, args, executor: Player | str):
         """Apply an enchantment to each target player's selected item."""
@@ -736,6 +839,7 @@ class CommandExecutor:
         - @a - 所有玩家
         - @p - 最近的玩家
         - @r - 随机玩家
+        - @e - 所有已加载实体（包括玩家）
 
         返回 None 表示输入不是选择器（可能是坐标或实体名）
         返回空列表表示没有匹配的目标
@@ -776,11 +880,33 @@ class CommandExecutor:
                 return []
             return [random.choice(self.server.players)]
 
+        elif input_str == "@e":
+            entities = list(self.server.players)
+            seen = {str(entity.uuid) for entity in entities}
+            for world in self.server.worlds.values():
+                for entity in world.entities.values():
+                    if str(entity.uuid) not in seen and not entity.removed:
+                        entities.append(entity)
+                        seen.add(str(entity.uuid))
+            return entities
+
         else:
             # 尝试按名称查找玩家
             for player in self.server.players:
                 if str(player) == input_str or player.uuid.hex[:8] == input_str:
                     return [player]
+
+            # 再尝试已加载实体的名称、完整 UUID 或 UUID 前八位。
+            for world in self.server.worlds.values():
+                for entity in world.entities.values():
+                    entity_uuid = str(entity.uuid)
+                    if input_str in {
+                        str(entity),
+                        entity_uuid,
+                        entity.uuid.hex[:8],
+                        str(getattr(entity, "name", "")),
+                    }:
+                        return [entity]
 
             # 不是有效的选择器或名称
             return None

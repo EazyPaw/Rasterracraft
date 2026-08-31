@@ -491,12 +491,20 @@ class Server:
             return
         data = self.level_data.get("player", {})
         player.attributes.load_persistent_data(data.get("attributes", []))
+        player.restore_status_effects(data.get("active_effects", []))
         player.health = max(
             0.0, min(player.max_health, float(data.get("health", player.max_health)))
         )
         player.food_level = max(0, min(20, int(data.get("food_level", 20))))
         player.saturation = max(
             0.0, min(float(player.food_level), float(data.get("saturation", 5.0)))
+        )
+        player.absorption_amount = max(
+            0.0,
+            min(
+                player.get_attribute_value("max_absorption"),
+                float(data.get("absorption_amount", 0.0)),
+            ),
         )
         player.exhaustion = max(0.0, min(40.0, float(data.get("exhaustion", 0.0))))
         player.food_tick_timer = max(0, min(80, int(data.get("food_tick_timer", 0))))
@@ -621,7 +629,12 @@ class Server:
                 "x": float(player.x),
                 "y": float(player.y),
                 "health": float(player.health),
+                "absorption_amount": float(player.absorption_amount),
                 "attributes": player.attributes.to_persistent_data(),
+                "active_effects": [
+                    instance.to_dict(include_hidden=True)
+                    for instance in player.active_effects.values()
+                ],
                 "food_level": int(getattr(player, "food_level", 20)),
                 "saturation": float(getattr(player, "saturation", 5.0)),
                 "exhaustion": float(getattr(player, "exhaustion", 0.0)),

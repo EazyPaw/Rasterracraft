@@ -211,14 +211,44 @@ class Player(Entity):
             "cursor": stack_to_payload(self.cursor_stack),
             "selected_slot": int(self.selected_slot),
             "health": float(self.health),
+            "absorption_amount": float(self.absorption_amount),
             "food_level": int(self.food_level),
             "saturation": float(self.saturation),
             "blocking": bool(self.blocking),
             "attributes": self.attributes.sync_snapshot(),
+            "active_effects": self.status_effects_payload(),
         }
 
     def sync_inventory(self) -> None:
         self.world.server.send_client_socket(self, self.inventory_packet(), "Forward")
+
+    def effect_packet(self) -> dict:
+        self.refresh_attribute_modifiers()
+        return {
+            "__class__": "EffectUpdate",
+            "uuid": str(self.uuid),
+            "active_effects": self.status_effects_payload(),
+            "health": float(self.health),
+            "max_health": float(self.max_health),
+            "absorption_amount": float(self.absorption_amount),
+            "attributes": self.attributes.sync_snapshot(),
+        }
+
+    def sync_effects(self) -> None:
+        server = getattr(self.world, "server", None)
+        if server is None or self not in getattr(server, "players", ()):
+            return
+        server.send_client_socket(self, self.effect_packet(), "Forward")
+        for observer in tuple(server.players):
+            if observer is self or observer.world is not self.world:
+                continue
+            if observer.is_loading_position(
+                int(self.x), int(self.y), getattr(self, "z", 0)
+            ):
+                server.send_client_socket(observer, self, "EntityUpdate")
+
+    def _on_status_effects_changed(self) -> None:
+        self.sync_effects()
 
     def apply_item_event(self, stack: ItemStack, event: str, *args) -> bool:
         if stack is None or stack.is_empty():
@@ -911,6 +941,8 @@ class Player(Entity):
 
     def tick_server(self) -> None:
         self.tick_damage_state()
+        if self.tick_status_effects():
+            self.sync_effects()
         if self.attack_cooldown_ticks > 0:
             self.attack_cooldown_ticks -= 1
         if self.attack_animation_ticks > 0:
@@ -1091,6 +1123,7 @@ class Player(Entity):
         packet = {
             "__class__": "PlayerHurt",
             "health": self.health,
+            "absorption_amount": self.absorption_amount,
             "hurt_time": self.hurt_time,
             "last_hurt_damage": self.last_hurt_damage,
             "cause": getattr(damage_type, "message_id", "generic"),

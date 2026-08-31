@@ -104,6 +104,7 @@ class FIREBALL(DamageType):
     exhaustion = 0.1
     message_id = "fireball"
     scaling = "when_caused_by_living_non_player"
+    tags = (DamageTag.IS_FIRE,)
 
 
 class FIREWORKS(DamageType):
@@ -138,7 +139,7 @@ class HOT_FLOOR(DamageType):
     exhaustion = 0.1
     message_id = "hotFloor"
     scaling = "when_caused_by_living_non_player"
-    tags = (DamageTag.BYPASSES_ARMOR,)
+    tags = (DamageTag.BYPASSES_ARMOR, DamageTag.IS_FIRE)
 
 
 class IN_FIRE(DamageType):
@@ -146,7 +147,7 @@ class IN_FIRE(DamageType):
     exhaustion = 0.1
     message_id = "inFire"
     scaling = "when_caused_by_living_non_player"
-    tags = (DamageTag.BYPASSES_ARMOR,)
+    tags = (DamageTag.BYPASSES_ARMOR, DamageTag.IS_FIRE)
 
 
 class IN_WALL(DamageType):
@@ -168,7 +169,7 @@ class LAVA(DamageType):
     exhaustion = 0.1
     message_id = "lava"
     scaling = "when_caused_by_living_non_player"
-    tags = (DamageTag.BYPASSES_ARMOR,)
+    tags = (DamageTag.BYPASSES_ARMOR, DamageTag.IS_FIRE)
 
 
 class LIGHTNING_BOLT(DamageType):
@@ -207,7 +208,7 @@ class ON_FIRE(DamageType):
     exhaustion = 0.0
     message_id = "onFire"
     scaling = "when_caused_by_living_non_player"
-    tags = (DamageTag.BYPASSES_ARMOR,)
+    tags = (DamageTag.BYPASSES_ARMOR, DamageTag.IS_FIRE)
 
 
 class OUT_OF_WORLD(DamageType):
@@ -218,6 +219,7 @@ class OUT_OF_WORLD(DamageType):
         DamageTag.BYPASSES_ARMOR,
         DamageTag.BYPASSES_COOLDOWN,
         DamageTag.BYPASSES_ENCHANTMENTS,
+        DamageTag.BYPASSES_EFFECTS,
     )
 
 
@@ -291,6 +293,7 @@ class UNATTRIBUTED_FIREBALL(DamageType):
     exhaustion = 0.1
     message_id = "onFire"
     scaling = "when_caused_by_living_non_player"
+    tags = (DamageTag.IS_FIRE,)
 
 
 class WITHER(DamageType):

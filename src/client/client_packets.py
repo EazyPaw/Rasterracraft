@@ -9,6 +9,7 @@ from src.server.blocks import get_block_by_id
 from src.server.inventory import payload_to_stack, restore_inventory
 from src.server.location import Location
 from src.server.text import Text
+from src.server.status_effects import StatusEffectInstance, get_status_effect
 
 if TYPE_CHECKING:
     from src.client.client_main import Client
@@ -64,6 +65,22 @@ def _apply_local_attribute_snapshot(player, payload) -> None:
     )
     if callable(reconcile):
         reconcile()
+
+
+def _apply_effect_snapshot(entity, payload) -> None:
+    effects = {}
+    if isinstance(payload, list):
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                instance = StatusEffectInstance.from_dict(entry)
+            except (TypeError, ValueError):
+                continue
+            effect = get_status_effect(instance.effect_id)
+            if effect is not None and instance.duration != 0:
+                effects[effect.id] = instance
+    entity.active_effects = effects
 
 
 def decode_packet(packet: dict, client: "Client") -> None:
@@ -125,6 +142,7 @@ def decode_packet(packet: dict, client: "Client") -> None:
         if client.client_player is not None:
             for key in (
                 "health",
+                "absorption_amount",
                 "hurt_time",
                 "last_hurt_damage",
                 "food_level",
@@ -155,6 +173,9 @@ def decode_packet(packet: dict, client: "Client") -> None:
                 _apply_local_attribute_snapshot(
                     client.client_player, packet["attributes"]
                 )
+            _apply_effect_snapshot(
+                client.client_player, packet.get("active_effects", [])
+            )
             client.client_player.dead = False
             client.close_death_screen()
 
@@ -282,7 +303,12 @@ def decode_packet(packet: dict, client: "Client") -> None:
             restore_inventory(player.inventory, packet.get("inventory", []))
             _set_equipment(player, packet.get("equipment"))
             _set_crafting_grid(client, packet.get("crafting", []))
-            for key in ("health", "food_level", "saturation"):
+            for key in (
+                "health",
+                "absorption_amount",
+                "food_level",
+                "saturation",
+            ):
                 if key in packet:
                     setattr(player, key, packet[key])
             player.blocking = bool(packet.get("blocking", False))
@@ -296,6 +322,7 @@ def decode_packet(packet: dict, client: "Client") -> None:
             _set_inventory_cursor(client, cursor)
             if "attributes" in packet:
                 _apply_local_attribute_snapshot(player, packet["attributes"])
+            _apply_effect_snapshot(player, packet.get("active_effects", []))
     elif packet["__class__"] == "FurnaceOpen":
         from src.client.GUI.inventory.furnace import Furnace
 
@@ -333,6 +360,10 @@ def decode_packet(packet: dict, client: "Client") -> None:
             player.health = max(
                 0.0, min(player.max_health, float(packet.get("health", player.health)))
             )
+            player.absorption_amount = max(
+                0.0,
+                float(packet.get("absorption_amount", player.absorption_amount)),
+            )
             player.hurt_time = max(
                 player.hurt_time, int(packet.get("hurt_time", player.HURT_FLASH_TICKS))
             )
@@ -361,6 +392,24 @@ def decode_packet(packet: dict, client: "Client") -> None:
             if entity is not None:
                 entity.attributes.apply_sync_snapshot(packet.get("attributes", []))
                 entity.max_health = float(packet.get("max_health", entity.max_health))
+    elif packet["__class__"] == "EffectUpdate":
+        player = client.client_player
+        target_uuid = str(packet.get("uuid", ""))
+        if player is not None and target_uuid in {
+            "",
+            str(player.uuid),
+            str(getattr(client, "server_player_uuid", "")),
+        }:
+            _apply_effect_snapshot(player, packet.get("active_effects", []))
+            if "attributes" in packet:
+                _apply_local_attribute_snapshot(player, packet["attributes"])
+            player.health = max(
+                0.0, min(player.max_health, float(packet.get("health", player.health)))
+            )
+            player.absorption_amount = max(
+                0.0,
+                float(packet.get("absorption_amount", player.absorption_amount)),
+            )
     elif packet["__class__"] == "PlayerVelocity":
         player = client.client_player
         if player is not None:

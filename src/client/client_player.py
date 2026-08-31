@@ -123,6 +123,11 @@ class ClientPlayer(Entity):
     def _update_survival_state(self):
 
         self.tick_damage_state()
+        for effect_id, instance in tuple(self.active_effects.items()):
+            if instance.duration > 0:
+                instance.duration -= 1
+                if instance.duration == 0:
+                    self.active_effects.pop(effect_id, None)
         if not isinstance(self.game_mode, SurvivalMode):
             return
         if self.food_level <= 6:

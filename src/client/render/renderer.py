@@ -611,6 +611,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.draw_destroy_progress()
                     self.client.client_player.skeleton.update()
                     self.draw_player()
+                    self.draw_status_effect_overlay()
                     self.draw_gui()
 
                     # 帧率统计（每秒更新一次）
@@ -708,7 +709,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def draw_player(self) -> None:
         """绘制玩家实体。"""
         player = self.client.client_player
-        player.skeleton.draw()
+        if "invisibility" not in getattr(player, "active_effects", {}):
+            player.skeleton.draw()
         if getattr(self, "show_entity_hitboxes", False):
             self.draw_skeleton_hitbox(player, player.skeleton)
 
@@ -732,11 +734,58 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     continue
             elif z_filter == 1:
                 continue
-            if entity.skeleton is not None:
+            if entity.skeleton is not None and "invisibility" not in getattr(
+                entity, "active_effects", {}
+            ):
                 entity.skeleton.update()
                 entity.skeleton.draw()
             if getattr(self, "show_entity_hitboxes", False):
                 self.draw_skeleton_hitbox(entity, entity.skeleton)
+
+    def draw_status_effect_overlay(self) -> None:
+        """Render the Java-like full-screen parts of local status effects."""
+        player = self.client.client_player
+        effects = getattr(player, "active_effects", {}) if player is not None else {}
+        if not effects:
+            return
+        screen_size = (self.SCREEN_WIDTH, self.SCREEN_HEIGHT)
+        if "nausea" in effects:
+            phase = pygame.time.get_ticks() / 420.0
+            strength = 0.012 + 0.006 * (effects["nausea"].amplifier + 1)
+            scale = 1.0 + abs(_math.sin(phase)) * min(0.08, strength)
+            snapshot = self.screen.copy()
+            scaled = pygame.transform.smoothscale(
+                snapshot,
+                (
+                    max(1, round(self.SCREEN_WIDTH * scale)),
+                    max(1, round(self.SCREEN_HEIGHT / scale)),
+                ),
+            )
+            self.screen.blit(scaled, scaled.get_rect(center=self.screen.get_rect().center))
+            tint = pygame.Surface(screen_size, pygame.SRCALPHA)
+            tint.fill((96, 32, 112, 22))
+            self.screen.blit(tint, (0, 0))
+        if "night_vision" in effects and "blindness" not in effects:
+            light = pygame.Surface(screen_size)
+            light.fill((38, 48, 28))
+            self.screen.blit(light, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
+        if "blindness" in effects:
+            amplifier = effects["blindness"].amplifier
+            radius_x = max(24, round(self.SCREEN_WIDTH * max(0.08, 0.24 - amplifier * 0.025)))
+            radius_y = max(24, round(self.SCREEN_HEIGHT * max(0.10, 0.32 - amplifier * 0.03)))
+            darkness = pygame.Surface(screen_size, pygame.SRCALPHA)
+            darkness.fill((0, 0, 0, 245))
+            pygame.draw.ellipse(
+                darkness,
+                (0, 0, 0, 0),
+                pygame.Rect(
+                    self.SCREEN_WIDTH // 2 - radius_x,
+                    self.SCREEN_HEIGHT // 2 - radius_y,
+                    radius_x * 2,
+                    radius_y * 2,
+                ),
+            )
+            self.screen.blit(darkness, (0, 0))
 
     def draw_skeleton_hitbox(self, entity, skeleton) -> None:
         """优先使用 Skeleton 当前帧坐标，无对应接口时回退到实体坐标。"""
