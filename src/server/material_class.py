@@ -1,10 +1,12 @@
 # Commented and arranged by ChatGPT
 import pygame
 import math
+import random
 
 from src.client.resources_manager import transkey
 from src.server.utils import client_method
 from src.server.location import Location
+from src.server.status_effects import StatusEffectInstance
 
 
 class Material:
@@ -18,6 +20,8 @@ class Material:
     name_space_key = "minecraft"
     attribute_modifiers = ()
     Tags = ()
+    enchantment_glint = False
+    tooltip_color = None
 
     def __init__(self):
         self.texture_cache = {}
@@ -139,6 +143,8 @@ class Food(Material):
     saturation_modifier = 0.0
     consume_duration_ticks = 32
     always_edible = False
+    # (effect id, duration in ticks, zero-based amplifier, application chance)
+    consumption_effects = ()
 
     def can_consume(self, consumer) -> bool:
         checker = getattr(consumer, "can_consume_food", None)
@@ -153,6 +159,14 @@ class Food(Material):
         handler = getattr(consumer, "consume_food", None)
         if callable(handler):
             handler(self)
+        add_effect = getattr(consumer, "add_status_effect", None)
+        if not callable(add_effect):
+            return
+        for effect_id, duration, amplifier, chance in self.consumption_effects:
+            chance = max(0.0, min(1.0, float(chance)))
+            if chance < 1.0 and random.random() >= chance:
+                continue
+            add_effect(StatusEffectInstance(effect_id, duration, amplifier))
 
     def right_click(self, stack, holder, *, target=None, context=None) -> bool:
         if stack is None or stack.is_empty() or not self.can_consume(holder):

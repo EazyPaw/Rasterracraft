@@ -571,10 +571,15 @@ class PlayerSkeleton(EntitySkeleton):
         self._held_item_textures: dict[int, pygame.Surface] = {}
         self._held_item_glint_textures: dict[int, pygame.Surface | None] = {}
         self._held_item_pivots: dict[int, tuple[float, float]] = {}
+        self._held_item_glint_key = None
+        self._held_item_glint_source = None
         self._held_item_texture_side = None
         self._armor_key = None
+        self._armor_glint_key = None
+        self._armor_layers = {}
         self._armor_texture_side = None
         self._armor_part_textures = {}
+        self._armor_part_glint_textures = {}
         self._armor_part_visible = {}
         self._build_player_body()
         self._apply_pose(instant=True)
@@ -730,8 +735,9 @@ class PlayerSkeleton(EntitySkeleton):
             return None
         texture = self.client.resources_manager.get_texture_img(
             f"models.armor.{texture_name}_layer_{layer}"
-        ).copy()
+        )
         if texture_name == "leather":
+            texture = texture.copy()
             color_getter = getattr(stack.material, "get_dye_color", None)
             color = color_getter(stack) if callable(color_getter) else 0xA06540
             texture.fill(
@@ -760,7 +766,9 @@ class PlayerSkeleton(EntitySkeleton):
                 getattr(getattr(equipment.get(slot), "material", None), "name_id", "air"),
                 repr(getattr(equipment.get(slot), "nbt", {})),
                 (
-                    equipment[slot].get_texture_state_key(self.client)
+                    equipment[slot].get_texture_state_key(
+                        self.client, include_glint_frame=False
+                    )
                     if equipment.get(slot) is not None
                     and not equipment[slot].is_empty()
                     else None
@@ -778,16 +786,6 @@ class PlayerSkeleton(EntitySkeleton):
                     ("feet", 1),
                 )
             }
-            glint_layers = {
-                key: (
-                    equipment[key[0]].get_enchantment_glint_overlay(
-                        texture, self.client
-                    )
-                    if texture is not None
-                    else None
-                )
-                for key, texture in layers.items()
-            }
             part_layout = {
                 "armor_head": (("head", 1), (0, 8, 8, 8)),
                 "armor_chest_body": (("chest", 1), (16, 20, 4, 12)),
@@ -803,20 +801,55 @@ class PlayerSkeleton(EntitySkeleton):
                 name: self._combine_armor_crops((layers[layer_key],), rect)
                 for name, (layer_key, rect) in part_layout.items()
             }
-            glint_parts = {
-                name: (
-                    glint_layers[layer_key].subsurface(rect).copy()
-                    if glint_layers[layer_key] is not None
-                    else None
-                )
-                for name, (layer_key, rect) in part_layout.items()
-            }
             self._armor_part_textures = {
                 self.RIGHT: base_parts,
                 self.LEFT: {
                     name: pygame.transform.flip(texture, True, False)
                     for name, texture in base_parts.items()
                 },
+            }
+            self._armor_layers = layers
+            self._armor_part_layout = part_layout
+            self._armor_part_visible = {
+                name: bool(texture.get_bounding_rect().width)
+                for name, texture in base_parts.items()
+            }
+            self._armor_key = key
+            self._armor_glint_key = None
+            self._armor_texture_side = None
+
+        glint_key = tuple(
+            (
+                layer_key,
+                id(texture),
+                (
+                    equipment[layer_key[0]].get_enchantment_glint_frame_key(
+                        self.client
+                    )
+                    if texture is not None
+                    else None
+                ),
+            )
+            for layer_key, texture in self._armor_layers.items()
+        )
+        if glint_key != self._armor_glint_key:
+            glint_layers = {
+                layer_key: (
+                    equipment[layer_key[0]].get_enchantment_glint_overlay(
+                        texture, self.client
+                    )
+                    if texture is not None
+                    else None
+                )
+                for layer_key, texture in self._armor_layers.items()
+            }
+            glint_parts = {
+                name: (
+                    glint_layers[layer_key].subsurface(rect).copy()
+                    if glint_layers[layer_key] is not None
+                    else None
+                )
+                for name, (layer_key, rect) in self._armor_part_layout.items()
             }
             self._armor_part_glint_textures = {
                 self.RIGHT: glint_parts,
@@ -829,12 +862,12 @@ class PlayerSkeleton(EntitySkeleton):
                     for name, texture in glint_parts.items()
                 },
             }
-            self._armor_part_visible = {
-                name: bool(texture.get_bounding_rect().width)
-                for name, texture in base_parts.items()
-            }
-            self._armor_key = key
-            self._armor_texture_side = None
+            self._armor_glint_key = glint_key
+            if self._armor_texture_side == self.facing:
+                for name, texture in self._armor_part_glint_textures[
+                    self.facing
+                ].items():
+                    self.body[name].set_overlay_texture(texture)
 
         if self._armor_texture_side != self.facing:
             glint_textures = getattr(self, "_armor_part_glint_textures", {}).get(
@@ -860,7 +893,9 @@ class PlayerSkeleton(EntitySkeleton):
         item_id = getattr(getattr(stack, "material", None), "name_id", "air")
         texture_state_key = None
         if stack is not None and not stack.is_empty():
-            texture_state_key = stack.get_texture_state_key(self.client)
+            texture_state_key = stack.get_texture_state_key(
+                self.client, include_glint_frame=False
+            )
         blocking = bool(
             getattr(self.entity, "blocking", False)
             and getattr(getattr(stack, "material", None), "tool_type", None) == "sword"
@@ -878,12 +913,8 @@ class PlayerSkeleton(EntitySkeleton):
             offset = (0.0, 0.0)
             item_scale = 0.7
             item_rotation = 0.0
-            glint_texture = None
             if stack is not None and not stack.is_empty():
                 texture = stack.get_base_texture(1.0, client=self.client)
-                glint_texture = stack.get_enchantment_glint_overlay(
-                    texture, self.client
-                )
                 try:
                     raw_pose = stack.material.get_anchor()
                     if isinstance(raw_pose, dict):
@@ -925,6 +956,31 @@ class PlayerSkeleton(EntitySkeleton):
                 self.RIGHT: pygame.transform.flip(texture, True, False),
                 self.LEFT: texture,
             }
+            self._held_item_glint_source = texture
+            self._held_item_glint_key = None
+            self._held_item_pivots = {
+                self.RIGHT: right_pivot,
+                self.LEFT: (texture.get_width() - right_pivot[0], right_pivot[1]),
+            }
+            self._held_item_texture_side = None
+            self._held_item_key = key
+
+        glint_key = (
+            id(self._held_item_glint_source),
+            (
+                stack.get_enchantment_glint_frame_key(self.client)
+                if stack is not None and not stack.is_empty()
+                else None
+            ),
+        )
+        if glint_key != self._held_item_glint_key:
+            glint_texture = (
+                stack.get_enchantment_glint_overlay(
+                    self._held_item_glint_source, self.client
+                )
+                if stack is not None and not stack.is_empty()
+                else None
+            )
             self._held_item_glint_textures = {
                 self.RIGHT: (
                     pygame.transform.flip(glint_texture, True, False)
@@ -933,12 +989,11 @@ class PlayerSkeleton(EntitySkeleton):
                 ),
                 self.LEFT: glint_texture,
             }
-            self._held_item_pivots = {
-                self.RIGHT: right_pivot,
-                self.LEFT: (texture.get_width() - right_pivot[0], right_pivot[1]),
-            }
-            self._held_item_texture_side = None
-            self._held_item_key = key
+            self._held_item_glint_key = glint_key
+            if self._held_item_texture_side == self.facing:
+                part.set_overlay_texture(
+                    self._held_item_glint_textures[self.facing]
+                )
 
         if self._held_item_texture_side != self.facing:
             part.set_source_texture(self._held_item_textures[self.facing])

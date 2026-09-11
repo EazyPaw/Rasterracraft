@@ -13,6 +13,21 @@ from src.server.tags import ItemTag
 
 RECIPES_ROOT = Path("data/minecraft/recipes")
 
+# Enchanted golden apples were still craftable in Java 1.8. The bundled
+# modern recipe data intentionally omits this removed recipe, so keep the
+# version-specific recipe in tracked gameplay code.
+MINECRAFT_1_8_RECIPES = (
+    {
+        "type": "minecraft:crafting_shaped",
+        "key": {
+            "#": {"item": "minecraft:gold_block"},
+            "X": {"item": "minecraft:apple"},
+        },
+        "pattern": ["###", "#X#", "###"],
+        "result": {"item": "minecraft:enchanted_golden_apple"},
+    },
+)
+
 
 def _item_id(stack) -> str | None:
     if stack is None or stack.is_empty():
@@ -65,7 +80,7 @@ def _trim(grid: list[list[ItemStack | None]]) -> list[list[ItemStack | None]]:
 
 @lru_cache(maxsize=1)
 def load_recipes() -> tuple[dict, ...]:
-    recipes = []
+    recipes = list(MINECRAFT_1_8_RECIPES)
     for path in RECIPES_ROOT.glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))

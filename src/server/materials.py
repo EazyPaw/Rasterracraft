@@ -109,6 +109,7 @@ class ROTTEN_FLESH(Food):
     _texture_path = "items.rotten_flesh"
     food_value = 4
     saturation_modifier = 0.1
+    consumption_effects = (("hunger", 30 * 20, 0, 0.8),)
 
 
 @register_material
@@ -118,6 +119,7 @@ class RAW_CHICKEN(Food):
     _texture_path = "items.chicken_raw"
     food_value = 2
     saturation_modifier = 0.3
+    consumption_effects = (("hunger", 30 * 20, 0, 0.3),)
 
 
 @register_material
@@ -170,6 +172,42 @@ class BAKED_POTATO(Food):
     _texture_path = "items.potato_baked"
     food_value = 5
     saturation_modifier = 0.6
+
+
+@register_material
+class GOLDEN_APPLE(Food):
+    name_id = "golden_apple"
+    name = "item.appleGold.name"
+    _texture_path = "items.apple_golden"
+    food_value = 4
+    saturation_modifier = 1.2
+    always_edible = True
+    tooltip_color = "AQUA"
+    consumption_effects = (
+        ("absorption", 2 * 60 * 20, 0, 1.0),
+        ("regeneration", 5 * 20, 1, 1.0),
+    )
+
+
+@register_material(aliases=("notch_apple",))
+class ENCHANTED_GOLDEN_APPLE(Food):
+    name_id = "enchanted_golden_apple"
+    # Minecraft 1.8 stores this as golden_apple damage value 1, so it shares
+    # the ordinary apple's name and texture while the enchantment glint
+    # distinguishes it.
+    name = "item.appleGold.name"
+    _texture_path = "items.apple_golden"
+    food_value = 4
+    saturation_modifier = 1.2
+    always_edible = True
+    enchantment_glint = True
+    tooltip_color = "LIGHT_PURPLE"
+    consumption_effects = (
+        ("absorption", 2 * 60 * 20, 0, 1.0),
+        ("regeneration", 30 * 20, 4, 1.0),
+        ("resistance", 5 * 60 * 20, 0, 1.0),
+        ("fire_resistance", 5 * 60 * 20, 0, 1.0),
+    )
 
 
 @register_material
@@ -298,6 +336,31 @@ class POISONOUS_POTATO(Food):
     _texture_path = "items.potato_poisonous"
     food_value = 2
     saturation_modifier = 0.3
+    consumption_effects = (("poison", 5 * 20, 0, 0.6),)
+
+
+@register_material
+class SPIDER_EYE(Food):
+    name_id = "spider_eye"
+    name = "item.spiderEye.name"
+    _texture_path = "items.spider_eye"
+    food_value = 2
+    saturation_modifier = 0.8
+    consumption_effects = (("poison", 5 * 20, 0, 1.0),)
+
+
+@register_material(aliases=("fish_pufferfish",))
+class PUFFERFISH(Food):
+    name_id = "pufferfish"
+    name = "item.fish.pufferfish.raw.name"
+    _texture_path = "items.fish_pufferfish_raw"
+    food_value = 1
+    saturation_modifier = 0.1
+    consumption_effects = (
+        ("poison", 60 * 20, 3, 1.0),
+        ("hunger", 15 * 20, 2, 1.0),
+        ("nausea", 15 * 20, 1, 1.0),
+    )
 
 
 @register_material

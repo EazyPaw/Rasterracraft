@@ -19,6 +19,16 @@ class ItemStack:
     _durability_bar_cache = {}
     _glint_texture_cache = {}
     _glint_coordinate_cache = {}
+    # The animated UV transform is shared by every enchanted texture with the
+    # same dimensions.  Keep a few recent frames so a fully equipped player
+    # samples the 128x128 glint image once per frame instead of once per item.
+    _glint_sample_cache = {}
+    _glint_source_array_cache = {}
+    _glint_alpha_cache = {}
+    _glint_base_rgb_cache = {}
+    _max_glint_sample_cache_entries = 16
+    _max_glint_source_cache_entries = 4
+    _max_glint_item_array_cache_entries = 64
     _glint_strength = 1.0
     _glint_speed = 0.5
     # Item surfaces use local 0..1 UVs instead of Minecraft's atlas UVs.
@@ -140,6 +150,12 @@ class ItemStack:
 
     def has_enchantments(self) -> bool:
         return bool(self.get_enchantments())
+
+    def has_enchantment_glint(self) -> bool:
+        """Return whether this stack renders the animated enchantment foil."""
+        return self.has_enchantments() or bool(
+            getattr(self.material, "enchantment_glint", False)
+        )
 
     def get_enchantment_level(self, enchantment_id: str) -> int:
         from src.server.enchantments import normalize_enchantment_id
@@ -418,7 +434,7 @@ class ItemStack:
         if shadow and res is not None:
             cached = self.material.texture_cache.get(cache_key)
             if cached is not None:
-                if not self.has_enchantments():
+                if not self.has_enchantment_glint():
                     return cached
                 result = cached.copy()
                 result.blit(self._apply_enchantment_glint(res, client), (0, 0))
@@ -451,31 +467,40 @@ class ItemStack:
             if len(self.material.texture_cache) > 128:
                 self.material.texture_cache.pop(next(iter(self.material.texture_cache)))
 
-            if self.has_enchantments():
+            if self.has_enchantment_glint():
                 result = result.copy()
                 result.blit(self._apply_enchantment_glint(res, client), (0, 0))
             return result
 
         return self._apply_enchantment_glint(res, client)
 
-    def get_texture_state_key(self, client):
+    def get_texture_state_key(self, client, *, include_glint_frame=True):
         """Return every state that can change this stack's rendered texture."""
         animation_key = self.material.get_texture_animation_key(client=client)
         variant_getter = getattr(self.material, "get_texture_variant_key", None)
         variant_key = variant_getter(self) if callable(variant_getter) else None
         enchantments = tuple(sorted(self.get_enchantments().items()))
-        glint_frame = None
-        if enchantments:
-            time_units, _, _ = self._get_glint_offsets(client)
-            glint_frame = (
-                time_units % self._glint_x_period_units,
-                time_units % self._glint_y_period_units,
-            )
-        return animation_key, variant_key, enchantments, glint_frame
+        built_in_glint = bool(getattr(self.material, "enchantment_glint", False))
+        glint_frame = (
+            self.get_enchantment_glint_frame_key(client)
+            if include_glint_frame and (enchantments or built_in_glint)
+            else None
+        )
+        return animation_key, variant_key, enchantments, built_in_glint, glint_frame
+
+    def get_enchantment_glint_frame_key(self, client):
+        """Return only the dynamic state of this stack's enchantment foil."""
+        if not self.has_enchantment_glint():
+            return None
+        time_units, _, _ = self._get_glint_offsets(client)
+        return (
+            time_units % self._glint_x_period_units,
+            time_units % self._glint_y_period_units,
+        )
 
     def get_enchantment_glint_overlay(self, texture, client):
         """Return only the additive glint contribution for a separate render pass."""
-        if texture is None or not self.has_enchantments():
+        if texture is None or not self.has_enchantment_glint():
             return None
 
         time_units, x_offset, y_offset = self._get_glint_offsets(client)
@@ -513,7 +538,7 @@ class ItemStack:
         return overlay
 
     def _apply_enchantment_glint(self, texture, client):
-        if texture is None or not self.has_enchantments():
+        if texture is None or not self.has_enchantment_glint():
             return texture
 
         time_units, x_offset, y_offset = self._get_glint_offsets(client)
@@ -603,6 +628,11 @@ class ItemStack:
         cls, source, width, height, x_offset, y_offset
     ):
         """Repeat and linearly sample the glint using vanilla's texture matrix."""
+        cache_key = (source, width, height, x_offset, y_offset)
+        cached = cls._glint_sample_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         base_u, base_v = cls._get_glint_coordinates(width, height)
         sample_u = np.mod(base_u - x_offset, 1.0)
         sample_v = np.mod(base_v + y_offset, 1.0)
@@ -610,16 +640,37 @@ class ItemStack:
         source_width, source_height = source.get_size()
         source_x = sample_u * source_width - 0.5
         source_y = sample_v * source_height - 0.5
-        x0 = np.floor(source_x).astype(np.int32)
-        y0 = np.floor(source_y).astype(np.int32)
+        source_x_floor = np.floor(source_x)
+        source_y_floor = np.floor(source_y)
+        x0 = source_x_floor.astype(np.int32)
+        y0 = source_y_floor.astype(np.int32)
         x1 = (x0 + 1) % source_width
         y1 = (y0 + 1) % source_height
         x0 %= source_width
         y0 %= source_height
-        x_weight = (source_x - np.floor(source_x))[:, :, None]
-        y_weight = (source_y - np.floor(source_y))[:, :, None]
+        x_weight = (source_x - source_x_floor)[:, :, None]
+        y_weight = (source_y - source_y_floor)[:, :, None]
 
-        source_rgb = pygame.surfarray.array3d(source).astype(np.float32)
+        source_arrays = cls._glint_source_array_cache.get(source)
+        if source_arrays is None:
+            source_rgb = pygame.surfarray.array3d(source).astype(np.float32)
+            source_alpha = (
+                pygame.surfarray.array_alpha(source).astype(np.float32)
+                if source.get_flags() & pygame.SRCALPHA
+                else None
+            )
+            source_arrays = (source_rgb, source_alpha)
+            cls._glint_source_array_cache[source] = source_arrays
+            if (
+                len(cls._glint_source_array_cache)
+                > cls._max_glint_source_cache_entries
+            ):
+                cls._glint_source_array_cache.pop(
+                    next(iter(cls._glint_source_array_cache))
+                )
+        else:
+            source_rgb, source_alpha = source_arrays
+
         top = source_rgb[x0, y0] * (1.0 - x_weight) + source_rgb[
             x1, y0
         ] * x_weight
@@ -628,8 +679,7 @@ class ItemStack:
         ] * x_weight
         sampled_rgb = top * (1.0 - y_weight) + bottom * y_weight
 
-        if source.get_flags() & pygame.SRCALPHA:
-            source_alpha = pygame.surfarray.array_alpha(source).astype(np.float32)
+        if source_alpha is not None:
             x_weight_2d = x_weight[:, :, 0]
             y_weight_2d = y_weight[:, :, 0]
             top_alpha = source_alpha[x0, y0] * (1.0 - x_weight_2d) + source_alpha[
@@ -641,13 +691,43 @@ class ItemStack:
             sampled_alpha = top_alpha * (1.0 - y_weight_2d) + bottom_alpha * y_weight_2d
         else:
             sampled_alpha = np.full((width, height), 255.0, dtype=np.float32)
-        return sampled_rgb, sampled_alpha
+        sampled = (sampled_rgb, sampled_alpha)
+        cls._glint_sample_cache[cache_key] = sampled
+        if len(cls._glint_sample_cache) > cls._max_glint_sample_cache_entries:
+            cls._glint_sample_cache.pop(next(iter(cls._glint_sample_cache)))
+        return sampled
+
+    @classmethod
+    def _get_glint_item_alpha(cls, texture):
+        item_alpha = cls._glint_alpha_cache.get(texture)
+        if item_alpha is None:
+            item_alpha = pygame.surfarray.array_alpha(texture).astype(np.float32)
+            cls._glint_alpha_cache[texture] = item_alpha
+            if (
+                len(cls._glint_alpha_cache)
+                > cls._max_glint_item_array_cache_entries
+            ):
+                cls._glint_alpha_cache.pop(next(iter(cls._glint_alpha_cache)))
+        return item_alpha
+
+    @classmethod
+    def _get_glint_base_rgb(cls, texture):
+        base_rgb = cls._glint_base_rgb_cache.get(texture)
+        if base_rgb is None:
+            base_rgb = pygame.surfarray.array3d(texture).astype(np.float32)
+            cls._glint_base_rgb_cache[texture] = base_rgb
+            if (
+                len(cls._glint_base_rgb_cache)
+                > cls._max_glint_item_array_cache_entries
+            ):
+                cls._glint_base_rgb_cache.pop(next(iter(cls._glint_base_rgb_cache)))
+        return base_rgb
 
     @classmethod
     def _source_color_additive_glint(cls, texture, sampled_rgb, sampled_alpha):
         """Emulate vanilla's SRC_COLOR/ONE glint pass while preserving item alpha."""
-        base_rgb = pygame.surfarray.array3d(texture).astype(np.float32)
-        item_alpha = pygame.surfarray.array_alpha(texture).astype(np.float32)
+        base_rgb = cls._get_glint_base_rgb(texture)
+        item_alpha = cls._get_glint_item_alpha(texture)
         source_color = sampled_rgb * (cls._glint_strength / 255.0)
         contribution = source_color * source_color * 255.0
         fragment_visible = sampled_alpha >= 25.5
@@ -666,7 +746,7 @@ class ItemStack:
     @classmethod
     def _source_color_glint_overlay(cls, texture, sampled_rgb, sampled_alpha):
         """Build the RGB contribution used by a later additive render pass."""
-        item_alpha = pygame.surfarray.array_alpha(texture).astype(np.float32)
+        item_alpha = cls._get_glint_item_alpha(texture)
         source_color = sampled_rgb * (cls._glint_strength / 255.0)
         contribution = source_color * source_color * 255.0
         fragment_visible = sampled_alpha >= 25.5

@@ -150,10 +150,12 @@ class ItemTooltip:
 
     def get_lines(self, stack) -> list[str | Text]:
         translated_name = self._translated_name(stack)
+        color_name = getattr(stack.material, "tooltip_color", None)
+        color = TextColor.__members__.get(str(color_name), None)
+        if color is None and stack.has_enchantments():
+            color = TextColor.AQUA
         lines: list[str | Text] = [
-            Text(translated_name, TextColor.AQUA)
-            if stack.has_enchantments()
-            else translated_name
+            Text(translated_name, color) if color is not None else translated_name
         ]
         lines.extend(self._enchantment_lines(stack))
         lore = stack.get_lore()
