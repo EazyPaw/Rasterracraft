@@ -6,7 +6,7 @@
 始终存在于 drawing_GUIs 列表中，优先级低于背包等浮层 GUI。
 未激活时显示最近消息；激活时（按 T 或 / 键）显示输入栏、展开历史并支持滚轮滚动。
 """
-
+import os
 import time
 
 import pygame
@@ -42,6 +42,8 @@ class ChatGUI(GUI):
         self._max_scroll = 0
         # 发送历史（↑↓ 快速补全）
         self.sent_history: list[str] = []
+        self.command_history: list[str] = []
+        self.load_command_history()
         self._history_index = -1
         self._saved_input = ""
 
@@ -116,6 +118,26 @@ class ChatGUI(GUI):
         self.render.request_text_input(False)
         self._text_input_started = False
 
+    def load_command_history(self):
+        """加载已保存的命令，且绝不在启动时改写历史文件。"""
+        commands: list[str] = []
+        if os.path.exists("command_history.txt"):
+            with open("command_history.txt", "r", encoding='utf-8') as file:
+                commands: list[str] = file.read().splitlines()
+
+        # 旧版本会把普通聊天也写进该文件；忽略这些遗留项，并保持两种历史
+        # 为独立列表，避免本次普通聊天再次污染待持久化的命令历史。
+        self.command_history = [command for command in commands if command.startswith("/")]
+        self.sent_history = self.command_history.copy()
+
+    def _save_command_history(self, path: str, max_lines=50):
+        lines = [line for line in self.command_history if line.startswith("/")][
+            -max_lines:
+        ]
+        with open(path, "w", encoding="utf-8") as f:
+            for line in lines:
+                f.write(line + "\n")
+
     def send_message(self):
         text = self.input_text.strip()
         if not text:
@@ -123,12 +145,18 @@ class ChatGUI(GUI):
             return
         if len(text) > MAX_INPUT_LENGTH:
             text = text[:MAX_INPUT_LENGTH]
-        # 存入发送历史（去重：与上一条相同时不重复添加）
-        if not self.sent_history or self.sent_history[-1] != text:
-            self.sent_history.append(text)
-        # 限制历史数量
+
+        self.sent_history.append(text)
+
+        if text[0] == '/':
+            self.command_history.append(text)
+            if len(self.command_history) > 50:
+                self.command_history = self.command_history[-50:]
+            self._save_command_history("command_history.txt", 50)
+
         if len(self.sent_history) > 50:
             self.sent_history = self.sent_history[-50:]
+
         self.render.client.sent_packet({"__class__": "ChatMessage", "text": text})
         self.close_chat()
 

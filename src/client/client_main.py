@@ -107,7 +107,7 @@ class Client:
         self.game_thread.start()
         self.render.request_text_input(False)
 
-        # 简写方法
+        self.under_dev = True
 
     def set_camera_mode(self, mode: CameraMode | str) -> None:
         """设置玩家镜头模式：``centered`` 或 ``mouse_lead``。"""
