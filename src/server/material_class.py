@@ -14,6 +14,8 @@ class Material:
     name = "Null"
     max_stack_size = 64
     _texture_path = None
+    texture_shadow = False
+    texture_size = 1.0
     _original_texture = None
     _last_scaled = None
     _scaled_texture_cache = {}
@@ -186,6 +188,8 @@ class Food(Material):
 
 class BlockItem(Material):
     target_block_id = None
+    texture_size = 0.7
+    texture_shadow = True
 
     @classmethod
     def create_block(cls):

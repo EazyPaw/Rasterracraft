@@ -76,6 +76,527 @@ class LAVA(BlockItem):
 
 
 @register_material
+class STONE(BlockItem):
+    name_id = "stone"
+    name = "tile.stone.stone.name"
+    target_block_id = "stone"
+
+
+@register_material
+class OBSIDIAN(BlockItem):
+    name_id = "obsidian"
+    name = "tile.obsidian.name"
+    target_block_id = "obsidian"
+
+
+@register_material
+class GRASS_BLOCK(BlockItem):
+    name_id = "grass_block"
+    name = "tile.grass.name"
+    target_block_id = "grass_block"
+
+
+@register_material
+class OAK_PLANKS(BlockItem):
+    name_id = "oak_planks"
+    name = "tile.wood.oak.name"
+    target_block_id = "oak_planks"
+
+
+@register_material
+class OAK_LOG(BlockItem):
+    name_id = "oak_log"
+    name = "tile.log.oak.name"
+    target_block_id = "oak_log"
+
+
+@register_material
+class CRAFTING_TABLE(BlockItem):
+    name_id = "crafting_table"
+    name = "tile.workbench.name"
+    target_block_id = "crafting_table"
+
+
+@register_material
+class FURNACE(BlockItem):
+    name_id = "furnace"
+    name = "tile.furnace.name"
+    target_block_id = "furnace"
+
+
+@register_material
+class GLASS(BlockItem):
+    name_id = "glass"
+    name = "tile.glass.name"
+    target_block_id = "glass"
+
+
+@register_material
+class COAL_ORE(BlockItem):
+    name_id = "coal_ore"
+    name = "tile.oreCoal.name"
+    target_block_id = "coal_ore"
+
+
+@register_material
+class IRON_ORE(BlockItem):
+    name_id = "iron_ore"
+    name = "tile.oreIron.name"
+    target_block_id = "iron_ore"
+
+
+@register_material
+class GOLD_ORE(BlockItem):
+    name_id = "gold_ore"
+    name = "tile.oreGold.name"
+    target_block_id = "gold_ore"
+
+
+@register_material
+class DIAMOND_ORE(BlockItem):
+    name_id = "diamond_ore"
+    name = "tile.oreDiamond.name"
+    target_block_id = "diamond_ore"
+
+
+@register_material
+class TNT(BlockItem):
+    name_id = "tnt"
+    name = "tile.tnt.name"
+    target_block_id = "tnt"
+
+
+class PlantBlockItem(BlockItem):
+    texture_size = 1.0
+    texture_shadow = False
+
+
+class LeavesBlockItem(BlockItem):
+    texture_shadow = False
+
+
+@register_material
+class GRANITE(BlockItem):
+    name_id = "granite"
+    name = "tile.stone.granite.name"
+    target_block_id = "granite"
+
+
+@register_material
+class DIORITE(BlockItem):
+    name_id = "diorite"
+    name = "tile.stone.diorite.name"
+    target_block_id = "diorite"
+
+
+@register_material
+class ANDESITE(BlockItem):
+    name_id = "andesite"
+    name = "tile.stone.andesite.name"
+    target_block_id = "andesite"
+
+
+@register_material
+class BEDROCK(BlockItem):
+    name_id = "bedrock"
+    name = "tile.bedrock.name"
+    target_block_id = "bedrock"
+
+
+@register_material
+class COARSE_DIRT(BlockItem):
+    name_id = "coarse_dirt"
+    name = "tile.dirt.coarse.name"
+    target_block_id = "coarse_dirt"
+
+
+@register_material
+class PODZOL(BlockItem):
+    name_id = "podzol"
+    name = "tile.dirt.podzol.name"
+    target_block_id = "podzol"
+
+
+@register_material
+class BIRCH_PLANKS(BlockItem):
+    name_id = "birch_planks"
+    name = "tile.wood.birch.name"
+    target_block_id = "birch_planks"
+
+
+@register_material
+class SPRUCE_PLANKS(BlockItem):
+    name_id = "spruce_planks"
+    name = "tile.wood.spruce.name"
+    target_block_id = "spruce_planks"
+
+
+@register_material
+class JUNGLE_PLANKS(BlockItem):
+    name_id = "jungle_planks"
+    name = "tile.wood.jungle.name"
+    target_block_id = "jungle_planks"
+
+
+@register_material
+class ACACIA_PLANKS(BlockItem):
+    name_id = "acacia_planks"
+    name = "tile.wood.acacia.name"
+    target_block_id = "acacia_planks"
+
+
+@register_material
+class DARK_OAK_PLANKS(BlockItem):
+    name_id = "dark_oak_planks"
+    name = "tile.wood.big_oak.name"
+    target_block_id = "dark_oak_planks"
+
+
+@register_material
+class BIRCH_LOG(BlockItem):
+    name_id = "birch_log"
+    name = "tile.log.birch.name"
+    target_block_id = "birch_log"
+
+
+@register_material
+class SPRUCE_LOG(BlockItem):
+    name_id = "spruce_log"
+    name = "tile.log.spruce.name"
+    target_block_id = "spruce_log"
+
+
+@register_material
+class JUNGLE_LOG(BlockItem):
+    name_id = "jungle_log"
+    name = "tile.log.jungle.name"
+    target_block_id = "jungle_log"
+
+
+@register_material
+class ACACIA_LOG(BlockItem):
+    name_id = "acacia_log"
+    name = "tile.log.acacia.name"
+    target_block_id = "acacia_log"
+
+
+@register_material
+class DARK_OAK_LOG(BlockItem):
+    name_id = "dark_oak_log"
+    name = "tile.log.big_oak.name"
+    target_block_id = "dark_oak_log"
+
+
+@register_material
+class RED_SAND(BlockItem):
+    name_id = "red_sand"
+    name = "tile.sand.red.name"
+    target_block_id = "red_sand"
+
+
+@register_material
+class SANDSTONE(BlockItem):
+    name_id = "sandstone"
+    name = "tile.sandStone.name"
+    target_block_id = "sandstone"
+
+
+@register_material
+class RED_SANDSTONE(BlockItem):
+    name_id = "red_sandstone"
+    name = "tile.redSandStone.name"
+    target_block_id = "red_sandstone"
+
+
+@register_material
+class GRAVEL(BlockItem):
+    name_id = "gravel"
+    name = "tile.gravel.name"
+    target_block_id = "gravel"
+
+
+@register_material
+class CLAY(BlockItem):
+    name_id = "clay"
+    name = "tile.clay.name"
+    target_block_id = "clay"
+
+
+@register_material
+class HARDENED_CLAY(BlockItem):
+    name_id = "hardened_clay"
+    name = "tile.clayHardened.name"
+    target_block_id = "hardened_clay"
+
+
+@register_material
+class SNOW(BlockItem):
+    name_id = "snow"
+    name = "tile.snow.name"
+    target_block_id = "snow"
+
+
+@register_material
+class SNOW_BLOCK(BlockItem):
+    name_id = "snow_block"
+    name = "tile.snow.name"
+    target_block_id = "snow_block"
+
+
+@register_material
+class ICE(BlockItem):
+    name_id = "ice"
+    name = "tile.ice.name"
+    target_block_id = "ice"
+
+
+@register_material
+class CACTUS(BlockItem):
+    name_id = "cactus"
+    name = "tile.cactus.name"
+    target_block_id = "cactus"
+
+
+@register_material
+class EMERALD_ORE(BlockItem):
+    name_id = "emerald_ore"
+    name = "tile.oreEmerald.name"
+    target_block_id = "emerald_ore"
+
+
+@register_material
+class LAPIS_ORE(BlockItem):
+    name_id = "lapis_ore"
+    name = "tile.oreLapis.name"
+    target_block_id = "lapis_ore"
+
+
+@register_material
+class REDSTONE_ORE(BlockItem):
+    name_id = "redstone_ore"
+    name = "tile.oreRedstone.name"
+    target_block_id = "redstone_ore"
+
+
+@register_material
+class DIAMOND_BLOCK(BlockItem):
+    name_id = "diamond_block"
+    name = "tile.blockDiamond.name"
+    target_block_id = "diamond_block"
+
+
+@register_material
+class OAK_SLAB(BlockItem):
+    name_id = "oak_slab"
+    name = "tile.woodSlab.name"
+    target_block_id = "oak_slab"
+
+
+@register_material
+class MYCELIUM(BlockItem):
+    name_id = "mycelium"
+    name = "tile.mycel.name"
+    target_block_id = "mycelium"
+
+
+@register_material
+class MUSHROOM_STEM(BlockItem):
+    name_id = "mushroom_stem"
+    name = "tile.mushroom.name"
+    target_block_id = "mushroom_stem"
+
+
+@register_material
+class RED_MUSHROOM_BLOCK(BlockItem):
+    name_id = "red_mushroom_block"
+    name = "tile.mushroom.name"
+    target_block_id = "red_mushroom_block"
+
+
+@register_material
+class BROWN_MUSHROOM_BLOCK(BlockItem):
+    name_id = "brown_mushroom_block"
+    name = "tile.mushroom.name"
+    target_block_id = "brown_mushroom_block"
+
+
+@register_material
+class SHORT_GRASS(PlantBlockItem):
+    name_id = "short_grass"
+    name = "tile.tallgrass.grass.name"
+    target_block_id = "short_grass"
+
+
+@register_material
+class TALL_GRASS(PlantBlockItem):
+    name_id = "tall_grass"
+    name = "tile.doublePlant.grass.name"
+    target_block_id = "tall_grass"
+
+
+@register_material
+class LARGE_FERN(PlantBlockItem):
+    name_id = "large_fern"
+    name = "tile.doublePlant.fern.name"
+    target_block_id = "large_fern"
+
+
+@register_material
+class SUNFLOWER(PlantBlockItem):
+    name_id = "sunflower"
+    name = "tile.doublePlant.sunflower.name"
+    target_block_id = "sunflower"
+
+
+@register_material
+class ROSE_BUSH(PlantBlockItem):
+    name_id = "rose_bush"
+    name = "tile.doublePlant.rose.name"
+    target_block_id = "rose_bush"
+
+
+@register_material
+class PEONY(PlantBlockItem):
+    name_id = "peony"
+    name = "tile.doublePlant.paeonia.name"
+    target_block_id = "peony"
+
+
+@register_material
+class LILAC(PlantBlockItem):
+    name_id = "lilac"
+    name = "tile.doublePlant.syringa.name"
+    target_block_id = "lilac"
+
+
+@register_material
+class POPPY(PlantBlockItem):
+    name_id = "poppy"
+    name = "tile.flower2.poppy.name"
+    target_block_id = "poppy"
+
+
+@register_material
+class DANDELION(PlantBlockItem):
+    name_id = "dandelion"
+    name = "tile.flower1.dandelion.name"
+    target_block_id = "dandelion"
+
+
+@register_material
+class SUGAR_CANE(PlantBlockItem):
+    name_id = "sugar_cane"
+    name = "tile.reeds.name"
+    target_block_id = "sugar_cane"
+
+
+@register_material
+class FERN(PlantBlockItem):
+    name_id = "fern"
+    name = "tile.tallgrass.fern.name"
+    target_block_id = "fern"
+
+
+@register_material
+class DEAD_BUSH(PlantBlockItem):
+    name_id = "dead_bush"
+    name = "tile.deadbush.name"
+    target_block_id = "dead_bush"
+
+
+@register_material
+class BROWN_MUSHROOM(PlantBlockItem):
+    name_id = "brown_mushroom"
+    name = "tile.mushroom.name"
+    target_block_id = "brown_mushroom"
+
+
+@register_material
+class RED_MUSHROOM(PlantBlockItem):
+    name_id = "red_mushroom"
+    name = "tile.mushroom.name"
+    target_block_id = "red_mushroom"
+
+
+@register_material
+class VINE(PlantBlockItem):
+    name_id = "vine"
+    name = "tile.vine.name"
+    target_block_id = "vine"
+
+
+@register_material
+class BLUE_ORCHID(PlantBlockItem):
+    name_id = "blue_orchid"
+    name = "tile.flower2.blueOrchid.name"
+    target_block_id = "blue_orchid"
+
+
+@register_material
+class ALLIUM(PlantBlockItem):
+    name_id = "allium"
+    name = "tile.flower2.allium.name"
+    target_block_id = "allium"
+
+
+@register_material
+class AZURE_BLUET(PlantBlockItem):
+    name_id = "azure_bluet"
+    name = "tile.flower2.houstonia.name"
+    target_block_id = "azure_bluet"
+
+
+@register_material
+class OXEYE_DAISY(PlantBlockItem):
+    name_id = "oxeye_daisy"
+    name = "tile.flower2.oxeyeDaisy.name"
+    target_block_id = "oxeye_daisy"
+
+
+@register_material
+class OAK_LEAVES(LeavesBlockItem):
+    name_id = "oak_leaves"
+    name = "tile.leaves.oak.name"
+    target_block_id = "oak_leaves"
+
+
+@register_material
+class BIRCH_LEAVES(LeavesBlockItem):
+    name_id = "birch_leaves"
+    name = "tile.leaves.birch.name"
+    target_block_id = "birch_leaves"
+
+
+@register_material
+class SPRUCE_LEAVES(LeavesBlockItem):
+    name_id = "spruce_leaves"
+    name = "tile.leaves.spruce.name"
+    target_block_id = "spruce_leaves"
+
+
+@register_material
+class JUNGLE_LEAVES(LeavesBlockItem):
+    name_id = "jungle_leaves"
+    name = "tile.leaves.jungle.name"
+    target_block_id = "jungle_leaves"
+
+
+@register_material
+class ACACIA_LEAVES(LeavesBlockItem):
+    name_id = "acacia_leaves"
+    name = "tile.leaves.acacia.name"
+    target_block_id = "acacia_leaves"
+
+
+@register_material
+class DARK_OAK_LEAVES(LeavesBlockItem):
+    name_id = "dark_oak_leaves"
+    name = "tile.leaves.big_oak.name"
+    target_block_id = "dark_oak_leaves"
+
+
+
+@register_material
 class APPLE(Food):
     name_id = "apple"
     name = "item.apple.name"
@@ -433,10 +954,10 @@ class SHEARS(DamageableItem):
 
 
 @register_material
-class WHITE_WOOL(Material):
+class WHITE_WOOL(BlockItem):
     name_id = "white_wool"
     name = "tile.cloth.white.name"
-    _texture_path = "blocks.wool_colored_white"
+    target_block_id = "white_wool"
 
 
 @register_material
@@ -1026,26 +1547,13 @@ class SNOWBALL(ThrowableMaterial):
     _texture_path = "items.snowball"
 
 
-_block_item_types: dict[str, type[BlockItem]] = {}
-
-
 def get_block_item(block):
+    """Return only an explicitly registered item form for ``block``."""
     block_id = getattr(block, "block_id", "air")
-    if block_id == "air":
+    material_type = _material_registry.get("minecraft", {}).get(block_id)
+    if material_type is None or not issubclass(material_type, BlockItem):
         return AIR()
-    item_type = _block_item_types.get(block_id)
-    if item_type is None:
-        item_type = type(
-            f"{block_id.title().replace('_', '')}Item",
-            (BlockItem,),
-            {
-                "name_id": block_id,
-                "name": getattr(block, "name", block_id),
-                "target_block_id": block_id,
-            },
-        )
-        _block_item_types[block_id] = item_type
-    return item_type()
+    return material_type()
 
 
 def get_material_by_id(material_id: str):
@@ -1057,22 +1565,16 @@ def get_material_by_id(material_id: str):
     material_type = _material_registry.get(namespace, {}).get(key)
     if material_type is not None:
         return material_type()
-    from src.server import blocks
-
-    if blocks.has_block_id(key):
-        return get_block_item(blocks.get_block_by_id(key))
-
-    if key.endswith("s") and blocks.has_block_id(key[:-1]):
-        return get_block_item(blocks.get_block_by_id(key[:-1]))
     return AIR()
 
 
 def get_creative_inventory_materials() -> tuple[Material, ...]:
-    """Build the unsplit creative catalogue from registered items and blocks.
+    """Build the unsplit creative catalogue from registered materials.
 
-    Registry aliases and blocks which already have a dedicated item are de-duplicated
-    by their resulting item id. Air is intentionally omitted because it represents an
-    empty stack rather than something the player can take.
+    Registry aliases are de-duplicated by their resulting item id. Air is
+    intentionally omitted because it represents an empty stack rather than
+    something the player can take. Blocks appear here only when their BlockItem
+    material was explicitly registered above.
     """
     result: list[Material] = []
     seen: set[str] = set()
@@ -1087,9 +1589,4 @@ def get_creative_inventory_materials() -> tuple[Material, ...]:
     for namespace in _material_registry.values():
         for material_type in namespace.values():
             append(material_type())
-
-    from src.server import blocks
-
-    for block_id in blocks.get_registered_block_ids():
-        append(get_material_by_id(block_id))
     return tuple(result)

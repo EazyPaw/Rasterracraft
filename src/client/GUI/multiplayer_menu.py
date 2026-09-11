@@ -22,7 +22,7 @@ class MultiplayerMenu(GUI):
         self._background_cache_key = None
 
         self.address_box = InputBox(
-            "",
+            "127.0.0.1",
             label=transkey("addServer.enterIp"),
             max_length=253,
             on_change=self._on_address_changed,
@@ -33,6 +33,7 @@ class MultiplayerMenu(GUI):
         )
         self.cancel_button = Button(transkey("gui.cancel"), self.back)
         self.buttons = [self.connect_button, self.cancel_button]
+        self._on_address_changed(self.address_box.text)
 
     def on_open(self):
         self.address_box.focus()

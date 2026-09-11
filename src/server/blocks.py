@@ -68,7 +68,8 @@ class AIR(Block):
 class TillableBlockMixin:
     till_sound = "item.hoe.till"
 
-    def accepts_item_use(self, material) -> bool:
+    @staticmethod
+    def accepts_item_use(material) -> bool:
         return getattr(material, "tool_type", None) == "hoe"
 
     def on_right_click(self, player) -> bool:
@@ -1925,6 +1926,13 @@ class FIRE(Block):
 
     def get_collision_box(self):
         return EMPTY
+
+@register_block
+class WHITE_WOOL(Block):
+    block_id = "white_wool"
+    name = "tile.cloth.white.name"
+    _texture_path = "blocks.wool_colored_white"
+    break_sound = 'dig.cloth'
 
 # class CHEST(Container):
 #     block_id = "chest"

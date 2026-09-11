@@ -767,9 +767,8 @@ class ItemStack:
     @client_method
     def get_gui_texture(self, gui_scale: float, client = None):
         """Return an icon sized and styled for an 18x18 GUI slot."""
-        is_block_item = isinstance(self.material, BlockItem)
-        scale = float(gui_scale) * (0.7 if is_block_item else 1.0)
-        return self.get_texture(scale, shadow=is_block_item, client=client)
+        scale = float(gui_scale) * self.material.texture_size
+        return self.get_texture(scale, shadow=self.material.texture_shadow, client=client)
 
     def get_lore(self) -> list[str | Text]:
         lore = []

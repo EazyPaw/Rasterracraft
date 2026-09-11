@@ -1,5 +1,6 @@
 import pygame
 
+from server.text import TextColor
 from src.client.GUI.button import Button
 from src.client.GUI.gui import GUI
 from src.server.text import Text
@@ -23,11 +24,12 @@ class DisconnectScreen(GUI):
         self._draw_background(width, height)
 
         title = self.render.client.resources_manager.get_translation_key(self.title_key)
+        title_text = Text(title, TextColor.GRAY)
         title_size = max(24, min(40, height // 25))
         reason_size = max(20, min(32, height // 30))
         title_width = self.render.get_font(title_size).size(title)[0]
         self.render.render_text(
-            title,
+            title_text,
             ((width - title_width) / 2, int(height * 0.38)),
             font_size=title_size,
             shadow=True,
