@@ -193,8 +193,6 @@ class Projectile(Entity, ABC):
             owner=shooter,
             **kwargs,
         )
-        if hasattr(shooter, 'motion'):
-            projectile.motion += shooter.motion
         projectile.x -= projectile.width * 0.5
         projectile.y -= projectile.height * 0.5
         projectile.shoot_from_rotation(
@@ -209,6 +207,17 @@ class Projectile(Entity, ABC):
         )
         projectile.x += projectile.motion.x / direction_length * 0.1
         projectile.y += projectile.motion.y / direction_length * 0.1
+        # 先确定发射方向与出生偏移，再叠加投掷者速度，避免被 shoot 覆盖。
+        motion = getattr(shooter, "motion", None)
+        if motion is not None:
+            projectile.motion.x += float(motion.x)
+            if not getattr(shooter, "on_ground", False):
+                projectile.motion.y += float(motion.y)
+        if projectile.motion.x or projectile.motion.y:
+            projectile.facing = 1 if projectile.motion.x >= 0.0 else 0
+            projectile.look_angle = math.degrees(
+                math.atan2(projectile.motion.y, projectile.motion.x)
+            )
         return projectile
 
     def get_synced_data(self) -> dict:
@@ -497,13 +506,13 @@ class Projectile(Entity, ABC):
         if callable(callback):
             callback(self, result)
         damage = max(0.0, float(self.impact_damage))
-        if damage > 0.0:
-            target.apply_damage(
-                damage,
-                self.damage_type,
-                source=owner or self,
-                knockback=self.get_impact_knockback(target),
-            )
+        target.apply_damage(
+            damage,
+            self.damage_type,
+            source=owner or self,
+            knockback=self.get_impact_knockback(target),
+            allow_zero_damage=True,
+        )
         return True
 
     def on_hit_block(self, result: ProjectileHitResult) -> bool:

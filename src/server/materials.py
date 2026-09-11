@@ -263,8 +263,37 @@ class FEATHER(Material):
     _texture_path = "items.feather"
 
 
+class ThrowableMaterial(Material):
+    """通过服务端实体注册表发射，并消耗真实物品堆叠。"""
+
+    def right_click(self, stack, holder, *, target=None, context=None) -> bool:
+        if stack is None or stack.is_empty() or getattr(holder, "health", 0) <= 0:
+            return False
+        mode = getattr(getattr(holder, "gamemode", None), "name_id", "survival")
+        if mode == "spectator":
+            return False
+
+        from src.server.entity_registry import get_entity_type
+
+        projectile_type = get_entity_type(self.name_id)
+        projectile = projectile_type.from_shooter(holder)
+        holder.world.spawn_entity(projectile)
+        if mode != "creative":
+            stack.reduce_amount(1)
+        server = getattr(holder.world, "server", None)
+        if server is not None:
+            server.broadcast_sound(
+                "random.bow",
+                float(holder.x) + float(holder.width) * 0.5,
+                float(holder.y)
+                + float(getattr(holder, "eye_height", holder.height * 0.85)),
+                int(getattr(holder, "z", 0)),
+            )
+        return True
+
+
 @register_material
-class EGG(Material):
+class EGG(ThrowableMaterial):
     name_id = "egg"
     name = "item.egg.name"
     _texture_path = "items.egg"
@@ -991,38 +1020,10 @@ class DIAMOND(Material):
 
 
 @register_material
-class SNOWBALL(Material):
+class SNOWBALL(ThrowableMaterial):
     name_id = "snowball"
     name = "item.snowball.name"
     _texture_path = "items.snowball"
-
-    def right_click(self, stack, holder, *, target=None, context=None) -> bool:
-        if stack is None or stack.is_empty() or getattr(holder, "health", 0) <= 0:
-            return False
-        if (
-            getattr(getattr(holder, "gamemode", None), "name_id", "survival")
-            == "spectator"
-        ):
-            return False
-
-        from src.server.entities.snow_ball import SnowBall
-
-        projectile = SnowBall.from_shooter(holder)
-        holder.world.spawn_entity(projectile)
-        mode = getattr(getattr(holder, "gamemode", None), "name_id", "survival")
-        if mode != "creative":
-            stack.reduce_amount(1)
-        server = getattr(holder.world, "server", None)
-        if server is not None:
-            server.broadcast_sound(
-                "random.bow",
-                float(holder.x) + float(holder.width) * 0.5,
-                float(holder.y)
-                + float(getattr(holder, "eye_height", holder.height * 0.85)),
-                int(getattr(holder, "z", 0)),
-            )
-        return True
-
 
 
 _block_item_types: dict[str, type[BlockItem]] = {}

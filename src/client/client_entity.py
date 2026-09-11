@@ -13,6 +13,7 @@ from src.server.entities.cow import CowSkeleton
 from src.server.entities.pig import PigSkeleton
 from src.server.entities.sheep import SheepSkeleton
 from src.server.entities.snow_ball import SnowBallSkeleton
+from src.server.entities.egg import EggSkeleton
 from src.server.blocks import get_block_by_id
 from src.server.item_class import ItemStack
 from src.server.location import Location, Vector
@@ -368,3 +369,5 @@ class ClientEntity:
             self.skeleton = PrimedTNTSkeleton(self)
         elif self.entity_id == "snowball":
             self.skeleton = SnowBallSkeleton(self)
+        elif self.entity_id == "egg":
+            self.skeleton = EggSkeleton(self)

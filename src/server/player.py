@@ -1114,7 +1114,8 @@ class Player(Entity):
         super().on_damage_applied(actual_damage, raw_damage, damage_type, source)
         if self.health <= 0 and self.blocking:
             self.clear_blocking(sync=True)
-        self.add_exhaustion(getattr(damage_type, "exhaustion", 0.0))
+        if actual_damage > 0.0:
+            self.add_exhaustion(getattr(damage_type, "exhaustion", 0.0))
         server = getattr(self.world, "server", None)
         if server is None:
             return

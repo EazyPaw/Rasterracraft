@@ -1332,12 +1332,19 @@ class Entity:
         damage_type: type[DamageType] = GENERIC,
         source=None,
         knockback: Vector | None = None,
+        *,
+        allow_zero_damage: bool = False,
     ) -> float:
         try:
-            raw_damage = max(0.0, float(amount))
+            raw_damage = float(amount)
         except (TypeError, ValueError):
             return 0.0
-        if raw_damage <= 0 or not self.can_take_damage(damage_type):
+        if (
+            not math.isfinite(raw_damage)
+            or raw_damage < 0.0
+            or (raw_damage == 0.0 and not allow_zero_damage)
+            or not self.can_take_damage(damage_type)
+        ):
             return 0.0
 
         if self.has_status_effect("fire_resistance") and self._damage_type_has_tag(
@@ -1359,7 +1366,12 @@ class Entity:
             self.last_hurt_damage = raw_damage
             self.hurt_time = 10
 
-        reduced_damage = self.modify_damage_for_armor(damage_to_process, damage_type)
+        # 零伤害命中仍会受击，但不磨损护甲或消耗吸收生命。
+        reduced_damage = (
+            self.modify_damage_for_armor(damage_to_process, damage_type)
+            if damage_to_process > 0.0
+            else 0.0
+        )
         resistance = self.get_status_effect("resistance")
         if resistance is not None and not self._damage_type_has_tag(
             damage_type, DamageTag.BYPASSES_EFFECTS
@@ -1371,7 +1383,7 @@ class Entity:
         old_health = float(self.health)
         self.health = max(0.0, old_health - reduced_damage)
         actual_damage = absorbed + old_health - self.health
-        if actual_damage <= 0:
+        if actual_damage <= 0 and not (allow_zero_damage and raw_damage == 0.0):
             return 0.0
 
         self.last_damage_type = damage_type
