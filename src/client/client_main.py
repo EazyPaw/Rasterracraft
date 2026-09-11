@@ -28,6 +28,7 @@ from src.client.particles import ParticleManager
 from src.client.resources_manager import ResourcesManager
 from src.server import save_manager
 from src.server.player_identity import player_uuid_from_name, random_player_name
+from src.protocol import SERVERBOUND, encode_payload, make_packet
 from src.server.server_main import Server
 from src.server.text import Text
 from src.server.utils import recv_exact, set_client
@@ -227,11 +228,9 @@ class Client:
                 break
 
     def _send_client_hello(self) -> None:
+        packet = encode_payload(make_packet("ClientHello", name=self.player_name), SERVERBOUND)
         payload = msgpack.packb(
-            {
-                "__class__": "ClientHello",
-                "name": self.player_name,
-            },
+            packet,
             use_bin_type=True,
         )
         with self._send_lock:
@@ -400,7 +399,7 @@ class Client:
     def on_chunk_loaded(self, rx: int) -> None:
         self.loaded_chunk_regions.add(int(rx))
         if self.client_player is not None:
-            self.sent_packet({"__class__": "ChunkReady", "rx": int(rx)})
+            self.sent_packet(make_packet("ChunkReady", rx=int(rx)))
         self._try_finish_world_loading()
 
     def handle_initial_world_complete(self, regions) -> None:
@@ -442,10 +441,7 @@ class Client:
             return
         if self.pending_teleport_id is not None:
             self.sent_packet(
-                {
-                    "__class__": "TeleportConfirm",
-                    "teleport_id": self.pending_teleport_id,
-                }
+                make_packet("TeleportConfirm", teleport_id=self.pending_teleport_id)
             )
             self.pending_teleport_id = None
 
@@ -777,7 +773,7 @@ class Client:
             return
         try:
             self.save_complete_event.clear()
-            self.sent_packet({"__class__": "ClientShutdown"})
+            self.sent_packet(make_packet("ClientShutdown"))
             self.save_complete_event.wait(timeout=timeout)
         except Exception:
             pass

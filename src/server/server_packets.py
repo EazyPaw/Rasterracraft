@@ -14,11 +14,30 @@ from src.server.item_class import EmptyItemStack
 from src.server.particles import ParticleEffect
 from src.server.player import Player
 from src.server.world_class import Chunk
+from src.protocol import (
+    CLIENTBOUND,
+    SERVERBOUND,
+    Packet,
+    PacketDecodeError,
+    PacketDispatcher,
+    decode_payload,
+    encode_payload,
+    make_packet,
+)
 
 
-def encode_packet(obj, obj_type, args) -> dict:
+def encode_packet(obj, obj_type=None, args=None) -> dict:
+    """Adapt gameplay objects and validate the clientbound contract once."""
+    return encode_payload(_encode_packet_object(obj, obj_type, args), CLIENTBOUND)
+
+
+def _encode_packet_object(obj, obj_type, args) -> Packet | dict:
     if args is None:
         args = []
+    if isinstance(obj, Packet):
+        return obj
+    if isinstance(obj, dict) and "__class__" in obj and obj_type in (None, "Forward"):
+        return obj
     if type(obj) == Chunk:
         return obj.to_dict()
     elif isinstance(obj, Player) and obj_type == "Teleport":
@@ -59,8 +78,6 @@ def encode_packet(obj, obj_type, args) -> dict:
             "__class__": "EntityRemove",
             "uuid": str(obj.uuid) if isinstance(obj, Entity) else str(obj["uuid"]),
         }
-    elif obj_type == "Forward":  # 转发给服务器内其它玩家
-        return obj
     elif isinstance(obj, ParticleEffect):
         return obj.to_packet()
     elif obj_type == "LightUpdate":
@@ -206,7 +223,7 @@ def _read_placement_context(
     )
 
 
-def _handle_right_click(packet: dict, player: Player) -> None:
+def _process_right_click(packet: dict, player: Player) -> None:
     if not _allow_action_this_tick(player, "right_click"):
         return
     if player.health <= 0:
@@ -288,399 +305,498 @@ def _allow_action_this_tick(player: Player, action: str) -> bool:
     return True
 
 
-def decode_packet(packet: dict, player: Player):
-    if "__class__" not in packet:
-        logging.warning("Received unknown packet")
-        logging.debug(packet)
+SERVER_PACKET_DISPATCHER = PacketDispatcher[Player](SERVERBOUND)
+
+
+def decode_packet(packet: dict, player: Player) -> None:
+    """Validate and dispatch one client-to-server packet."""
+    try:
+        decoded = decode_payload(packet, SERVERBOUND)
+        if getattr(player, "_disconnecting", False) and decoded.name != "DisconnectAck":
+            return
+        SERVER_PACKET_DISPATCHER.dispatch_packet(decoded, player)
+    except PacketDecodeError as exc:
+        logging.warning("Rejected serverbound packet: %s", exc)
+
+
+@SERVER_PACKET_DISPATCHER.handler("DisconnectAck")
+def _handle_disconnect_ack(packet: dict, player: Player) -> None:
+    player.world.server.acknowledge_disconnect(player)
+
+
+@SERVER_PACKET_DISPATCHER.handler("PlayerMove")
+def _handle_player_move(packet: dict, player: Player) -> None:
+    if player.is_awaiting_teleport_confirmation:
         return
-    if packet["__class__"] == "DisconnectAck":
-        player.world.server.acknowledge_disconnect(player)
+    if player.health <= 0:
         return
-    if getattr(player, "_disconnecting", False):
+    try:
+        new_x = float(packet.get("x"))
+        new_y = float(packet.get("y"))
+    except (TypeError, ValueError, OverflowError):
+        _reject_player_move(player)
         return
-    if packet["__class__"] == "PlayerMove":
-        # {
+    if not math.isfinite(new_x) or not math.isfinite(new_y):
+        _reject_player_move(player)
+        return
+    if not -64.0 <= new_y <= player.world.attribute.MAX_BUILD_HEIGHT + 64.0:
+        _reject_player_move(player)
+        return
+    destination_rx = int(new_x // 16)
+    if (
+        not player.world.is_chunk_loaded(destination_rx)
+        or destination_rx not in player.client_loaded_regions
+    ):
+        _reject_player_move(player)
+        return
 
-        # }
-
-        if player.is_awaiting_teleport_confirmation:
-            return
-        if player.health <= 0:
-            return
-        try:
-            new_x = float(packet.get("x"))
-            new_y = float(packet.get("y"))
-        except (TypeError, ValueError, OverflowError):
-            _reject_player_move(player)
-            return
-        if not math.isfinite(new_x) or not math.isfinite(new_y):
-            _reject_player_move(player)
-            return
-        if not -64.0 <= new_y <= player.world.attribute.MAX_BUILD_HEIGHT + 64.0:
-            _reject_player_move(player)
-            return
-        destination_rx = int(new_x // 16)
-        if (
-            not player.world.is_chunk_loaded(destination_rx)
-            or destination_rx not in player.client_loaded_regions
-        ):
-            _reject_player_move(player)
-            return
-
-        current_tick = int(getattr(player.world.server, "server_ticks", 0))
-        last_tick = int(getattr(player, "_last_move_tick", -1))
-        if last_tick == current_tick:
-            return
-        elapsed_ticks = 1 if last_tick < 0 else max(1, current_tick - last_tick)
-        mode = getattr(getattr(player, "gamemode", None), "name_id", "survival")
-        if mode == "creative" and player.flying:
-            movement_scale = max(1.0, player.get_attribute_value("flying_speed") / 0.4)
-        else:
-            movement_scale = max(
-                1.0, player.get_attribute_value("movement_speed") / 0.1
-            )
-
-        max_horizontal = (
-            (4.0 if mode == "creative" else 2.0) * movement_scale * elapsed_ticks
+    current_tick = int(getattr(player.world.server, "server_ticks", 0))
+    last_tick = int(getattr(player, "_last_move_tick", -1))
+    if last_tick == current_tick:
+        return
+    elapsed_ticks = 1 if last_tick < 0 else max(1, current_tick - last_tick)
+    mode = getattr(getattr(player, "gamemode", None), "name_id", "survival")
+    if mode == "creative" and player.flying:
+        movement_scale = max(1.0, player.get_attribute_value("flying_speed") / 0.4)
+    else:
+        movement_scale = max(
+            1.0, player.get_attribute_value("movement_speed") / 0.1
         )
-        max_vertical = (6.0 if mode == "creative" else 3.0) * elapsed_ticks
-        dx = new_x - player.x
-        dy = new_y - player.y
-        if abs(dx) > max_horizontal or abs(dy) > max_vertical:
-            _reject_player_move(player)
-            return
 
-        if player._check_collision_at(new_x, new_y) and not player._check_collision_at(
-            player.x, player.y
-        ):
-            _reject_player_move(player)
-            return
+    max_horizontal = (
+        (4.0 if mode == "creative" else 2.0) * movement_scale * elapsed_ticks
+    )
+    max_vertical = (6.0 if mode == "creative" else 3.0) * elapsed_ticks
+    dx = new_x - player.x
+    dy = new_y - player.y
+    if abs(dx) > max_horizontal or abs(dy) > max_vertical:
+        _reject_player_move(player)
+        return
 
-        previous_y = player.y
-        was_on_ground = bool(player.on_ground)
-        player.x = new_x
-        player.y = new_y
-        player.motion.x = dx
-        player.motion.y = dy
-        player.sneaking = packet.get("sneaking") is True
-        player.sprinting = (
-            not player.blocking
-            and packet.get("sprinting") is True
-            and (mode != "survival" or player.food_level > 6)
-        )
-        try:
-            facing = int(packet.get("facing", player.facing))
-        except (TypeError, ValueError):
-            facing = player.facing
-        if facing in (0, 1):
-            player.facing = facing
-        try:
-            look_angle = float(packet.get("look_angle", player.look_angle))
-        except (TypeError, ValueError, OverflowError):
-            look_angle = player.look_angle
-        if math.isfinite(look_angle):
-            player.look_angle = max(-45.0, min(80.0, look_angle))
-        player.flying = mode == "creative" and packet.get("flying") is True
-        player.in_fluid = bool(player._get_fluid_interaction()[0])
-        player.in_water = player.in_fluid
-        player.on_ground = bool(player._check_support_at())
-        player._last_move_tick = current_tick
-        player.record_server_movement(previous_y, was_on_ground, abs(dx))
-        player.on_moving()
+    if player._check_collision_at(new_x, new_y) and not player._check_collision_at(
+        player.x, player.y
+    ):
+        _reject_player_move(player)
+        return
+
+    previous_y = player.y
+    was_on_ground = bool(player.on_ground)
+    player.x = new_x
+    player.y = new_y
+    player.motion.x = dx
+    player.motion.y = dy
+    player.sneaking = packet.get("sneaking") is True
+    player.sprinting = (
+        not player.blocking
+        and packet.get("sprinting") is True
+        and (mode != "survival" or player.food_level > 6)
+    )
+    try:
+        facing = int(packet.get("facing", player.facing))
+    except (TypeError, ValueError):
+        facing = player.facing
+    if facing in (0, 1):
+        player.facing = facing
+    try:
+        look_angle = float(packet.get("look_angle", player.look_angle))
+    except (TypeError, ValueError, OverflowError):
+        look_angle = player.look_angle
+    if math.isfinite(look_angle):
+        player.look_angle = max(-45.0, min(80.0, look_angle))
+    player.flying = mode == "creative" and packet.get("flying") is True
+    player.in_fluid = bool(player._get_fluid_interaction()[0])
+    player.in_water = player.in_fluid
+    player.on_ground = bool(player._check_support_at())
+    player._last_move_tick = current_tick
+    player.record_server_movement(previous_y, was_on_ground, abs(dx))
+    player.on_moving()
+    forward_packet_to_others(player, player, mode="entity_update")
+
+
+@SERVER_PACKET_DISPATCHER.handler("TeleportConfirm")
+def _handle_teleport_confirm(packet: dict, player: Player) -> None:
+    player.confirm_teleport(packet.get("teleport_id"))
+
+
+@SERVER_PACKET_DISPATCHER.handler("ChunkReady")
+def _handle_chunk_ready(packet: dict, player: Player) -> None:
+    try:
+        rx = int(packet.get("rx"))
+    except (TypeError, ValueError):
+        return
+    if rx in player.loading_regions and rx in player.world.regions:
+        player.client_loaded_regions.add(rx)
+
+
+@SERVER_PACKET_DISPATCHER.handler("PlayerAction")
+def _handle_player_action(packet: dict, player: Player) -> None:
+    action = packet.get("action")
+    if action == "abort_breaking":
+        player.clear_breaking()
+        return
+    if action in {"continue_item_use", "continue_eating"}:
+        if player.blocking:
+            player.request_blocking()
+        elif player.eating:
+            player.request_eating()
+        return
+    if action in {"stop_item_use", "stop_eating"}:
+        player.clear_eating(sync=True)
+        player.clear_blocking(sync=True)
+        return
+    if action != "continue_breaking":
+        return
+    position = _read_block_position(packet)
+    if position is not None:
+        player.request_breaking(*position)
+
+
+@SERVER_PACKET_DISPATCHER.handler("BreakBlock")
+def _handle_break_block(packet: dict, player: Player) -> None:
+    position = _read_block_position(packet)
+    if position is not None:
+        player.finish_breaking(*position)
+
+
+@SERVER_PACKET_DISPATCHER.handler("RightClick")
+def _handle_right_click(packet: dict, player: Player) -> None:
+    _process_right_click(packet, player)
+
+
+@SERVER_PACKET_DISPATCHER.handler("PickupItem")
+def _handle_pickup_item(packet: dict, player: Player) -> None:
+    from src.server.entities.item import Item
+
+    entity = player.world.entities.get(str(packet.get("uuid", "")))
+    if isinstance(entity, Item):
+        entity.pick_up(player)
+
+
+@SERVER_PACKET_DISPATCHER.handler("AttackEntity")
+def _handle_attack_entity(packet: dict, player: Player) -> None:
+    target = _find_attack_target(player, packet.get("uuid", ""))
+    current_tick = int(getattr(player.world.server, "server_ticks", 0))
+    if (
+        target is not None
+        and current_tick != int(getattr(player, "_last_attack_tick", -1))
+        and _can_player_reach_entity(player, target)
+    ):
+        player._last_attack_tick = current_tick
+        player.clear_eating(sync=True)
+        player.clear_blocking(sync=True)
+        player.attack_animation_ticks = player.attack_animation_duration
+        player.attack(target)
         forward_packet_to_others(player, player, mode="entity_update")
-    elif packet["__class__"] == "TeleportConfirm":
-        player.confirm_teleport(packet.get("teleport_id"))
-    elif packet["__class__"] == "ChunkReady":
-        try:
-            rx = int(packet.get("rx"))
-        except (TypeError, ValueError):
-            return
-        if rx in player.loading_regions and rx in player.world.regions:
-            player.client_loaded_regions.add(rx)
-    elif packet["__class__"] == "PlayerAction":
-        action = packet.get("action")
-        if action == "abort_breaking":
-            player.clear_breaking()
-            return
-        if action in {"continue_item_use", "continue_eating"}:
-            if player.blocking:
-                player.request_blocking()
-            elif player.eating:
-                player.request_eating()
-            return
-        if action in {"stop_item_use", "stop_eating"}:
-            player.clear_eating(sync=True)
-            player.clear_blocking(sync=True)
-            return
-        if action != "continue_breaking":
-            return
-        position = _read_block_position(packet)
-        if position is not None:
-            player.request_breaking(*position)
 
-    elif packet["__class__"] == "BreakBlock":
-        position = _read_block_position(packet)
-        if position is not None:
-            player.finish_breaking(*position)
 
-    elif packet["__class__"] == "RightClick":
-        _handle_right_click(packet, player)
-
-    elif packet["__class__"] == "PickupItem":
-        from src.server.entities.item import Item
-
-        entity = player.world.entities.get(str(packet.get("uuid", "")))
-        if isinstance(entity, Item):
-            entity.pick_up(player)
-
-    elif packet["__class__"] == "AttackEntity":
-        target = _find_attack_target(player, packet.get("uuid", ""))
-        current_tick = int(getattr(player.world.server, "server_ticks", 0))
-        if (
-            target is not None
-            and current_tick != int(getattr(player, "_last_attack_tick", -1))
-            and _can_player_reach_entity(player, target)
-        ):
-            player._last_attack_tick = current_tick
-            player.clear_eating(sync=True)
-            player.clear_blocking(sync=True)
-            player.attack_animation_ticks = player.attack_animation_duration
-            player.attack(target)
+@SERVER_PACKET_DISPATCHER.handler("InteractEntity")
+def _handle_interact_entity(packet: dict, player: Player) -> None:
+    target = _find_attack_target(player, packet.get("uuid", ""))
+    if target is not None and _can_player_reach_entity(player, target):
+        slot = max(0, min(len(player.inventory) - 1, int(player.selected_slot)))
+        held = player.inventory[slot]
+        handled = bool(target.interact(player, held))
+        if handled:
+            player.apply_item_event(
+                held,
+                "on_successful_entity_interaction",
+                target,
+            )
+            player.sync_inventory()
+            player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
+            forward_packet_to_others(player, player, mode="entity_update")
+        elif player.use_held_item():
+            player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
             forward_packet_to_others(player, player, mode="entity_update")
 
-    elif packet["__class__"] == "InteractEntity":
-        target = _find_attack_target(player, packet.get("uuid", ""))
-        if target is not None and _can_player_reach_entity(player, target):
-            slot = max(0, min(len(player.inventory) - 1, int(player.selected_slot)))
-            held = player.inventory[slot]
-            handled = bool(target.interact(player, held))
-            if handled:
-                player.apply_item_event(
-                    held,
-                    "on_successful_entity_interaction",
-                    target,
-                )
-                player.sync_inventory()
-                player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
-                forward_packet_to_others(player, player, mode="entity_update")
-            elif player.use_held_item():
-                player.attack_animation_ticks = max(player.attack_animation_ticks, 6)
-                forward_packet_to_others(player, player, mode="entity_update")
 
-    elif packet["__class__"] == "SelfDamage":
+@SERVER_PACKET_DISPATCHER.handler("SelfDamage")
+def _handle_self_damage(packet: dict, player: Player) -> None:
+    return
+
+
+@SERVER_PACKET_DISPATCHER.handler("ChatMessage")
+def _handle_chat_message(packet: dict, player: Player) -> None:
+    # 客户端发送的聊天消息
+    text = packet.get("text", "")
+    # 截断过长消息（服务端防御）
+    if len(text) > 128:
+        text = text[:128]
+    # 以 "/" 开头的内容交由命令系统处理
+    if text.startswith("/"):
+        cmd_text = text[1:]
+        args = cmd_text.split()
+        if args:
+            server = player.world.server
+            try:
+                result = server.command_executor.execute_command(player, args)
+                # 检查是否为错误回显（§c 开头）
+                if isinstance(result, str) and result.startswith("§c"):
+                    color = (255, 85, 85)  # 红色
+                else:
+                    color = (255, 255, 255)  # 白色
+            except Exception:
+                result = f"§c命令执行错误: {cmd_text}"
+                color = (255, 85, 85)
+            # 回显仅发送给执行者
+            server.send_chat_to_player(player, result, color)
         return
+    # 普通聊天：广播给所有玩家
+    formatted = f"<{player.name}> {text}"
+    player.world.server.broadcast_chat(formatted, (255, 255, 255))
 
-    elif packet["__class__"] == "ChatMessage":
-        # 客户端发送的聊天消息
-        text = packet.get("text", "")
-        # 截断过长消息（服务端防御）
-        if len(text) > 128:
-            text = text[:128]
-        # 以 "/" 开头的内容交由命令系统处理
-        if text.startswith("/"):
-            cmd_text = text[1:]
-            args = cmd_text.split()
-            if args:
-                server = player.world.server
-                try:
-                    result = server.command_executor.execute_command(player, args)
-                    # 检查是否为错误回显（§c 开头）
-                    if isinstance(result, str) and result.startswith("§c"):
-                        color = (255, 85, 85)  # 红色
-                    else:
-                        color = (255, 255, 255)  # 白色
-                except Exception:
-                    result = f"§c命令执行错误: {cmd_text}"
-                    color = (255, 85, 85)
-                # 回显仅发送给执行者
-                server.send_chat_to_player(player, result, color)
-            return
-        # 普通聊天：广播给所有玩家
-        formatted = f"<{player.name}> {text}"
-        player.world.server.broadcast_chat(formatted, (255, 255, 255))
-    elif packet["__class__"] == "ClientShutdown":
-        for container in tuple(player.open_inventory_containers.values()):
-            furnace = getattr(container, "furnace", None)
-            if furnace is not None:
-                furnace.close_for(player)
-        player.world.server.save_all(player, force=True)
-        player.world.server.send_client_socket(
-            player, {"__class__": "SaveComplete"}, "Forward"
-        )
-    elif packet["__class__"] == "InventoryClick":
-        try:
-            player.inventory_click(int(packet.get("slot")), int(packet.get("button")))
-        except (TypeError, ValueError):
-            player.sync_inventory()
-    elif packet["__class__"] == "ContainerClick":
-        try:
-            player.container_click(
-                str(packet.get("container", "")),
-                packet.get("slot"),
-                int(packet.get("button")),
-            )
-        except (TypeError, ValueError, IndexError):
-            player.sync_inventory()
-    elif packet["__class__"] == "CloseFurnace":
-        container_id = str(packet.get("container", ""))
-        container = player.open_inventory_containers.get(container_id)
+
+@SERVER_PACKET_DISPATCHER.handler("ClientShutdown")
+def _handle_client_shutdown(packet: dict, player: Player) -> None:
+    for container in tuple(player.open_inventory_containers.values()):
         furnace = getattr(container, "furnace", None)
         if furnace is not None:
             furnace.close_for(player)
-    elif packet["__class__"] == "ContainerQuickMove":
-        try:
-            player.container_quick_move(
-                str(packet.get("container", "")),
-                packet.get("slot"),
-                screen=str(packet.get("screen", "inventory")),
-                crafting_size=int(packet.get("crafting_size", 4)),
-                all_matching=bool(packet.get("all_matching", False)),
-            )
-        except (TypeError, ValueError, IndexError):
-            player.sync_inventory()
-    elif packet["__class__"] == "ContainerSwap":
-        try:
-            player.container_swap(
-                str(packet.get("container", "")),
-                packet.get("slot"),
-                str(packet.get("target_container", "")),
-                packet.get("target_slot"),
-            )
-        except (TypeError, ValueError, IndexError):
-            player.sync_inventory()
-    elif packet["__class__"] == "ContainerDrop":
-        try:
-            player.drop_container(
-                str(packet.get("container", "inventory")),
-                packet.get("slot"),
-                cursor=bool(packet.get("cursor", False)),
-                amount=packet.get("amount"),
-            )
-        except (TypeError, ValueError, IndexError):
-            player.sync_inventory()
-    elif packet["__class__"] == "CreativeSetSlot":
-        if getattr(player.gamemode, "name_id", "survival") != "creative":
-            player.sync_inventory()
-            return
-        try:
-            item_payload = packet.get("item", packet)
-            item = payload_to_stack(item_payload)
-            item = EmptyItemStack() if item.is_empty() else item
-            if packet.get("target", "inventory") == "cursor":
-                player.cursor_stack = item
-            else:
-                slot = int(packet.get("slot"))
-                if not 0 <= slot < len(player.inventory):
-                    raise ValueError
-                player.inventory[slot] = item
-        except (TypeError, ValueError):
-            pass
+    player.world.server.save_all(player, force=True)
+    player.world.server.send_client_socket(
+        player, make_packet("SaveComplete")
+    )
+
+
+@SERVER_PACKET_DISPATCHER.handler("InventoryClick")
+def _handle_inventory_click(packet: dict, player: Player) -> None:
+    try:
+        player.inventory_click(int(packet.get("slot")), int(packet.get("button")))
+    except (TypeError, ValueError):
         player.sync_inventory()
-    elif packet["__class__"] == "CreativeClearInventory":
-        if getattr(player.gamemode, "name_id", "survival") != "creative":
-            player.sync_inventory()
-            return
-        for slot in range(len(player.inventory)):
-            player.inventory[slot] = EmptyItemStack()
-        for slot in player.equipment:
-            player.equipment[slot] = EmptyItemStack()
-        player._equipment_attribute_signature = None
-        player.sync_inventory()
-    elif packet["__class__"] == "InventoryDrag":
-        try:
-            button = int(packet.get("button"))
-        except (TypeError, ValueError):
-            button = 0
-        player.inventory_drag(packet.get("slots", []), button)
-    elif packet["__class__"] == "ContainerDrag":
-        try:
-            button = int(packet.get("button"))
-        except (TypeError, ValueError):
-            button = 0
-        player.container_drag(
+
+
+@SERVER_PACKET_DISPATCHER.handler("ContainerClick")
+def _handle_container_click(packet: dict, player: Player) -> None:
+    try:
+        player.container_click(
             str(packet.get("container", "")),
-            packet.get("slots", []),
-            button,
+            packet.get("slot"),
+            int(packet.get("button")),
         )
-    elif packet["__class__"] == "CraftingDrag":
-        try:
-            button = int(packet.get("button"))
-        except (TypeError, ValueError):
-            button = 0
-        player.crafting_drag(packet.get("slots", []), button)
-    elif packet["__class__"] == "InventoryDrop":
-        cursor = bool(packet.get("cursor", True))
-        slot = packet.get("slot")
-        try:
-            if not cursor:
-                slot = int(slot)
-                if not 0 <= slot < len(player.inventory):
-                    raise ValueError
-            amount = packet.get("amount")
-            player.drop_inventory(cursor=cursor, slot=slot, amount=amount)
-        except (TypeError, ValueError, IndexError):
-            player.sync_inventory()
-    elif packet["__class__"] == "InventoryResyncRequest":
+    except (TypeError, ValueError, IndexError):
         player.sync_inventory()
-    elif packet["__class__"] == "CraftingClick":
-        try:
-            player.crafting_click(int(packet.get("slot")), int(packet.get("button")))
-        except (TypeError, ValueError):
-            player.sync_inventory()
-    elif packet["__class__"] == "CraftingTake":
-        try:
-            width, height = int(packet.get("width", 2)), int(packet.get("height", 2))
-        except (TypeError, ValueError):
-            width, height = 2, 2
-        player.crafting_take(width, height)
-    elif packet["__class__"] == "CraftingQuickTake":
-        try:
-            width, height = int(packet.get("width", 2)), int(packet.get("height", 2))
-        except (TypeError, ValueError):
-            width, height = 2, 2
-        player.crafting_quick_take(width, height)
-    elif packet["__class__"] == "CraftingClose":
-        player.crafting_close()
-    elif packet["__class__"] == "SaveHotbar":
-        player.save_hotbar(packet.get("preset"))
-    elif packet["__class__"] == "LoadHotbar":
-        player.load_hotbar(packet.get("preset"))
-    elif packet["__class__"] == "SelectHotbarSlot":
-        old_slot = player.selected_slot
-        try:
-            player.selected_slot = max(0, min(8, int(packet.get("slot"))))
-        except (TypeError, ValueError):
-            pass
-        if player.selected_slot != old_slot:
-            player.clear_breaking()
-            player.clear_eating()
-            player.clear_blocking()
+
+
+@SERVER_PACKET_DISPATCHER.handler("CloseFurnace")
+def _handle_close_furnace(packet: dict, player: Player) -> None:
+    container_id = str(packet.get("container", ""))
+    container = player.open_inventory_containers.get(container_id)
+    furnace = getattr(container, "furnace", None)
+    if furnace is not None:
+        furnace.close_for(player)
+
+
+@SERVER_PACKET_DISPATCHER.handler("ContainerQuickMove")
+def _handle_container_quick_move(packet: dict, player: Player) -> None:
+    try:
+        player.container_quick_move(
+            str(packet.get("container", "")),
+            packet.get("slot"),
+            screen=str(packet.get("screen", "inventory")),
+            crafting_size=int(packet.get("crafting_size", 4)),
+            all_matching=bool(packet.get("all_matching", False)),
+        )
+    except (TypeError, ValueError, IndexError):
         player.sync_inventory()
-    elif packet["__class__"] == "RequestRespawn":
-        if player.health > 0:
-            return
-        player.clear_status_effects()
-        player.health = player.max_health
-        player.absorption_amount = 0.0
-        player.hurt_time = 0
-        player.last_hurt_damage = 0.0
-        player.last_damage_source = None
-        player.last_damage_type = None
-        player._death_handled = False
-        player.motion.x = 0.0
-        player.motion.y = 0.0
-        player.food_level = 20
-        player.saturation = 5.0
-        player.exhaustion = 0.0
-        player.food_tick_timer = 0
-        player.fall_distance = 0.0
-        player.score = 0
+
+
+@SERVER_PACKET_DISPATCHER.handler("ContainerSwap")
+def _handle_container_swap(packet: dict, player: Player) -> None:
+    try:
+        player.container_swap(
+            str(packet.get("container", "")),
+            packet.get("slot"),
+            str(packet.get("target_container", "")),
+            packet.get("target_slot"),
+        )
+    except (TypeError, ValueError, IndexError):
+        player.sync_inventory()
+
+
+@SERVER_PACKET_DISPATCHER.handler("ContainerDrop")
+def _handle_container_drop(packet: dict, player: Player) -> None:
+    try:
+        player.drop_container(
+            str(packet.get("container", "inventory")),
+            packet.get("slot"),
+            cursor=bool(packet.get("cursor", False)),
+            amount=packet.get("amount"),
+        )
+    except (TypeError, ValueError, IndexError):
+        player.sync_inventory()
+
+
+@SERVER_PACKET_DISPATCHER.handler("CreativeSetSlot")
+def _handle_creative_set_slot(packet: dict, player: Player) -> None:
+    if getattr(player.gamemode, "name_id", "survival") != "creative":
+        player.sync_inventory()
+        return
+    try:
+        item_payload = packet.get("item", packet)
+        item = payload_to_stack(item_payload)
+        item = EmptyItemStack() if item.is_empty() else item
+        if packet.get("target", "inventory") == "cursor":
+            player.cursor_stack = item
+        else:
+            slot = int(packet.get("slot"))
+            if not 0 <= slot < len(player.inventory):
+                raise ValueError
+            player.inventory[slot] = item
+    except (TypeError, ValueError):
+        pass
+    player.sync_inventory()
+
+
+@SERVER_PACKET_DISPATCHER.handler("CreativeClearInventory")
+def _handle_creative_clear_inventory(packet: dict, player: Player) -> None:
+    if getattr(player.gamemode, "name_id", "survival") != "creative":
+        player.sync_inventory()
+        return
+    for slot in range(len(player.inventory)):
+        player.inventory[slot] = EmptyItemStack()
+    for slot in player.equipment:
+        player.equipment[slot] = EmptyItemStack()
+    player._equipment_attribute_signature = None
+    player.sync_inventory()
+
+
+@SERVER_PACKET_DISPATCHER.handler("InventoryDrag")
+def _handle_inventory_drag(packet: dict, player: Player) -> None:
+    try:
+        button = int(packet.get("button"))
+    except (TypeError, ValueError):
+        button = 0
+    player.inventory_drag(packet.get("slots", []), button)
+
+
+@SERVER_PACKET_DISPATCHER.handler("ContainerDrag")
+def _handle_container_drag(packet: dict, player: Player) -> None:
+    try:
+        button = int(packet.get("button"))
+    except (TypeError, ValueError):
+        button = 0
+    player.container_drag(
+        str(packet.get("container", "")),
+        packet.get("slots", []),
+        button,
+    )
+
+
+@SERVER_PACKET_DISPATCHER.handler("CraftingDrag")
+def _handle_crafting_drag(packet: dict, player: Player) -> None:
+    try:
+        button = int(packet.get("button"))
+    except (TypeError, ValueError):
+        button = 0
+    player.crafting_drag(packet.get("slots", []), button)
+
+
+@SERVER_PACKET_DISPATCHER.handler("InventoryDrop")
+def _handle_inventory_drop(packet: dict, player: Player) -> None:
+    cursor = bool(packet.get("cursor", True))
+    slot = packet.get("slot")
+    try:
+        if not cursor:
+            slot = int(slot)
+            if not 0 <= slot < len(player.inventory):
+                raise ValueError
+        amount = packet.get("amount")
+        player.drop_inventory(cursor=cursor, slot=slot, amount=amount)
+    except (TypeError, ValueError, IndexError):
+        player.sync_inventory()
+
+
+@SERVER_PACKET_DISPATCHER.handler("InventoryResyncRequest")
+def _handle_inventory_resync_request(packet: dict, player: Player) -> None:
+    player.sync_inventory()
+
+
+@SERVER_PACKET_DISPATCHER.handler("CraftingClick")
+def _handle_crafting_click(packet: dict, player: Player) -> None:
+    try:
+        player.crafting_click(int(packet.get("slot")), int(packet.get("button")))
+    except (TypeError, ValueError):
+        player.sync_inventory()
+
+
+@SERVER_PACKET_DISPATCHER.handler("CraftingTake")
+def _handle_crafting_take(packet: dict, player: Player) -> None:
+    try:
+        width, height = int(packet.get("width", 2)), int(packet.get("height", 2))
+    except (TypeError, ValueError):
+        width, height = 2, 2
+    player.crafting_take(width, height)
+
+
+@SERVER_PACKET_DISPATCHER.handler("CraftingQuickTake")
+def _handle_crafting_quick_take(packet: dict, player: Player) -> None:
+    try:
+        width, height = int(packet.get("width", 2)), int(packet.get("height", 2))
+    except (TypeError, ValueError):
+        width, height = 2, 2
+    player.crafting_quick_take(width, height)
+
+
+@SERVER_PACKET_DISPATCHER.handler("CraftingClose")
+def _handle_crafting_close(packet: dict, player: Player) -> None:
+    player.crafting_close()
+
+
+@SERVER_PACKET_DISPATCHER.handler("SaveHotbar")
+def _handle_save_hotbar(packet: dict, player: Player) -> None:
+    player.save_hotbar(packet.get("preset"))
+
+
+@SERVER_PACKET_DISPATCHER.handler("LoadHotbar")
+def _handle_load_hotbar(packet: dict, player: Player) -> None:
+    player.load_hotbar(packet.get("preset"))
+
+
+@SERVER_PACKET_DISPATCHER.handler("SelectHotbarSlot")
+def _handle_select_hotbar_slot(packet: dict, player: Player) -> None:
+    old_slot = player.selected_slot
+    try:
+        player.selected_slot = max(0, min(8, int(packet.get("slot"))))
+    except (TypeError, ValueError):
+        pass
+    if player.selected_slot != old_slot:
         player.clear_breaking()
         player.clear_eating()
         player.clear_blocking()
-        block = player.world.find_top_block(player.spawn_point, 0)
-        if block is not None:
-            player.teleport_to(0.0, block.location.y + 1)
+    player.sync_inventory()
+
+
+@SERVER_PACKET_DISPATCHER.handler("RequestRespawn")
+def _handle_request_respawn(packet: dict, player: Player) -> None:
+    if player.health > 0:
+        return
+    player.clear_status_effects()
+    player.health = player.max_health
+    player.absorption_amount = 0.0
+    player.hurt_time = 0
+    player.last_hurt_damage = 0.0
+    player.last_damage_source = None
+    player.last_damage_type = None
+    player._death_handled = False
+    player.motion.x = 0.0
+    player.motion.y = 0.0
+    player.food_level = 20
+    player.saturation = 5.0
+    player.exhaustion = 0.0
+    player.food_tick_timer = 0
+    player.fall_distance = 0.0
+    player.score = 0
+    player.clear_breaking()
+    player.clear_eating()
+    player.clear_blocking()
+    block = player.world.find_top_block(player.spawn_point, 0)
+    if block is not None:
+        player.teleport_to(0.0, block.location.y + 1)
+
+
+# ClientHello is consumed before a Player exists in SocketServer.receive_client_hello.
+SERVER_PACKET_DISPATCHER.validate_handlers(exclude=("ClientHello",))
 
 
 def _send_light_updates_for_boundary(world, player, rx: int):

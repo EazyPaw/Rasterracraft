@@ -35,6 +35,7 @@ from src.server.server_packets import encode_packet, decode_packet
 from src.server.text import Text
 from src.server.utils import recv_exact, set_client, set_server
 from src.server.world_class import Weather, World, WorldAttribute
+from src.protocol import SERVERBOUND, decode_payload
 
 
 def _msgpack_default(value):
@@ -265,10 +266,8 @@ class Server:
             finally:
                 client_sock.settimeout(previous_timeout)
 
-            if (
-                not isinstance(packet, dict)
-                or packet.get("__class__") != "ClientHello"
-            ):
+            packet = decode_payload(packet, SERVERBOUND)
+            if packet.name != "ClientHello":
                 raise ValueError("Expected ClientHello")
             raw_name = str(packet.get("name", ""))
             player_name = "".join(
