@@ -26,6 +26,25 @@ if TYPE_CHECKING:
     from src.server.server_main import Server
 
 
+_COMMAND_REGISTRY: Dict[str, Callable] = {}
+
+
+def register_command(name: str):
+    """Register a ``CommandExecutor`` method under a command name."""
+    command_name = str(name).strip().lower()
+    if not command_name:
+        raise ValueError("Command name cannot be empty")
+
+    def decorator(handler: Callable):
+        existing = _COMMAND_REGISTRY.get(command_name)
+        if existing is not None and existing is not handler:
+            raise ValueError(f"Duplicate command registration: {command_name}")
+        _COMMAND_REGISTRY[command_name] = handler
+        return handler
+
+    return decorator
+
+
 class CommandExecutor:
     def __init__(self, server: "Server"):
         self.server = server
@@ -33,25 +52,8 @@ class CommandExecutor:
         self.commands_map: Dict[
             str, Callable[[List[str], Player | str], str | Text]
         ] = {
-            "regions": self.list_region,
-            "players": self.list_players,
-            "tp": self.teleport,
-            "exec": self.python_execute,
-            "setblock": self.set_block_c,
-            "say": self.say_command,
-            "fill": self.fill_command,
-            "time": self.time,
-            "weather": self.weather,
-            "gamemode": self.switch_gamemode,
-            "give": self.give_command,
-            "enchant": self.enchant_command,
-            "effect": self.effect_command,
-            "kick": self.kick_command,
-            "locate": self.locate_command,
-            "summon": self.summon_command,
-            "tps": self.tps_command,
-            "mspt": self.mspt_command,
-            "stop": self.stop_server,
+            name: handler.__get__(self, type(self))
+            for name, handler in _COMMAND_REGISTRY.items()
         }
 
     @staticmethod
@@ -70,6 +72,7 @@ class CommandExecutor:
                 return TextColor.YELLOW
         return TextColor.RED
 
+    @register_command("tps")
     def tps_command(self, args, executor: Player | str):
         if args:
             raise ValueError("Usage: /tps")
@@ -84,6 +87,7 @@ class CommandExecutor:
             )
         return message
 
+    @register_command("mspt")
     def mspt_command(self, args, executor: Player | str):
         if args:
             raise ValueError("Usage: /mspt")
@@ -105,6 +109,7 @@ class CommandExecutor:
                 )
         return message
 
+    @register_command("exec")
     def python_execute(self, args, executor: Player | str):
         """
         执行 Python 命令
@@ -120,10 +125,12 @@ class CommandExecutor:
         execution_time = end_time - start_time
         return f"Done in {execution_time * 1000} ms."
 
+    @register_command("stop")
     def stop_server(self, args, executor: Player | str):
         self.server.close_server()
         return "Stopping server.."
 
+    @register_command("gamemode")
     def switch_gamemode(self, args, executor: Player | str):
         if not isinstance(executor, Player) or len(args) != 1:
             raise ValueError("Usage: /gamemode <creative|survival>")
@@ -134,6 +141,7 @@ class CommandExecutor:
         self.server.send_client_socket(executor, executor, "GamemodeUpdate")
         return f"Gamemode is set to {gamemode.name_id}"
 
+    @register_command("give")
     def give_command(self, args, executor: Player | str):
         """
         /give <target> <item> [<count>]
@@ -197,6 +205,7 @@ class CommandExecutor:
             return False
         raise ValueError("hideParticles must be true or false")
 
+    @register_command("effect")
     def effect_command(self, args, executor: Player | str):
         """Execute Java-style ``/effect give`` and ``/effect clear``."""
         if isinstance(executor, Player) and not executor.is_operator:
@@ -284,6 +293,7 @@ class CommandExecutor:
             f"for {duration_text}"
         )
 
+    @register_command("enchant")
     def enchant_command(self, args, executor: Player | str):
         """Apply an enchantment to each target player's selected item."""
         if len(args) not in (2, 3):
@@ -327,6 +337,7 @@ class CommandExecutor:
             f"{enchantment.id} {level}"
         )
 
+    @register_command("kick")
     def kick_command(self, args, executor: Player | str):
         if not args:
             raise ValueError("Usage: /kick <target> [reason]")
@@ -342,6 +353,7 @@ class CommandExecutor:
                 kicked += 1
         return f"Kicked {kicked} player(s)"
 
+    @register_command("locate")
     def locate_command(self, args, executor: Player | str):
         if len(args) < 2 or args[0].lower() != "biome":
             raise ValueError("Usage: /locate biome <biome>")
@@ -402,6 +414,7 @@ class CommandExecutor:
             raise ValueError("Entity NBT must be a compound")
         return value
 
+    @register_command("summon")
     def summon_command(self, args, executor: Player | str):
         if not args:
             raise ValueError("Usage: /summon <entity> [<x> <y> <z>] [<nbt>]")
@@ -449,6 +462,7 @@ class CommandExecutor:
         world.spawn_entity(entity)
         return f"Summoned {entity_id} at ({entity.x:g}, {entity.y:g}, {entity.z})"
 
+    @register_command("time")
     def time(self, args, executor: Player | str):
         if args[0] == "add" and isinstance(executor, Player):
             executor.world.world_time += int(args[1])
@@ -461,6 +475,7 @@ class CommandExecutor:
         else:
             raise ValueError(f"Invalid args: {args}")
 
+    @register_command("weather")
     def weather(self, args, executor: Player | str):
         if not args or args[0].lower() == "query":
             world = (
@@ -490,14 +505,17 @@ class CommandExecutor:
         world.set_weather(Weather(state), duration_ticks)
         return f"Weather set to {state}"
 
+    @register_command("regions")
     def list_region(self, args, executor: Player | str):
         world_name = args[0]
         regions = str(self.server.worlds[world_name].regions)
         return f"{world_name} regions: {regions}"
 
+    @register_command("players")
     def list_players(self, args, executor: Player | str):
         return str((self.server.players[0].x, self.server.players[0].y))
 
+    @register_command("tp")
     def teleport(self, args, executor: Player | str):
         """
         tp 指令，模仿 Minecraft 的 tp 语法：
@@ -577,6 +595,7 @@ class CommandExecutor:
 
         return f"Teleported {len(targets)} entities to {target_location}"
 
+    @register_command("setblock")
     def set_block_c(self, args, executor: Player | str):
         """
         /setblock <x> <y> <z> <block>
@@ -607,6 +626,7 @@ class CommandExecutor:
         block.place_at(Location(world, x, y, z))
         return f"Block placed at {block.location}"
 
+    @register_command("say")
     def say_command(self, args, executor: Player | str):
         """广播消息给所有玩家（/say <message>）"""
         message = " ".join(args)
@@ -676,6 +696,7 @@ class CommandExecutor:
         else:
             return 0.0, 0.0, 0.0
 
+    @register_command("fill")
     def fill_command(self, args, executor: Player | str):
         """
         /fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [mode]
@@ -820,13 +841,13 @@ class CommandExecutor:
             except Exception as e:
                 if self.server.commands_error_traceback:
                     logging.error(
-                        f"§cError executing command: {cmd}\n{traceback.format_exc()}"
+                        f"Error executing command: {cmd}\n{traceback.format_exc()}"
                     )
                 else:
-                    logging.error(f"§cUnknown or invalid command: {cmd}\n{e}")
-                return f"§cUnknown or invalid command: {cmd}\n{e}"
+                    logging.error(f"Unknown or invalid command: {cmd}\n{e}")
+                return f"Unknown or invalid command: {cmd}\n{e}"
         else:
-            return f"§cUnknown or invalid command: {cmd}"
+            return f"Unknown or invalid command: {cmd}"
 
     def target_selector(
         self, input_str: str, executor: Player | str
