@@ -58,11 +58,34 @@ vec3 applyNightVision(vec3 color) {
         return color;
     }
 
-    float brightest = max(max(color.r, color.g), color.b);
-    vec3 normalized = color / max(brightest, 0.075);
-    vec3 lifted = mix(color, normalized, 0.72);
-    lifted *= vec3(0.96, 1.03, 0.94);
-    return mix(color, clamp(lifted, 0.0, 1.0), nightVisionStrength);
+    float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+
+    const float low  = 0.05;
+    const float high = 0.55;
+    float shadowMask = 1.0 - smoothstep(low, high, luma);
+
+    const float gamma = 0.70;
+    float liftedLuma = pow(max(luma, 0.0), gamma);
+
+    float gain = liftedLuma / max(luma, 1e-4);
+    gain = min(gain, 6.0);
+
+    vec3 brightened = color * gain;
+
+    const float satBoost = 1.25;
+    float brightenedLuma = dot(brightened, vec3(0.2126, 0.7152, 0.0722));
+    vec3 saturated = mix(vec3(brightenedLuma), brightened, satBoost);
+
+    brightened = mix(brightened, saturated, shadowMask);
+
+    vec3 lifted = mix(color, brightened, shadowMask);
+
+    vec3 tint = vec3(0.96, 1.03, 0.94);
+    lifted *= mix(vec3(1.0), tint, shadowMask);
+
+    lifted = clamp(lifted, 0.0, 1.0);
+
+    return mix(color, lifted, nightVisionStrength);
 }
 
 vec3 applyBlindness(vec3 color, vec2 uv) {
