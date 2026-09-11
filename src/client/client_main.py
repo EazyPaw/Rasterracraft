@@ -27,6 +27,7 @@ from src.client.GUI.death_screen import DeathScreen
 from src.client.particles import ParticleManager
 from src.client.resources_manager import ResourcesManager
 from src.server import save_manager
+from src.server.player_identity import player_uuid_from_name, random_player_name
 from src.server.server_main import Server
 from src.server.text import Text
 from src.server.utils import recv_exact, set_client
@@ -46,6 +47,13 @@ class Client:
 
         self.language = "en_US"
         self.fore_place_switch_mode = "switch"
+        self.under_dev = True
+        if '--notdev' in sys.argv:
+            self.under_dev = False
+        if self.under_dev:
+            logging.debug('client is under development mode.')
+        self.player_name = "Dev" if self.under_dev else random_player_name()
+        self.player_uuid = player_uuid_from_name(self.player_name)
 
         self.client_world = client_world.ClientWorld(self)
         self.render = render.Render(self)
@@ -106,8 +114,6 @@ class Client:
         self.render.show_gui(self.main_menu)
         self.game_thread.start()
         self.render.request_text_input(False)
-
-        self.under_dev = True
 
     def set_camera_mode(self, mode: CameraMode | str) -> None:
         """设置玩家镜头模式：``centered`` 或 ``mouse_lead``。"""
@@ -177,6 +183,16 @@ class Client:
                 )
             return
 
+        try:
+            self._send_client_hello()
+        except (ConnectionError, OSError) as e:
+            logging.error("Failed to send client identity: %s", e)
+            if self.socket_thread_running and not self.is_shutting_down:
+                self.show_disconnect(
+                    "connect.failed", self._format_connection_error(e)
+                )
+            return
+
         logging.info("Connected to server %s:%s", *self.connection_target)
         self.socket_connected.set()
         while self.socket_thread_running:
@@ -209,6 +225,17 @@ class Client:
                         "disconnect.lost", self._format_connection_error(e)
                     )
                 break
+
+    def _send_client_hello(self) -> None:
+        payload = msgpack.packb(
+            {
+                "__class__": "ClientHello",
+                "name": self.player_name,
+            },
+            use_bin_type=True,
+        )
+        with self._send_lock:
+            self.client_sock.sendall(struct.pack(">I", len(payload)) + payload)
 
     @staticmethod
     def _format_connection_error(error: BaseException | None) -> str:
@@ -363,6 +390,8 @@ class Client:
         ):
             self.render.close_gui(self.multiplayer_menu)
         self.client_player = ClientPlayer(self, self.current_game_mode)
+        self.client_player.uuid = self.player_uuid
+        self.client_player.name = self.player_name
         self._install_game_controls()
 
         self.loading_screen = LoadingScreen(self.render, loading_title_key)

@@ -15,7 +15,8 @@ from src.server.blocks import AIR, get_block_by_id
 from src.server.location import Location
 
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+PLAYER_DATA_FORMAT_VERSION = 1
 REGION_SIZE = 256
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SAVES_ROOT = PROJECT_ROOT / "saves"
@@ -102,6 +103,19 @@ def icon_path(save_id: str) -> Path:
     return save_path(save_id) / "icon.png"
 
 
+def normalize_player_uuid(value: str | uuid.UUID) -> str:
+    """Return the canonical filename-safe representation of a player UUID."""
+    return str(uuid.UUID(str(value)))
+
+
+def playerdata_path(save_id: str, player_uuid: str | uuid.UUID) -> Path:
+    return (
+        save_path(save_id)
+        / "playerdata"
+        / f"{normalize_player_uuid(player_uuid)}.msgpack"
+    )
+
+
 def _read_msgpack(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -135,6 +149,44 @@ def save_level(save_id: str, data: dict[str, Any]) -> None:
     _write_msgpack(level_path(save_id), data, compress=False)
 
 
+def load_player_data(
+    save_id: str, player_uuid: str | uuid.UUID
+) -> dict[str, Any] | None:
+    return _read_msgpack(playerdata_path(save_id, player_uuid))
+
+
+def save_player_data(
+    save_id: str, player_uuid: str | uuid.UUID, data: dict[str, Any]
+) -> None:
+    canonical_uuid = normalize_player_uuid(player_uuid)
+    data["format_version"] = PLAYER_DATA_FORMAT_VERSION
+    data["uuid"] = canonical_uuid
+    data["last_saved"] = _now()
+    _write_msgpack(playerdata_path(save_id, canonical_uuid), data, compress=False)
+
+
+def migrate_player_data(
+    save_id: str,
+    source_uuid: str | uuid.UUID,
+    target_uuid: str | uuid.UUID,
+) -> bool:
+    """Move one UUID profile to another without overwriting an existing profile."""
+    source_uuid = normalize_player_uuid(source_uuid)
+    target_uuid = normalize_player_uuid(target_uuid)
+    if source_uuid == target_uuid or load_player_data(save_id, target_uuid) is not None:
+        return False
+    data = load_player_data(save_id, source_uuid)
+    if data is None:
+        return False
+    save_player_data(save_id, target_uuid, data)
+    try:
+        playerdata_path(save_id, source_uuid).unlink()
+    except OSError:
+        # The target profile is already durable. A stale source copy is harmless.
+        pass
+    return True
+
+
 def create_save(
     display_name: str = "New World", *, version: str = "", game_mode: str = "survival"
 ) -> dict[str, Any]:
@@ -150,7 +202,6 @@ def create_save(
         "version": version,
         "game_mode": game_mode,
         "worlds": {},
-        "player": {"x": 0.0, "y": 100.0},
     }
     save_level(save_id, data)
     return data
@@ -172,7 +223,6 @@ def ensure_level(
         data.setdefault("version", version)
         data.setdefault("game_mode", game_mode)
         data.setdefault("worlds", {})
-        data.setdefault("player", {"x": 0.0, "y": 100.0})
         return data
 
     data = {
@@ -184,7 +234,6 @@ def ensure_level(
         "version": version,
         "game_mode": game_mode,
         "worlds": {},
-        "player": {"x": 0.0, "y": 100.0},
     }
     save_level(save_id, data)
     return data
@@ -209,7 +258,6 @@ def list_saves() -> list[dict[str, Any]]:
                 "version": "",
                 "game_mode": "unknown",
                 "worlds": {},
-                "player": {"x": 0.0, "y": 100.0},
             }
         data.setdefault("id", child.name)
         data["path"] = str(child)

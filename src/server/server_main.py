@@ -10,6 +10,7 @@ import time
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable
+from uuid import UUID
 
 import msgpack
 import numpy as np
@@ -29,6 +30,7 @@ from src.server.crafting import load_recipes
 from src.server.experience import total_experience_for_level
 from src.server.player import Player
 from src.server.performance import TickPerformanceMonitor
+from src.server.player_identity import player_uuid_from_name
 from src.server.server_packets import encode_packet, decode_packet
 from src.server.text import Text
 from src.server.utils import recv_exact, set_client, set_server
@@ -170,13 +172,36 @@ class Server:
                     self.server.reject_connection(client_sock, rejection_reason)
                     continue
 
-                spawn_x, spawn_y = self.server.get_player_spawn()
-                player = Player(spawn_x, spawn_y, self.server.worlds["overworld"])
+                try:
+                    player_uuid, player_name = self.receive_client_hello(client_sock)
+                except (ConnectionError, OSError, TypeError, ValueError) as exc:
+                    logging.warning(
+                        "Invalid client identity from %s: %s", client_addr, exc
+                    )
+                    self.server.reject_connection(
+                        client_sock, "Invalid client identity"
+                    )
+                    continue
+                if any(player.uuid == player_uuid for player in self.server.players):
+                    self.server.reject_connection(
+                        client_sock, "A player with this UUID is already connected"
+                    )
+                    continue
 
-                player.is_operator = bool(
+                is_main_player = bool(
                     self.server.integrated and not self.server.players
                 )
-                self.server.restore_player_state(player)
+                player_data = self.server.load_player_state(
+                    player_uuid, is_main_player=is_main_player
+                )
+                spawn_x, spawn_y = self.server.get_player_spawn(player_data)
+                player = Player(spawn_x, spawn_y, self.server.worlds["overworld"])
+                player.uuid = player_uuid
+                player.name = player_name
+                player.is_operator = is_main_player
+                self.server.restore_player_state(player, player_data)
+                # The current client's identity wins over an old display name in the profile.
+                player.name = player_name
                 self.connections[player] = (client_sock, client_addr)
                 self.send_locks[player] = threading.Lock()
                 self.server.players.append(player)
@@ -221,6 +246,38 @@ class Server:
                 )
                 client_thread.daemon = True
                 client_thread.start()
+
+        @staticmethod
+        def receive_client_hello(client_sock) -> tuple[UUID, str]:
+            previous_timeout = client_sock.gettimeout()
+            client_sock.settimeout(5.0)
+            try:
+                raw_len = recv_exact(client_sock, 4)
+                if not raw_len or len(raw_len) != 4:
+                    raise ConnectionError("Missing ClientHello length")
+                msg_len = struct.unpack(">I", raw_len)[0]
+                if not 0 < msg_len <= 4096:
+                    raise ValueError("Invalid ClientHello length")
+                raw_packet = recv_exact(client_sock, msg_len)
+                if not raw_packet or len(raw_packet) != msg_len:
+                    raise ConnectionError("Incomplete ClientHello")
+                packet = msgpack.unpackb(raw_packet, raw=False)
+            finally:
+                client_sock.settimeout(previous_timeout)
+
+            if (
+                not isinstance(packet, dict)
+                or packet.get("__class__") != "ClientHello"
+            ):
+                raise ValueError("Expected ClientHello")
+            raw_name = str(packet.get("name", ""))
+            player_name = "".join(
+                character for character in raw_name if character.isprintable()
+            ).strip()[:32]
+            if not player_name:
+                raise ValueError("Player name cannot be empty")
+            player_uuid = player_uuid_from_name(player_name)
+            return player_uuid, player_name
 
         def handle_client(self, client_sock, client_addr, player: Player):
             while True:
@@ -480,16 +537,74 @@ class Server:
         finish_section("autosave")
         self.last_tick_sections_ms = timings
 
-    def get_player_spawn(self) -> tuple[float, float]:
-        if not self.level_data:
-            return 0.0, 100.0
-        player_data = self.level_data.get("player", {})
+    def get_player_spawn(self, player_data: dict | None = None) -> tuple[float, float]:
+        if player_data is None and self.level_data:
+            legacy_data = self.level_data.get("player")
+            player_data = legacy_data if isinstance(legacy_data, dict) else None
+        player_data = player_data or {}
         return float(player_data.get("x", 0.0)), float(player_data.get("y", 100.0))
 
-    def restore_player_state(self, player: Player) -> None:
-        if not self.level_data:
+    def load_player_state(
+        self, player_uuid: UUID, *, is_main_player: bool = False
+    ) -> dict[str, Any] | None:
+        with self._save_lock:
+            return self._load_player_state_unlocked(
+                player_uuid, is_main_player=is_main_player
+            )
+
+    def _load_player_state_unlocked(
+        self, player_uuid: UUID, *, is_main_player: bool = False
+    ) -> dict[str, Any] | None:
+        if not self.save_id:
+            return None
+        canonical_uuid = save_manager.normalize_player_uuid(player_uuid)
+        data = save_manager.load_player_data(self.save_id, canonical_uuid)
+        if not is_main_player or self.level_data is None:
+            return data
+
+        old_uuid = self.level_data.get("main_player_uuid")
+        try:
+            old_uuid = (
+                save_manager.normalize_player_uuid(old_uuid) if old_uuid else None
+            )
+        except (TypeError, ValueError):
+            old_uuid = None
+
+        if data is None and old_uuid and old_uuid != canonical_uuid:
+            if save_manager.migrate_player_data(
+                self.save_id, old_uuid, canonical_uuid
+            ):
+                data = save_manager.load_player_data(self.save_id, canonical_uuid)
+
+        legacy_data = self.level_data.get("player")
+        if data is None and isinstance(legacy_data, dict):
+            data = dict(legacy_data)
+            save_manager.save_player_data(self.save_id, canonical_uuid, data)
+
+        self.level_data["main_player_uuid"] = canonical_uuid
+        self.level_data.pop("player", None)
+        save_manager.save_level(self.save_id, self.level_data)
+        return data
+
+    def restore_player_state(
+        self, player: Player, data: dict[str, Any] | None = None
+    ) -> None:
+        if data is None and self.level_data:
+            legacy_data = self.level_data.get("player")
+            data = legacy_data if isinstance(legacy_data, dict) else None
+        if not data:
             return
-        data = self.level_data.get("player", {})
+        world_id = str(data.get("world", self.main_world_id))
+        if world_id in self.worlds:
+            player.world = self.worlds[world_id]
+        player.x = float(data.get("x", player.x))
+        player.y = float(data.get("y", player.y))
+        if "z" in data:
+            player.z = int(data.get("z", 0))
+        motion = data.get("motion", {})
+        if isinstance(motion, dict):
+            player.motion.x = float(motion.get("x", 0.0))
+            player.motion.y = float(motion.get("y", 0.0))
         player.attributes.load_persistent_data(data.get("attributes", []))
         player.restore_status_effects(data.get("active_effects", []))
         player.health = max(
@@ -518,8 +633,29 @@ class Server:
         )
         player.score = max(0, int(data.get("score", player.experience_total)))
         player.normalize_experience_state()
+        player.facing = 1 if int(data.get("facing", player.facing)) == 1 else 0
+        player.look_angle = float(data.get("look_angle", player.look_angle))
+        player.on_ground = bool(data.get("on_ground", player.on_ground))
+        player.flying = bool(data.get("flying", player.flying))
+        player.sneaking = bool(data.get("sneaking", player.sneaking))
+        player.sprinting = bool(data.get("sprinting", player.sprinting))
+        player.fire_ticks = max(0, int(data.get("fire_ticks", player.fire_ticks)))
+        player.hurt_time = max(0, int(data.get("hurt_time", player.hurt_time)))
+        player.last_hurt_damage = max(
+            0.0, float(data.get("last_hurt_damage", player.last_hurt_damage))
+        )
+        player.fall_distance = max(
+            0.0, float(data.get("fall_distance", player.fall_distance))
+        )
+        player.take_xp_delay = max(
+            0, int(data.get("take_xp_delay", player.take_xp_delay))
+        )
+        if "spawn_point" in data:
+            player.spawn_point = data["spawn_point"]
         # 恢复玩家的游戏模式（优先读取玩家存档，回退到世界默认模式）
-        saved_gamemode = data.get("gamemode") or self.level_data.get("game_mode")
+        saved_gamemode = data.get("gamemode") or (
+            self.level_data.get("game_mode") if self.level_data else None
+        )
         if saved_gamemode:
             from src.client.game_mode import get_gamemode_by_id
 
@@ -556,7 +692,12 @@ class Server:
                     world,
                     set(world.regions.keys()) | world.get_active_entity_chunks(),
                 )
-            self._save_level_metadata(last_player)
+            players_to_save = list(self.players)
+            if last_player is not None and last_player not in players_to_save:
+                players_to_save.append(last_player)
+            for player in players_to_save:
+                self._save_player_state(player)
+            self._save_level_metadata()
             if force:
                 logging.info(f"Saved world '{self.save_id}'")
 
@@ -600,7 +741,7 @@ class Server:
                 logging.error(traceback.format_exc())
                 return False
 
-    def _save_level_metadata(self, last_player: Player | None = None):
+    def _save_level_metadata(self):
         if not self.save_id:
             return
         if self.level_data is None:
@@ -620,53 +761,71 @@ class Server:
             if legacy_entities:
                 world_meta["entities"] = legacy_entities
             worlds_meta[world.id_name] = world_meta
-        player = last_player
-        if player is None and self.players:
-            player = self.players[0]
-        if player is not None:
-            player.refresh_attribute_modifiers()
-            player_data = {
-                "x": float(player.x),
-                "y": float(player.y),
-                "health": float(player.health),
-                "absorption_amount": float(player.absorption_amount),
-                "attributes": player.attributes.to_persistent_data(),
-                "active_effects": [
-                    instance.to_dict(include_hidden=True)
-                    for instance in player.active_effects.values()
-                ],
-                "food_level": int(getattr(player, "food_level", 20)),
-                "saturation": float(getattr(player, "saturation", 5.0)),
-                "exhaustion": float(getattr(player, "exhaustion", 0.0)),
-                "food_tick_timer": int(getattr(player, "food_tick_timer", 0)),
-                "experience": int(getattr(player, "experience", 0)),
-                "experience_level": int(getattr(player, "experience_level", 0)),
-                "experience_total": int(getattr(player, "experience_total", 0)),
-                "score": int(getattr(player, "score", 0)),
-                "gamemode": player.gamemode.name_id
-                if hasattr(player.gamemode, "name_id")
-                else "survival",
-                "selected_slot": max(
-                    0, min(8, int(getattr(player, "selected_slot", 0)))
-                ),
-                "equipment": {
-                    slot: stack_to_payload(stack)
-                    for slot, stack in player.equipment.items()
-                },
-                "cursor": stack_to_payload(player.cursor_stack),
-                "inventory": normalize_inventory_payload(
-                    serialize_inventory(player.inventory)
-                ),
-                "crafting": normalize_inventory_payload(
-                    serialize_inventory(player.crafting_grid), 9
-                ),
-                "saved_hotbars": [
-                    normalize_inventory_payload(serialize_inventory(hotbar), 9)
-                    for hotbar in player.saved_hotbars
-                ],
-            }
-            self.level_data["player"] = player_data
         save_manager.save_level(self.save_id, self.level_data)
+
+    def _save_player_state(self, player: Player) -> None:
+        if not self.save_id:
+            return
+        player.refresh_attribute_modifiers()
+        player_data = {
+            "name": str(player.name),
+            "world": str(getattr(player.world, "id_name", self.main_world_id)),
+            "x": float(player.x),
+            "y": float(player.y),
+            "z": int(getattr(player, "z", 0)),
+            "motion": {
+                "x": float(player.motion.x),
+                "y": float(player.motion.y),
+            },
+            "facing": int(player.facing),
+            "look_angle": float(player.look_angle),
+            "on_ground": bool(player.on_ground),
+            "flying": bool(player.flying),
+            "sneaking": bool(player.sneaking),
+            "sprinting": bool(player.sprinting),
+            "fire_ticks": max(0, int(player.fire_ticks)),
+            "hurt_time": max(0, int(player.hurt_time)),
+            "last_hurt_damage": max(0.0, float(player.last_hurt_damage)),
+            "fall_distance": max(0.0, float(player.fall_distance)),
+            "take_xp_delay": max(0, int(player.take_xp_delay)),
+            "spawn_point": player.spawn_point,
+            "health": float(player.health),
+            "absorption_amount": float(player.absorption_amount),
+            "attributes": player.attributes.to_persistent_data(),
+            "active_effects": [
+                instance.to_dict(include_hidden=True)
+                for instance in player.active_effects.values()
+            ],
+            "food_level": int(getattr(player, "food_level", 20)),
+            "saturation": float(getattr(player, "saturation", 5.0)),
+            "exhaustion": float(getattr(player, "exhaustion", 0.0)),
+            "food_tick_timer": int(getattr(player, "food_tick_timer", 0)),
+            "experience": int(getattr(player, "experience", 0)),
+            "experience_level": int(getattr(player, "experience_level", 0)),
+            "experience_total": int(getattr(player, "experience_total", 0)),
+            "score": int(getattr(player, "score", 0)),
+            "gamemode": player.gamemode.name_id
+            if hasattr(player.gamemode, "name_id")
+            else "survival",
+            "selected_slot": max(
+                0, min(8, int(getattr(player, "selected_slot", 0)))
+            ),
+            "equipment": {
+                slot: stack_to_payload(stack) for slot, stack in player.equipment.items()
+            },
+            "cursor": stack_to_payload(player.cursor_stack),
+            "inventory": normalize_inventory_payload(
+                serialize_inventory(player.inventory)
+            ),
+            "crafting": normalize_inventory_payload(
+                serialize_inventory(player.crafting_grid), 9
+            ),
+            "saved_hotbars": [
+                normalize_inventory_payload(serialize_inventory(hotbar), 9)
+                for hotbar in player.saved_hotbars
+            ],
+        }
+        save_manager.save_player_data(self.save_id, player.uuid, player_data)
 
     def _resolve_chat_msg(self, msg, color=None):
         """解析聊天消息参数，统一处理 str 和 Text 对象。
