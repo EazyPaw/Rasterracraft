@@ -989,29 +989,23 @@ class Player(Entity):
             and self.y > previous_y
         ):
             self.add_exhaustion(0.2 if self.sprinting else 0.05)
-        if self.in_fluid or self.flying:
+        if self.in_water or self.flying:
             self.fall_distance = 0.0
+            return
+        if self.in_lava:
+            self.fall_distance *= 0.5
             return
         fallen = previous_y - self.y
         if fallen > 0:
             self.fall_distance += fallen
         if self.on_ground and not was_on_ground:
             landing_distance = self.fall_distance
-            position_corrected = self.on_landed(landing_distance)
+            impact_velocity = self.motion.y
+            position_corrected = self.on_landed(landing_distance, impact_velocity)
             if position_corrected:
                 self.teleport_to(self.x, self.y)
-            if getattr(
-                self.gamemode, "name_id", "survival"
-            ) == "survival" and landing_distance > self.get_attribute_value(
-                "safe_fall_distance"
-            ):
-                safe_distance = self.get_attribute_value("safe_fall_distance")
-                fall_damage = int(
-                    (landing_distance - safe_distance)
-                    * self.get_attribute_value("fall_damage_multiplier")
-                    + 0.999
-                )
-                self.apply_damage(fall_damage, FALL, source=None)
+            elif self.motion.y > 0.0 and self.motion.y != impact_velocity:
+                self.sync_velocity()
             self.fall_distance = 0.0
 
     def _tick_survival_state(self) -> None:
@@ -1154,17 +1148,39 @@ class Player(Entity):
                 self.attack_strength_ticker,
                 current_tick - self._last_attribute_attack_tick,
             )
+        was_sprinting = bool(self.sprinting)
         if amount is None:
-            strength = self.get_attack_strength_scale(0.5)
-            amount = self.get_attack_damage(target) * (0.2 + strength * strength * 0.8)
+            amount = self.get_attack_damage(target)
+        if knockback is None:
+            knockback = self.get_attack_knockback(
+                target, bonus_levels=1.0 if was_sprinting else 0.0
+            )
         self.attack_strength_ticker = 0
         self._last_attribute_attack_tick = current_tick
         actual_damage = super().attack(target, damage_type, amount, knockback)
         if actual_damage > 0:
+            if was_sprinting:
+                self.motion.x *= 0.6
+                self.sprinting = False
+                self.sync_velocity()
             self.add_exhaustion(0.1)
             held = self.inventory[self.selected_slot]
             self.apply_item_event(held, "on_post_hurt_enemy", target)
         return actual_damage
+
+    def sync_velocity(self) -> None:
+        server = getattr(self.world, "server", None)
+        if server is None:
+            return
+        server.send_client_socket(
+            self,
+            {
+                "__class__": "PlayerVelocity",
+                "motion": {"x": float(self.motion.x), "y": float(self.motion.y)},
+                "sprinting": bool(self.sprinting),
+            },
+            "Forward",
+        )
 
     def get_attack_strength_scale(self, partial_tick: float = 0.0) -> float:
         attack_speed = self.get_attribute_value("attack_speed")

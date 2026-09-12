@@ -49,14 +49,12 @@ class Entity:
         self.height = 1
 
         self.move_speed = 0.1
-        self.movement_acceleration = 0.098
         self.air_acceleration = 0.02
         self.air_friction = 0.91
         self.damping = self.air_friction
         self.gravity = 0.08
         self.drag_vertical = 0.98
 
-        self.fluid_move_speed_multiplier = 0.23
         self.fluid_horizontal_drag = 0.65
         self.fluid_vertical_drag = 0.65
         self.jump_height = 0.42
@@ -74,6 +72,9 @@ class Entity:
         self.removed = False
         self.in_fluid = False
         self.in_water = False
+        self.in_lava = False
+        self.fluid_type: str | None = None
+        self._active_fluid_block = None
         self.swimming_up = False
         self._jumped_this_tick = False
         self.fire_ticks = 0
@@ -744,17 +745,15 @@ class Entity:
             return None
 
     def _get_fluid_interaction(self) -> tuple[bool, float, float]:
-        min_x = math.floor(self.x)
-        max_x = math.floor(self.x + self.width)
-        min_y = math.floor(self.y)
-        max_y = math.floor(self.y + self.height)
+        epsilon = 0.001
+        min_x = math.floor(self.x + epsilon)
+        max_x = math.ceil(self.x + self.width - epsilon)
+        min_y = math.floor(self.y + epsilon)
+        max_y = math.ceil(self.y + self.height - epsilon)
+        samples: dict[str, dict[str, object]] = {}
 
-        flow_x = 0.0
-        flow_y = 0.0
-        touching = 0
-
-        for block_x in range(min_x, max_x + 1):
-            for block_y in range(min_y, max_y + 1):
+        for block_x in range(min_x, max_x):
+            for block_y in range(min_y, max_y):
                 block = self._get_block_at(block_x, block_y)
                 if not getattr(block, "is_fluid", False):
                     continue
@@ -764,23 +763,67 @@ class Entity:
                 if callable(height_getter):
                     height_ratio = height_getter()
                 fluid_top = block_y + max(0.0, min(1.0, height_ratio))
-                entity_top = self.y + self.height
-                if self.y >= fluid_top or entity_top <= block_y:
+                overlap = min(self.y + self.height - epsilon, fluid_top) - max(
+                    self.y + epsilon, float(block_y)
+                )
+                if overlap <= 0.0:
                     continue
 
-                touching += 1
+                fluid_id = str(getattr(block, "block_id", "fluid"))
+                sample = samples.setdefault(
+                    fluid_id,
+                    {"depth": 0.0, "flow_x": 0.0, "flow_y": 0.0, "block": block},
+                )
+                sample["depth"] = float(sample["depth"]) + overlap
                 vector_getter = getattr(block, "get_flow_vector", None)
                 if callable(vector_getter):
                     fx, fy = vector_getter()
-                    flow_x += fx
-                    flow_y += fy
+                    sample["flow_x"] = float(sample["flow_x"]) + float(fx)
+                    sample["flow_y"] = float(sample["flow_y"]) + float(fy)
 
-        if touching == 0:
+        if not samples:
+            self.fluid_type = None
+            self._active_fluid_block = None
+            self.in_water = False
+            self.in_lava = False
             return False, 0.0, 0.0
-        return True, flow_x / touching, flow_y / touching
+
+        fluid_id, sample = max(
+            samples.items(), key=lambda entry: float(entry[1]["depth"])
+        )
+        flow_x = float(sample["flow_x"])
+        flow_y = float(sample["flow_y"])
+        flow_length = math.hypot(flow_x, flow_y)
+        if flow_length > 1.0e-12:
+            flow_x /= flow_length
+            flow_y /= flow_length
+        self.fluid_type = fluid_id
+        self._active_fluid_block = sample["block"]
+        self.in_water = fluid_id == "water"
+        self.in_lava = fluid_id == "lava"
+        return True, flow_x, flow_y
 
     def _get_water_interaction(self) -> tuple[bool, float, float]:
-        return self._get_fluid_interaction()
+        touching, flow_x, flow_y = self._get_fluid_interaction()
+        return touching and self.in_water, flow_x, flow_y
+
+    def _iter_inside_blocks(self):
+        epsilon = 0.001
+        min_x = math.floor(self.x + epsilon)
+        max_x = math.ceil(self.x + self.width - epsilon)
+        min_y = math.floor(self.y + epsilon)
+        max_y = math.ceil(self.y + self.height - epsilon)
+        for block_x in range(min_x, max_x):
+            for block_y in range(min_y, max_y):
+                block = self._get_block_at(block_x, block_y, getattr(self, "z", 0))
+                if block is not None:
+                    yield block
+
+    def call_inside_block_hooks(self) -> None:
+        for block in self._iter_inside_blocks():
+            callback = getattr(block, "on_entity_inside", None)
+            if callable(callback):
+                callback(self)
 
     def get_ground_block(self):
         return self._get_block_at(self.x + self.width * 0.5, self.y - 0.05)
@@ -812,18 +855,32 @@ class Entity:
         self.on_ground = bool(self._check_support_at())
         return True
 
-    def on_landed(self, fall_distance: float) -> bool:
+    def on_landed(self, fall_distance: float, impact_velocity: float = 0.0) -> bool:
         ground = self.get_ground_block()
         location = getattr(ground, "location", None)
         if ground is None or location is None:
             return False
         world = location.world
         coordinates = int(location.x), int(location.y), int(location.z)
-        changed = ground.on_fallen_on(self, max(0.0, float(fall_distance)))
-        if not changed:
-            return False
+        changed = bool(ground.on_fallen_on(self, max(0.0, float(fall_distance))))
         replacement = world.get_block(*coordinates)
-        return self._resolve_landing_block_overlap(replacement)
+        replacement.on_landed(self, float(impact_velocity))
+        return changed and self._resolve_landing_block_overlap(replacement)
+
+    def cause_fall_damage(
+        self, fall_distance: float, damage_multiplier: float = 1.0
+    ) -> float:
+        safe_distance = self.get_attribute_value("safe_fall_distance")
+        damage = math.ceil(
+            max(0.0, float(fall_distance) - safe_distance)
+            * self.get_attribute_value("fall_damage_multiplier")
+            * max(0.0, float(damage_multiplier))
+        )
+        if damage <= 0:
+            return 0.0
+        from src.server.damange_type import FALL
+
+        return self.apply_damage(damage, FALL, source=None)
 
     def get_ground_friction(self) -> float:
         block = self.get_ground_block()
@@ -836,9 +893,6 @@ class Entity:
     def get_ground_jump_factor(self) -> float:
         block = self.get_ground_block()
         return float(getattr(block, "jump_factor", 1.0)) if block is not None else 1.0
-
-    def _is_player_like(self) -> bool:
-        return getattr(self, "entity_id", None) == "player" or hasattr(self, "client")
 
     def _check_collision_at(self, x: float, y: float) -> bool:
         min_x = math.floor(x) - 1
@@ -1049,7 +1103,15 @@ class Entity:
         actual_dy, collided_y = self._sweep_y(requested_dy)
         self.y += actual_dy
         if collided_y:
-            self.motion.y = 0
+            if requested_dy < 0.0:
+                ground = self.get_ground_block()
+                callback = getattr(ground, "on_landed", None)
+                if callable(callback):
+                    callback(self, requested_dy)
+                else:
+                    self.motion.y = 0.0
+            else:
+                self.motion.y = 0.0
 
         self.on_ground = (collided_y and requested_dy < 0) or self._check_support_at()
 
@@ -1109,24 +1171,9 @@ class Entity:
         if self.sprinting:
             multiplier *= 2.0 if self.flying else 1.0
         multiplier *= self.speed_factor
-        if self.in_fluid and not self.flying:
-            efficiency = self.get_attribute_value("water_movement_efficiency")
-            multiplier *= (
-                self.fluid_move_speed_multiplier
-                + (1.0 - self.fluid_move_speed_multiplier) * efficiency
-            )
         return multiplier
 
     def get_move_acceleration(self) -> float:
-
-        base = (
-            0.049
-            if self.flying
-            else (
-                self.movement_acceleration if self.on_ground else self.air_acceleration
-            )
-        )
-
         try:
             if self.flying:
                 speed_scale = max(0.0, self.get_attribute_value("flying_speed") / 0.4)
@@ -1134,7 +1181,25 @@ class Entity:
                 speed_scale = max(0.0, float(getattr(self, "move_speed", 0.1)) / 0.1)
         except (TypeError, ValueError):
             speed_scale = 1.0
-        base *= speed_scale
+
+        if self.flying:
+            base = 0.049 * speed_scale
+        elif self.in_fluid:
+            base = float(
+                getattr(self._active_fluid_block, "entity_move_acceleration", 0.02)
+            )
+            if self.in_water:
+                efficiency = self.get_attribute_value("water_movement_efficiency")
+                if not self.on_ground:
+                    efficiency *= 0.5
+                base += (float(getattr(self, "move_speed", 0.1)) - base) * efficiency
+        elif self.on_ground:
+            slipperiness = max(1.0e-6, self.get_ground_friction() * self.air_friction)
+            base = float(getattr(self, "move_speed", 0.1)) * 0.16277136 / (
+                slipperiness * slipperiness * slipperiness
+            )
+        else:
+            base = self.air_acceleration * speed_scale
 
         block_factor = 1.0
         if self.on_ground and not self.flying and not self.in_fluid:
@@ -1153,20 +1218,19 @@ class Entity:
         self.motion.y -= self.gravity
 
     def jump(self):
-        if self.on_ground:
-            self.motion.y = self.jump_height * self.get_ground_jump_factor()
-            self._jumped_this_tick = True
-        elif self.flying:
+        if self.flying:
             self.motion += Vector(0, self.jump_height * 1.5)
         elif self._get_fluid_interaction()[0]:
             self.swimming_up = True
-            self.motion.y = max(self.motion.y, self.jump_height * 0.08)
+        elif self.on_ground:
+            self.motion.y = self.jump_height * self.get_ground_jump_factor()
+            self._jumped_this_tick = True
 
     def handle_shift(self):
         if self.flying:
             self.motion -= Vector(0, self.jump_height * 1.5)
         elif self._get_fluid_interaction()[0]:
-            self.motion.y -= self.jump_height * 0.2
+            self.motion.y -= 0.04
 
     def switch_sprint(self, mode=None):
         if mode is None:
@@ -1179,7 +1243,18 @@ class Entity:
             self.damping = self.air_friction
             return
         if self.in_fluid:
-            self.damping = self.fluid_horizontal_drag
+            self.damping = float(
+                getattr(
+                    self._active_fluid_block,
+                    "entity_horizontal_drag",
+                    self.fluid_horizontal_drag,
+                )
+            )
+            if self.in_water:
+                efficiency = self.get_attribute_value("water_movement_efficiency")
+                if not self.on_ground:
+                    efficiency *= 0.5
+                self.damping += (0.54600006 - self.damping) * efficiency
             return
 
         block_below = self.get_ground_block()
@@ -1194,34 +1269,40 @@ class Entity:
 
     def move_update(self):
         self.in_fluid, flow_x, flow_y = self._get_fluid_interaction()
-        self.in_water = self.in_fluid
         if self.flying:
             self.motion.y *= 0.5
             if abs(self.motion.y) < 0.1:
                 self.motion.y = 0
         elif self.in_fluid:
-            self.motion.x += flow_x * 0.018
-            self.motion.y += flow_y * 0.018
-            if self._is_player_like():
-                if self.swimming_up:
-                    self.motion.y += self.jump_height * 0.035
-                else:
-                    self.motion.y -= self.gravity * 0.08
-            else:
-                self.motion.y -= self.gravity * 0.2
-            if not self._is_player_like() and self.motion.y < 0.04:
-                self.motion.y += 0.025
-        elif not self._jumped_this_tick:
-            self.handle_gravity()
+            current_push = float(
+                getattr(self._active_fluid_block, "entity_current_push", 0.014)
+            )
+            self.motion.x += flow_x * current_push
+            self.motion.y += flow_y * current_push
+            if self.swimming_up:
+                self.motion.y += 0.04
 
         if self.on_ground:
             self.flying = False
 
         self.collision_check(steps=4)
+        self.call_inside_block_hooks()
 
-        self.motion.y *= (
-            self.fluid_vertical_drag if self.in_fluid else self.drag_vertical
-        )
+        if self.in_fluid and not self.flying:
+            self.motion.y *= float(
+                getattr(
+                    self._active_fluid_block,
+                    "entity_vertical_drag",
+                    self.fluid_vertical_drag,
+                )
+            )
+            self.motion.y -= float(
+                getattr(self._active_fluid_block, "entity_gravity", 0.02)
+            )
+        else:
+            if not self.flying:
+                self.handle_gravity()
+            self.motion.y *= self.drag_vertical
         self.update_damping()
         self.motion.x *= self.damping
         if abs(self.motion.x) < 0.001:
@@ -1320,16 +1401,41 @@ class Entity:
         except (TypeError, ValueError):
             return max(0.0, float(damage))
 
-    def apply_knockback(self, knockback: Vector) -> None:
+    def apply_knockback(
+        self,
+        knockback: Vector,
+        *,
+        minecraft_18_melee: bool = False,
+        minecraft_18_base: bool = True,
+    ) -> bool:
         if not isinstance(knockback, Vector):
             raise TypeError("knockback must be a Vector")
         resistance = max(
             0.0,
             min(1.0, self.get_attribute_value("knockback_resistance")),
         )
-        adjusted = knockback * (1.0 - resistance)
-        self.motion.x += adjusted.x
-        self.motion.y = max(self.motion.y, adjusted.y)
+        if minecraft_18_melee:
+            # 1.8.9 LivingEntity.knockBack halves existing velocity before
+            # adding the base impulse. The later sprint/enchantment addVelocity
+            # bonus is deliberately separate and is not resistance-gated.
+            horizontal_sign = 1.0 if knockback.x >= 0.0 else -1.0
+            base_horizontal = horizontal_sign * min(0.4, abs(knockback.x))
+            bonus_horizontal = knockback.x - base_horizontal
+            base_vertical = max(-0.4, min(0.4, knockback.y))
+            bonus_vertical = max(0.0, knockback.y - 0.4)
+            applied = False
+            if minecraft_18_base and random.random() >= resistance:
+                self.motion.x = self.motion.x * 0.5 + base_horizontal
+                self.motion.y = min(0.4, self.motion.y * 0.5 + base_vertical)
+                applied = True
+            self.motion.x += bonus_horizontal
+            self.motion.y += bonus_vertical
+            return applied or bool(bonus_horizontal or bonus_vertical)
+        else:
+            adjusted = knockback * (1.0 - resistance)
+            self.motion.x += adjusted.x
+            self.motion.y = max(self.motion.y, adjusted.y)
+        return True
 
     def apply_damage(
         self,
@@ -1394,7 +1500,11 @@ class Entity:
         self.last_damage_type = damage_type
         self.last_damage_source = source
         if knockback is not None:
-            self.apply_knockback(knockback)
+            self.apply_knockback(
+                knockback,
+                minecraft_18_melee=damage_type in {PLAYER_ATTACK, MOB_ATTACK},
+                minecraft_18_base=not already_hurt,
+            )
         self.on_damage_applied(actual_damage, raw_damage, damage_type, source)
         return actual_damage
 
@@ -1426,14 +1536,19 @@ class Entity:
     def get_attack_damage(self, target=None) -> float:
         return max(0.0, float(getattr(self, "attack_damage", 1.0)))
 
-    def get_attack_knockback(self, target) -> Vector:
+    def get_attack_knockback(self, target, bonus_levels: float = 0.0) -> Vector:
         source_center = self.x + self.width * 0.5
         target_center = target.x + target.width * 0.5
         delta_x = target_center - source_center
         if abs(delta_x) < 1e-8:
             delta_x = 1.0 if int(getattr(self, "facing", 1)) == 1 else -1.0
-        strength = 0.4 + self.get_attribute_value("attack_knockback")
-        return Vector(strength if delta_x > 0 else -strength, 0.2)
+        bonus = max(
+            0.0,
+            float(bonus_levels) + self.get_attribute_value("attack_knockback"),
+        )
+        strength = 0.4 + bonus * 0.5
+        vertical = 0.4 + (0.1 if bonus else 0.0)
+        return Vector(strength if delta_x > 0 else -strength, vertical)
 
     def attack(
         self,

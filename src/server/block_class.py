@@ -361,8 +361,19 @@ class Block(ABC):
     def on_left_click(self, player) -> bool:
         return False
 
+    def on_entity_inside(self, entity) -> None:
+        """Called once per tick while an entity's bounds overlap this block."""
+
     def on_fallen_on(self, entity, fall_distance: float) -> bool:
+        """Handle fall effects; return true only if this block changed shape/state."""
+        cause_fall_damage = getattr(entity, "cause_fall_damage", None)
+        if callable(cause_fall_damage):
+            cause_fall_damage(fall_distance, 1.0)
         return False
+
+    def on_landed(self, entity, impact_velocity: float) -> None:
+        """Update vertical movement after landing; override for bounce blocks."""
+        entity.motion.y = 0.0
 
     def notify_state_changed(self) -> None:
         if self.location is None:
@@ -415,6 +426,14 @@ class FluidBlock(Block):
     light_attenuation = 1
     has_transparent_pixels = True
     is_fluid = True
+
+    # Minecraft 1.8 living-entity travel constants.  Individual fluids may
+    # override these without adding fluid-specific branches to Entity.
+    entity_move_acceleration = 0.02
+    entity_horizontal_drag = 0.8
+    entity_vertical_drag = 0.8
+    entity_gravity = 0.02
+    entity_current_push = 0.014
 
     _flow_texture_path = None
 

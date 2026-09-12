@@ -412,9 +412,9 @@ def _handle_player_move(packet: dict, player: Player) -> None:
         player.look_angle = max(-45.0, min(80.0, look_angle))
     player.flying = mode == "creative" and packet.get("flying") is True
     player.in_fluid = bool(player._get_fluid_interaction()[0])
-    player.in_water = player.in_fluid
     player.on_ground = bool(player._check_support_at())
     player._last_move_tick = current_tick
+    player.call_inside_block_hooks()
     player.record_server_movement(previous_y, was_on_ground, abs(dx))
     player.on_moving()
     forward_packet_to_others(player, player, mode="entity_update")

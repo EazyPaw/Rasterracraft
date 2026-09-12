@@ -512,6 +512,8 @@ def _handle_player_velocity(packet: dict, client: "Client") -> None:
         motion = packet.get("motion", {})
         player.motion.x = float(motion.get("x", player.motion.x))
         player.motion.y = float(motion.get("y", player.motion.y))
+        if "sprinting" in packet:
+            player.sprinting = packet.get("sprinting") is True
 
 
 @CLIENT_PACKET_DISPATCHER.handler("Experience")

@@ -407,6 +407,7 @@ class FARMLAND(Block):
             world.set_block(DIRT(), self.location)
 
     def on_fallen_on(self, entity, fall_distance: float) -> bool:
+        super().on_fallen_on(entity, fall_distance)
         volume = float(getattr(entity, "width", 0.0)) ** 2 * float(
             getattr(entity, "height", 0.0)
         )
@@ -2128,6 +2129,11 @@ class LAVA(FluidBlock):
     flow_speed_ticks = 30
     flowing_sound = "liquid.lava"
     source_sound = "liquid.lavapop"
+    entity_horizontal_drag = 0.5
+    entity_vertical_drag = 0.5
+    # 1.8.9 applies water currents through handleMaterialAcceleration, while
+    # lava travel only uses its movement acceleration, drag and gravity.
+    entity_current_push = 0.0
 
 
 @register_block
