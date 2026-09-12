@@ -24,6 +24,7 @@ from src.client.GUI.saves_menu import SavesMenu
 from src.client.GUI.loading_screen import LoadingScreen
 from src.client.GUI.disconnect_screen import DisconnectScreen
 from src.client.GUI.death_screen import DeathScreen
+from src.client.GUI.debug_exec import DebugExecGUI
 from src.client.particles import ParticleManager
 from src.client.resources_manager import ResourcesManager
 from src.server import save_manager
@@ -483,6 +484,15 @@ class Client:
         self.capture_save_icon()
         self.render.show_gui(PauseMenu(self.render))
 
+    def open_debug_exec(self):
+        """Open the developer Python executor, if development mode is enabled."""
+        if not self.under_dev:
+            return
+        for gui in self.render.drawing_GUIs:
+            if isinstance(gui, DebugExecGUI):
+                return
+        self.render.show_gui(DebugExecGUI(self.render))
+
     def show_death_screen(
         self, death_message: dict | None = None, *, score: int | None = None
     ) -> None:
@@ -590,6 +600,8 @@ class Client:
                 pygame.K_e: self.client_player.game_mode.open_inventory,
                 pygame.K_LCTRL: self.client_player.switch_sprint,
             }
+            if self.under_dev:
+                self.key_map[pygame.K_F8] = self.open_debug_exec
             if self.fore_place_switch_mode == "switch":
                 self.key_map[pygame.K_q] = lambda: setattr(
                     self.client_player, "fore_place", not self.client_player.fore_place

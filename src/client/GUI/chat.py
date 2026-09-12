@@ -11,6 +11,7 @@ import time
 
 import pygame
 
+from src.client.GUI.clipboard import get_clipboard_text
 from src.client.GUI.gui import GUI
 from src.server.text import Text
 
@@ -207,6 +208,8 @@ class ChatGUI(GUI):
 
             elif event.type == pygame.KEYDOWN:
                 if not self.is_open:
+                    if self.render.client.game_manager.ing_mouse_lock > 0:
+                        continue
                     if event.key in (
                         pygame.K_t,
                         pygame.K_SLASH,
@@ -331,50 +334,7 @@ class ChatGUI(GUI):
     @staticmethod
     def _get_clipboard_text() -> str | None:
         """从系统剪贴板获取文本，多级回退方案。"""
-        # 方案 1: pygame.scrap（跨平台但需 SDL 初始化支持）
-        try:
-            if not pygame.scrap.get_init():
-                pygame.scrap.init()
-            clip = pygame.scrap.get(pygame.SCRAP_TEXT)
-            if clip:
-                return clip.decode("utf-8")
-        except Exception:
-            pass
-
-        # 方案 2: Windows 剪贴板 API（ctypes 直调 Win32）
-        try:
-            import ctypes
-
-            CF_UNICODETEXT = 13
-            user32 = ctypes.windll.user32
-            kernel32 = ctypes.windll.kernel32
-            if user32.OpenClipboard(0):
-                if user32.IsClipboardFormatAvailable(CF_UNICODETEXT):
-                    h_mem = user32.GetClipboardData(CF_UNICODETEXT)
-                    if h_mem:
-                        p_str = kernel32.GlobalLock(h_mem)
-                        if p_str:
-                            text = ctypes.wstring_at(p_str)
-                            kernel32.GlobalUnlock(h_mem)
-                            user32.CloseClipboard()
-                            return text
-                user32.CloseClipboard()
-        except Exception:
-            pass
-
-        # 方案 3: tkinter（最后手段，跨平台但会短暂创建窗口）
-        try:
-            import tkinter as tk
-
-            root = tk.Tk()
-            root.withdraw()
-            text = root.clipboard_get()
-            root.destroy()
-            return text
-        except Exception:
-            pass
-
-        return None
+        return get_clipboard_text()
 
     @staticmethod
     def _set_clipboard_text(text: str):

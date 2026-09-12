@@ -8,6 +8,8 @@ from collections.abc import Callable
 
 import pygame
 
+from src.client.GUI.clipboard import get_clipboard_text, sanitize_single_line
+
 
 class InputBox:
     """Minecraft 风格的单行文本输入框。
@@ -157,7 +159,7 @@ class InputBox:
         self._cursor_visible = True
         request = getattr(self._render, "request_text_input", None)
         if callable(request):
-            request(True)
+            request(True, repeat=(400, 30))
 
     def blur(self):
         """失焦输入框，停止接收文本输入。"""
@@ -297,7 +299,11 @@ class InputBox:
         cursor_x = max(inner.x, min(inner.right - 1, cursor_x))
         request = getattr(render, "request_text_input", None)
         if callable(request):
-            request(True, pygame.Rect(cursor_x, inner.y, 1, inner.height))
+            request(
+                True,
+                pygame.Rect(cursor_x, inner.y, 1, inner.height),
+                repeat=(400, 30),
+            )
         if not self._cursor_visible:
             return
         cursor_top = inner.y + max(2, inner.height // 6)
@@ -353,7 +359,7 @@ class InputBox:
         if ctrl and event.key == pygame.K_v:
             clip = self._get_clipboard_text()
             if clip:
-                self._insert_text(clip.replace("\r", "").replace("\n", ""))
+                self._insert_text(sanitize_single_line(clip))
             return True
 
         return True
@@ -422,13 +428,5 @@ class InputBox:
 
     @staticmethod
     def _get_clipboard_text() -> str | None:
-        """从系统剪贴板获取文本。"""
-        try:
-            if not pygame.scrap.get_init():
-                pygame.scrap.init()
-            raw = pygame.scrap.get(pygame.SCRAP_TEXT)
-            if raw:
-                return raw.decode("utf-8", errors="ignore")
-        except Exception:
-            return None
-        return None
+        """从系统剪贴板获取经过安全清理的单行文本。"""
+        return get_clipboard_text()
