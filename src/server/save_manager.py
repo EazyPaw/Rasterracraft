@@ -1,5 +1,6 @@
 # Commented and arranged by ChatGPT
 import os
+import random
 import re
 import shutil
 import time
@@ -57,6 +58,30 @@ def _safe_save_id(value: str) -> str:
     value = re.sub(r"\s+", "_", value)
     value = re.sub(r"[^a-z0-9_.-]+", "", value)
     return value[:48].strip("._-") or "world"
+
+
+def suggested_save_folder(display_name: str) -> str:
+    """Return the readable base folder shown by the create-world screen."""
+    return _safe_save_id(display_name)
+
+
+def seed_from_text(value: int | str | None) -> int:
+    """Convert a numeric or textual Minecraft-style seed to a signed integer."""
+    if value is None or not str(value).strip():
+        return random.SystemRandom().randint(-(2**63), 2**63 - 1)
+    text = str(value).strip()
+    try:
+        number = int(text, 10)
+    except ValueError:
+        # Java String.hashCode(), used by the Minecraft generation UI when a
+        # seed is not a decimal integer.
+        number = 0
+        for character in text:
+            number = (31 * number + ord(character)) & 0xFFFFFFFF
+        if number >= 0x80000000:
+            number -= 0x100000000
+    number &= 0xFFFFFFFFFFFFFFFF
+    return number - 0x10000000000000000 if number >= 0x8000000000000000 else number
 
 
 def _now() -> float:
@@ -188,11 +213,29 @@ def migrate_player_data(
 
 
 def create_save(
-    display_name: str = "New World", *, version: str = "", game_mode: str = "survival"
+    display_name: str = "New World",
+    *,
+    version: str = "",
+    game_mode: str = "survival",
+    seed: int | str | None = None,
+    generator_name: str = "MinecraftLike2D",
+    generator_options: dict[str, Any] | None = None,
+    generate_structures: bool = True,
+    allow_cheats: bool = False,
+    bonus_chest: bool = False,
 ) -> dict[str, Any]:
     ensure_saves_root()
     base_id = _safe_save_id(display_name)
     save_id = f"{base_id}_{int(_now())}_{uuid.uuid4().hex[:6]}"
+    world_meta: dict[str, Any] = {
+        "seed": seed_from_text(seed),
+        "generator": str(generator_name),
+        "max_build_height": 256,
+        "generate_structures": bool(generate_structures),
+    }
+    if generator_options:
+        world_meta["generator_options"] = dict(generator_options)
+
     data = {
         "format_version": FORMAT_VERSION,
         "id": save_id,
@@ -201,7 +244,10 @@ def create_save(
         "last_played": _now(),
         "version": version,
         "game_mode": game_mode,
-        "worlds": {},
+        "allow_cheats": bool(allow_cheats),
+        "bonus_chest": bool(bonus_chest),
+        "generate_structures": bool(generate_structures),
+        "worlds": {"overworld": world_meta},
     }
     save_level(save_id, data)
     return data

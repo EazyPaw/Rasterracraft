@@ -549,9 +549,13 @@ def _handle_chat_message(packet: dict, player: Player) -> None:
 @SERVER_PACKET_DISPATCHER.handler("ClientShutdown")
 def _handle_client_shutdown(packet: dict, player: Player) -> None:
     for container in tuple(player.open_inventory_containers.values()):
-        furnace = getattr(container, "furnace", None)
-        if furnace is not None:
-            furnace.close_for(player)
+        owner = getattr(
+            container,
+            "owner_block",
+            getattr(container, "furnace", None),
+        )
+        if owner is not None:
+            owner.close_for(player)
     player.world.server.save_all(player, force=True)
     player.world.server.send_client_socket(
         player, make_packet("SaveComplete")
@@ -585,6 +589,15 @@ def _handle_close_furnace(packet: dict, player: Player) -> None:
     furnace = getattr(container, "furnace", None)
     if furnace is not None:
         furnace.close_for(player)
+
+
+@SERVER_PACKET_DISPATCHER.handler("CloseChest")
+def _handle_close_chest(packet: dict, player: Player) -> None:
+    container_id = str(packet.get("container", ""))
+    container = player.open_inventory_containers.get(container_id)
+    chest = getattr(container, "chest", None)
+    if chest is not None:
+        chest.close_for(player)
 
 
 @SERVER_PACKET_DISPATCHER.handler("ContainerQuickMove")

@@ -433,6 +433,10 @@ class Server:
         load_recipes()
         seed = random.randint(-23767, 23767)
         world_time = 0
+        world_meta: dict[str, Any] = {}
+        generator_type = generator.MinecraftLike2D
+        generator_options: dict[str, Any] = {}
+        max_build_height = 256
         if self.save_id:
             self.level_data = save_manager.ensure_level(self.save_id)
             world_meta = self.level_data.setdefault("worlds", {}).setdefault(
@@ -440,15 +444,41 @@ class Server:
             )
             seed = int(world_meta.get("seed", seed))
             world_time = int(world_meta.get("world_time", 0))
+            generator_type = generator.get_generator_type(
+                str(world_meta.get("generator", "MinecraftLike2D"))
+            )
+            raw_options = world_meta.get("generator_options", {})
+            if isinstance(raw_options, dict):
+                generator_options = raw_options
+            max_build_height = max(
+                1, min(256, int(world_meta.get("max_build_height", 256)))
+            )
             world_meta["seed"] = seed
-            world_meta["generator"] = "MinecraftLike2D"
-            world_meta["max_build_height"] = 256
+            world_meta["generator"] = generator_type.__name__
+            world_meta["max_build_height"] = max_build_height
             save_manager.save_level(self.save_id, self.level_data)
+
+        if generator_type is generator.ClassicFlat:
+            def generator_factory(world_seed):
+                return generator.ClassicFlat(world_seed, generator_options)
+        else:
+            generator_factory = generator_type
+
         self.worlds["overworld"] = World(
-            self, "overworld", generator.MinecraftLike2D, WorldAttribute(), seed
+            self,
+            "overworld",
+            generator_factory,
+            WorldAttribute(max_build_height=max_build_height),
+            seed,
         )
         self.worlds["overworld"].world_time = world_time
         if self.save_id:
+            settings_writer = getattr(
+                self.worlds["overworld"].generator, "to_settings_dict", None
+            )
+            if callable(settings_writer):
+                world_meta["generator_options"] = settings_writer()
+                save_manager.save_level(self.save_id, self.level_data)
             self.worlds["overworld"].disable_mob_generation = bool(
                 world_meta.get("disable_mob_generation", False)
             )
@@ -541,7 +571,15 @@ class Server:
             legacy_data = self.level_data.get("player")
             player_data = legacy_data if isinstance(legacy_data, dict) else None
         player_data = player_data or {}
-        return float(player_data.get("x", 0.0)), float(player_data.get("y", 100.0))
+        spawn_x = float(player_data.get("x", 0.0))
+        if "y" in player_data:
+            return spawn_x, float(player_data["y"])
+        overworld = self.worlds.get(self.main_world_id)
+        height_getter = getattr(
+            getattr(overworld, "generator", None), "get_spawn_height", None
+        )
+        spawn_y = height_getter(spawn_x) if callable(height_getter) else 100.0
+        return spawn_x, float(spawn_y)
 
     def load_player_state(
         self, player_uuid: UUID, *, is_main_player: bool = False
@@ -747,7 +785,9 @@ class Server:
             self.level_data = save_manager.ensure_level(self.save_id)
         worlds_meta = self.level_data.setdefault("worlds", {})
         for world in self.worlds.values():
-            world_meta = {
+            old_meta = worlds_meta.get(world.id_name, {})
+            world_meta = dict(old_meta) if isinstance(old_meta, dict) else {}
+            world_meta.update({
                 "seed": int(world.seed),
                 "world_time": int(world.world_time),
                 "generator": type(world.generator).__name__,
@@ -755,10 +795,17 @@ class Server:
                 "weather": world.weather.value,
                 "weather_tick": int(world.weather_tick),
                 "disable_mob_generation": bool(world.disable_mob_generation),
-            }
+            })
+            settings_writer = getattr(world.generator, "to_settings_dict", None)
+            if callable(settings_writer):
+                world_meta["generator_options"] = settings_writer()
+            else:
+                world_meta.pop("generator_options", None)
             legacy_entities = world.serialize_pending_legacy_entities()
             if legacy_entities:
                 world_meta["entities"] = legacy_entities
+            else:
+                world_meta.pop("entities", None)
             worlds_meta[world.id_name] = world_meta
         save_manager.save_level(self.save_id, self.level_data)
 

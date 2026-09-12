@@ -955,7 +955,12 @@ class Player(Entity):
         self.tick_eating()
         self.tick_blocking()
         for container_id, container in tuple(self.open_inventory_containers.items()):
-            if getattr(container, "furnace", None) is None:
+            owner = getattr(
+                container,
+                "owner_block",
+                getattr(container, "furnace", None),
+            )
+            if owner is None:
                 continue
             if self.get_inventory_container(container_id) is None:
                 server = getattr(self.world, "server", None)
@@ -963,7 +968,11 @@ class Player(Entity):
                     server.send_client_socket(
                         self,
                         {
-                            "__class__": "FurnaceClosed",
+                            "__class__": getattr(
+                                owner,
+                                "closed_packet_class",
+                                "FurnaceClosed",
+                            ),
                             "container": container_id,
                         },
                         "Forward",
@@ -1162,22 +1171,36 @@ class Player(Entity):
         if built_in is not None:
             return built_in
         container = self.open_inventory_containers.get(container_id)
-        owner = getattr(container, "furnace", None)
-        location = getattr(owner, "location", None)
-        if owner is not None and (
-            location is None
-            or location.world is not self.world
-            or self.world.get_block(location) is not owner
-            or not self.can_reach_block(
-                int(location.x),
-                int(location.y),
-                int(location.z),
+        owner = getattr(
+            container,
+            "owner_block",
+            getattr(container, "furnace", None),
+        )
+        owners = tuple(getattr(container, "owner_blocks", (owner,)))
+        locations = tuple(getattr(block, "location", None) for block in owners)
+        invalid_owner = owner is not None and (
+            any(
+                location is None
+                or location.world is not self.world
+                or self.world.get_block(location) is not block
+                for block, location in zip(owners, locations)
             )
-        ):
+            or not any(
+                self.can_reach_block(
+                    int(location.x),
+                    int(location.y),
+                    int(location.z),
+                )
+                for location in locations
+                if location is not None
+            )
+        )
+        if invalid_owner:
             self.open_inventory_containers.pop(container_id, None)
-            viewers = getattr(owner, "_viewers", None)
-            if viewers is not None:
-                viewers.discard(self)
+            for block in owners:
+                viewers = getattr(block, "_viewers", None)
+                if viewers is not None:
+                    viewers.discard(self)
             return None
         return container
 

@@ -28,3 +28,28 @@ from src.server.generator.decorations import DecorationMixin
 from src.server.generator.minecraft_like import MinecraftLike2D
 from src.server.generator.classic_flat import ClassicFlat
 from src.server.generator.bedrock_flat import bedrock_flat_generator
+from src.server.generator.superflat import (
+    BLOCK_DISPLAY_NAMES,
+    DEFAULT_SUPERFLAT_SETTINGS,
+    SUPERFLAT_PRESETS,
+    FlatLayer,
+    SuperflatPreset,
+    SuperflatSettings,
+    parse_superflat_code,
+)
+
+
+GENERATOR_TYPES = {
+    "MinecraftLike2D": MinecraftLike2D,
+    "ClassicFlat": ClassicFlat,
+}
+
+
+def get_generator_type(name: str):
+    """解析存档生成器名称，未知值安全回退到默认地形。"""
+    aliases = {
+        "default": "MinecraftLike2D",
+        "superflat": "ClassicFlat",
+    }
+    canonical = aliases.get(str(name).strip().lower(), str(name).strip())
+    return GENERATOR_TYPES.get(canonical, MinecraftLike2D)

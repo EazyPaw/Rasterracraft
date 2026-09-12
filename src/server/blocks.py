@@ -1,9 +1,7 @@
 # Commented and arranged by ChatGPT
 import os
-import random
-import src.server.materials as materials
-from src.server.container import Container
 
+import src.server.materials as materials
 from src.server.biome import get_biome_by_id, get_precipitation_type
 
 if os.environ.get("PYCRAFT_CLIENT") == "1":
@@ -100,6 +98,23 @@ class TillableBlockMixin:
 class STONE(Block):
     block_id = "stone"
     name = "tile.stone.stone.name"
+    _texture_path = "blocks.stone"
+    blast_resistance = 6.0
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    drops = (BlockDrop(COBBLESTONE_ITEM),)
+
+
+@register_block
+class DEEPSLATE(Block):
+    """Deep underground stone used by the Water World flat preset.
+
+    The current resource pack predates deepslate, so stone is used as a safe
+    visual fallback until a dedicated texture is added.
+    """
+
+    block_id = "deepslate"
+    name = "Deepslate"
     _texture_path = "blocks.stone"
     blast_resistance = 6.0
     preferred_tool = "pickaxe"
@@ -743,6 +758,7 @@ class FurnaceInventory(Inventory):
     def __init__(self, furnace):
         super().__init__(3)
         self.furnace = furnace
+        self.owner_block = furnace
 
     def can_place(self, slot, stack) -> bool:
         from src.server.smelting import find_smelting_recipe, is_fuel
@@ -920,7 +936,11 @@ class FURNACE(Block):
 
     def open_for(self, player) -> None:
         for container_id, container in tuple(player.open_inventory_containers.items()):
-            owner = getattr(container, "furnace", None)
+            owner = getattr(
+                container,
+                "owner_block",
+                getattr(container, "furnace", None),
+            )
             if owner is not None and owner is not self:
                 owner.close_for(player)
         player.register_inventory_container(self.container_id, self.inventory)
@@ -1934,9 +1954,534 @@ class WHITE_WOOL(Block):
     _texture_path = "blocks.wool_colored_white"
     break_sound = 'dig.cloth'
 
-# class CHEST(Container):
-#     block_id = "chest"
-#     name = "tile.chest.name"
+
+class ChestInventory(Inventory):
+    def __init__(self, chest):
+        super().__init__(27)
+        self.chest = chest
+        self.owner_block = chest
+
+    def on_changed(self) -> None:
+        self.chest.on_inventory_changed()
+
+
+class CombinedChestInventory(Inventory):
+    """Live 54-slot view over two independently persisted chest halves."""
+
+    def __init__(self, left_chest, right_chest):
+        self.left_chest = left_chest
+        self.right_chest = right_chest
+        self.chest = left_chest
+        self.owner_block = left_chest
+        self.owner_blocks = (left_chest, right_chest)
+        self.max_slots = 54
+        self.selected_slot = 0
+
+    def __len__(self):
+        return self.max_slots
+
+    def __iter__(self):
+        yield from self.left_chest.inventory
+        yield from self.right_chest.inventory
+
+    def __getitem__(self, slot):
+        slot = int(slot)
+        if not 0 <= slot < self.max_slots:
+            raise IndexError("Inventory index out of range")
+        if slot < 27:
+            return self.left_chest.inventory[slot]
+        return self.right_chest.inventory[slot - 27]
+
+    def __setitem__(self, slot, value):
+        slot = int(slot)
+        if not 0 <= slot < self.max_slots:
+            raise IndexError("Inventory index out of range")
+        if slot < 27:
+            self.left_chest.inventory[slot] = value
+        else:
+            self.right_chest.inventory[slot - 27] = value
+
+    def is_full(self) -> bool:
+        return all(not stack.is_empty() for stack in self)
+
+    def get_first_empty_slot(self) -> int:
+        return next((slot for slot, stack in enumerate(self) if stack.is_empty()), -1)
+
+    def can_place(self, slot, stack) -> bool:
+        slot = int(slot)
+        if slot < 27:
+            return self.left_chest.inventory.can_place(slot, stack)
+        return self.right_chest.inventory.can_place(slot - 27, stack)
+
+    def contains_chest(self, chest) -> bool:
+        return chest is self.left_chest or chest is self.right_chest
+
+    def on_changed(self) -> None:
+        self.owner_block.on_inventory_changed()
+
+
+@register_block
+class CHEST(Block):
+    block_id = "chest"
+    name = "tile.chest.name"
+    _texture_path = "entity.chest.normal"
+    break_sound = "dig.wood"
+    hardness = 2.5
+    blast_resistance = 2.5
+    preferred_tool = "axe"
+    collision_box = BlockCollisionBox.from_box(1 / 16, 0, 15 / 16, 14 / 16)
+    suffocating = False
+    redstone_conducting = False
+    light_attenuation = 1
+    has_transparent_pixels = True
+    _closed_texture_cache = {}
+    closed_packet_class = "ChestClosed"
+
+    # Minecraft 1.21.4 ChestModel#createSingleBodyLayer supplies the cuboid
+    # sizes/offsets. ModelPart.Cube maps their SOUTH faces to these atlas
+    # rectangles; its vertex order flips both axes for a 2-D front projection.
+    _LID_UV = pygame.Rect(42, 14, 14, 5)
+    _BOTTOM_UV = pygame.Rect(42, 33, 14, 10)
+    _LOCK_UV = pygame.Rect(4, 1, 2, 4)
+    # The bundled legacy resource pack stores both 15-wide halves in one
+    # 128x64 atlas. Combining the two 1.21.4 half-models produces a 30-wide
+    # front face and keeps the lock split across the inner block boundary.
+    _DOUBLE_LID_UV = pygame.Rect(58, 14, 30, 5)
+    _DOUBLE_BOTTOM_UV = pygame.Rect(58, 33, 30, 10)
+    _DOUBLE_LOCK_UV = pygame.Rect(4, 1, 2, 4)
+
+    def __init__(self, nbt=None):
+        self.inventory = ChestInventory(self)
+        self._viewers = set()
+        # Pairing is persistent block state, matching vanilla's
+        # SINGLE/LEFT/RIGHT property. ``False`` identifies saves written by
+        # the earlier adjacency-derived implementation so an existing double
+        # chest can be migrated without losing its relationship.
+        self.pair_offset = 0
+        self._pair_state_explicit = False
+        super().__init__()
+        if nbt:
+            self.write_nbt(nbt)
+
+    def _adjacent_chests(self) -> tuple["CHEST", ...]:
+        if self.location is None:
+            return ()
+        world = self.location.world
+        result = []
+        for dx in (-1, 1):
+            neighbor = world.get_block(self.location.add(dx, 0, 0))
+            if isinstance(neighbor, CHEST):
+                result.append(neighbor)
+        return tuple(result)
+
+    def get_pair(self):
+        if self.location is None:
+            return None
+        if self._pair_state_explicit:
+            if self.pair_offset not in (-1, 1):
+                return None
+            partner = self.location.world.get_block(
+                self.location.add(self.pair_offset, 0, 0)
+            )
+            if not isinstance(partner, CHEST):
+                return None
+            if partner._pair_state_explicit:
+                return (
+                    partner
+                    if partner.pair_offset == -self.pair_offset
+                    else None
+                )
+            # Mixed old/new chunk saves are possible at a chunk boundary.
+            explicit_claimants = [
+                chest
+                for chest in partner._adjacent_chests()
+                if chest._pair_state_explicit
+                and chest.pair_offset
+                == int(partner.location.x - chest.location.x)
+            ]
+            return partner if explicit_claimants == [self] else None
+
+        # Legacy saves had no explicit state because the old implementation
+        # inferred a double chest solely from adjacency. Ignore newly placed,
+        # explicitly-single neighbors so adding a third chest cannot dissolve
+        # the original pair before the next save migrates it.
+        explicit_claimants = [
+            chest
+            for chest in self._adjacent_chests()
+            if chest._pair_state_explicit
+            and chest.pair_offset == int(self.location.x - chest.location.x)
+        ]
+        if len(explicit_claimants) == 1:
+            return explicit_claimants[0]
+        legacy_neighbors = [
+            chest
+            for chest in self._adjacent_chests()
+            if not chest._pair_state_explicit
+        ]
+        return legacy_neighbors[0] if len(legacy_neighbors) == 1 else None
+
+    def _set_pair(self, partner) -> None:
+        offset = int(partner.location.x - self.location.x)
+        if offset not in (-1, 1):
+            raise ValueError("chest partners must be horizontally adjacent")
+        self.pair_offset = offset
+        partner.pair_offset = -offset
+        self._pair_state_explicit = True
+        partner._pair_state_explicit = True
+
+    @staticmethod
+    def _notify_state_changed(chest) -> None:
+        if chest.location is None:
+            return
+        world = chest.location.world
+        rx = int(chest.location.x) // 16
+        mark_chunk_dirty = getattr(world, "mark_chunk_dirty", None)
+        if callable(mark_chunk_dirty):
+            mark_chunk_dirty(rx)
+        invalidate_chunk_packet = getattr(world, "invalidate_chunk_packet", None)
+        if callable(invalidate_chunk_packet):
+            invalidate_chunk_packet(rx)
+        mark_render_chunk_dirty = getattr(world, "_mark_render_chunk_dirty", None)
+        if callable(mark_render_chunk_dirty):
+            mark_render_chunk_dirty(rx)
+        server = getattr(world, "server", None)
+        if server is None:
+            return
+        for player in tuple(getattr(server, "players", ())):
+            is_loading = getattr(player, "is_loading_position", None)
+            if callable(is_loading) and is_loading(
+                int(chest.location.x),
+                int(chest.location.y),
+                int(chest.location.z),
+            ):
+                server.send_client_socket(player, chest, "BlockUpdate")
+
+    def _unlink_pair(self) -> None:
+        partner = self.get_pair()
+        self.pair_offset = 0
+        self._pair_state_explicit = True
+        if partner is not None:
+            partner.pair_offset = 0
+            partner._pair_state_explicit = True
+            self._notify_state_changed(partner)
+        # Do not publish a BlockUpdate for ``self`` here. Both callers unlink
+        # because this half is about to be replaced; World.break_block sends a
+        # BreakBlock packet before World.set_block invokes on_unload, so a
+        # later chest update would resurrect this position as a client ghost.
+
+    def _ordered_chests(self) -> tuple["CHEST", ...]:
+        pair = self.get_pair()
+        if pair is None:
+            return (self,)
+        return tuple(sorted((self, pair), key=lambda chest: chest.location.x))
+
+    def get_chest_type(self) -> str:
+        pair = self.get_pair()
+        if pair is None:
+            return "single"
+        return "left" if self.location.x < pair.location.x else "right"
+
+    def _menu_inventory(self):
+        chests = self._ordered_chests()
+        if len(chests) == 1:
+            return self.inventory
+        return CombinedChestInventory(chests[0], chests[1])
+
+    def _all_viewers(self) -> set:
+        viewers = set()
+        for chest in self._ordered_chests():
+            viewers.update(chest._viewers)
+        return viewers
+
+    def get_collision_box(self):
+        chest_type = self.get_chest_type()
+        if chest_type == "left":
+            return BlockCollisionBox.from_box(1 / 16, 0, 1, 14 / 16)
+        if chest_type == "right":
+            return BlockCollisionBox.from_box(0, 0, 15 / 16, 14 / 16)
+        return self.collision_box
+
+    def place_at(self, location, *, force_single=False) -> bool:
+        # Only an explicitly single neighbor is eligible. A chest beside an
+        # existing double chest is therefore placed normally but stays single;
+        # the next chest can pair with it, allowing arbitrarily long rows.
+        candidates = [
+            neighbor
+            for neighbor in (
+                location.world.get_block(location.add(-1, 0, 0)),
+                location.world.get_block(location.add(1, 0, 0)),
+            )
+            if isinstance(neighbor, CHEST) and neighbor.get_pair() is None
+        ]
+        partner = None if force_single or not candidates else candidates[0]
+        if partner is not None:
+            partner.close_all_viewers()
+
+        self.pair_offset = 0
+        self._pair_state_explicit = True
+        if not super().place_at(location):
+            return False
+        if partner is not None:
+            self._set_pair(partner)
+            self._notify_state_changed(partner)
+            self._notify_state_changed(self)
+        return True
+
+    @property
+    def container_id(self) -> str:
+        if self.location is None:
+            return "chest:unplaced"
+        # Both halves must expose one stable id. Otherwise opening the right
+        # half and later syncing/closing through the left half would address
+        # two different containers.
+        primary = self._ordered_chests()[0]
+        return "chest:{},{},{}".format(
+            int(primary.location.x),
+            int(primary.location.y),
+            int(primary.location.z),
+        )
+
+    def parse_nbt(self) -> dict:
+        from src.server.inventory import serialize_inventory
+
+        pair = self.get_pair()
+        pair_offset = (
+            int(pair.location.x - self.location.x)
+            if pair is not None and self.location is not None
+            else 0
+        )
+        return {
+            "items": serialize_inventory(self.inventory),
+            "pair_offset": pair_offset,
+        }
+
+    def write_nbt(self, nbt):
+        import ast
+        from src.server.inventory import restore_inventory
+
+        if isinstance(nbt, str):
+            nbt = ast.literal_eval(nbt)
+        if isinstance(nbt, dict):
+            restore_inventory(self.inventory, nbt.get("items", []))
+            if "pair_offset" in nbt:
+                try:
+                    pair_offset = int(nbt["pair_offset"])
+                except (TypeError, ValueError, OverflowError):
+                    pair_offset = 0
+                self.pair_offset = pair_offset if pair_offset in (-1, 1) else 0
+                self._pair_state_explicit = True
+
+    def get_texture_path(self) -> str:
+        if self.get_chest_type() == "single":
+            return self._texture_path
+        return "entity.chest.normal_double"
+
+    @client_method
+    def get_texture(self, size, client):
+        size = max(1, int(round(size)))
+        chest_type = self.get_chest_type()
+        atlas = client.resources_manager.get_texture_img(self.get_texture_path())
+        if atlas is None:
+            return None
+        cache_key = (atlas, size, chest_type)
+        cached = self._closed_texture_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        required_width = 56 if chest_type == "single" else 88
+        if atlas.get_width() < required_width or atlas.get_height() < 43:
+            texture = pygame.transform.scale(atlas, (size, size))
+        else:
+            def front(rect):
+                face = atlas.subsurface(rect).copy()
+                return pygame.transform.flip(face, True, True)
+
+            if chest_type == "single":
+                native = pygame.Surface((16, 16), pygame.SRCALPHA)
+                # Model-space y grows upward here: the bottom occupies y=0..10,
+                # the lid y=9..14, and the lock y=7..11. Draw bottom first so the
+                # overlapping lid and lock remain the front-most parts.
+                native.blit(front(self._BOTTOM_UV), (1, 6))
+                native.blit(front(self._LID_UV), (1, 2))
+                native.blit(front(self._LOCK_UV), (7, 5))
+            else:
+                double_native = pygame.Surface((32, 16), pygame.SRCALPHA)
+                double_native.blit(front(self._DOUBLE_BOTTOM_UV), (1, 6))
+                double_native.blit(front(self._DOUBLE_LID_UV), (1, 2))
+                double_native.blit(front(self._DOUBLE_LOCK_UV), (15, 5))
+                source_x = 0 if chest_type == "left" else 16
+                native = double_native.subsurface((source_x, 0, 16, 16)).copy()
+            texture = pygame.transform.scale(native, (size, size))
+
+        self._closed_texture_cache[cache_key] = texture
+        if len(self._closed_texture_cache) > 16:
+            self._closed_texture_cache.pop(next(iter(self._closed_texture_cache)))
+        return texture
+
+    def _state_packet(self, packet_class="ChestUpdate") -> dict:
+        from src.server.inventory import serialize_inventory
+
+        menu_inventory = self._menu_inventory()
+        packet = {
+            "__class__": packet_class,
+            "container": self.container_id,
+            "slots": serialize_inventory(menu_inventory),
+            "rows": len(menu_inventory) // 9,
+        }
+        if self.location is not None:
+            packet.update(
+                x=int(self.location.x),
+                y=int(self.location.y),
+                z=int(self.location.z),
+            )
+        return packet
+
+    def sync_viewers(self, packet_class="ChestUpdate") -> None:
+        if self.location is None:
+            return
+        server = getattr(self.location.world, "server", None)
+        if server is None:
+            return
+        packet = self._state_packet(packet_class)
+        for player in tuple(self._all_viewers()):
+            container = player.get_inventory_container(self.container_id)
+            contains_chest = getattr(container, "contains_chest", None)
+            if container is not self.inventory and not (
+                callable(contains_chest) and contains_chest(self)
+            ):
+                for chest in self._ordered_chests():
+                    chest._viewers.discard(player)
+                continue
+            server.send_client_socket(player, packet, "Forward")
+
+    def _is_blocked(self) -> bool:
+        for chest in self._ordered_chests():
+            above = chest.location.world.get_block(chest.location.add(0, 1, 0))
+            if getattr(above, "redstone_conducting", False) and not getattr(
+                above, "replaceable", False
+            ):
+                return True
+        return False
+
+    def open_for(self, player) -> bool:
+        if self.location is None or self._is_blocked():
+            return False
+        container_id = self.container_id
+        for open_id, container in tuple(player.open_inventory_containers.items()):
+            if open_id == container_id:
+                continue
+            owner = getattr(
+                container,
+                "owner_block",
+                getattr(container, "furnace", None),
+            )
+            if owner is not None and owner is not self:
+                owner.close_for(player)
+        was_closed = not self._all_viewers()
+        player.register_inventory_container(container_id, self._menu_inventory())
+        for chest in self._ordered_chests():
+            chest._viewers.add(player)
+        server = getattr(self.location.world, "server", None)
+        if server is not None:
+            broadcast_sound = getattr(server, "broadcast_sound", None)
+            if was_closed and callable(broadcast_sound):
+                broadcast_sound(
+                    "random.chestopen",
+                    self.location.x + 0.5,
+                    self.location.y + 0.5,
+                    self.location.z,
+                )
+            server.send_client_socket(
+                player,
+                self._state_packet("ChestOpen"),
+                "Forward",
+            )
+        return True
+
+    def close_for(self, player) -> None:
+        container_id = self.container_id
+        chests = self._ordered_chests()
+        was_viewing = any(player in chest._viewers for chest in chests)
+        container = player.open_inventory_containers.get(container_id)
+        contains_chest = getattr(container, "contains_chest", None)
+        if container in tuple(chest.inventory for chest in chests) or (
+            callable(contains_chest) and contains_chest(self)
+        ):
+            player.unregister_inventory_container(container_id)
+        for chest in chests:
+            chest._viewers.discard(player)
+        if was_viewing and not self._all_viewers() and self.location is not None:
+            server = getattr(self.location.world, "server", None)
+            broadcast_sound = getattr(server, "broadcast_sound", None)
+            if callable(broadcast_sound):
+                broadcast_sound(
+                    "random.chestclosed",
+                    self.location.x + 0.5,
+                    self.location.y + 0.5,
+                    self.location.z,
+                )
+
+    def close_all_viewers(self) -> None:
+        container_id = self.container_id
+        for player in tuple(self._all_viewers()):
+            self.close_for(player)
+            server = getattr(getattr(self.location, "world", None), "server", None)
+            if server is not None:
+                server.send_client_socket(
+                    player,
+                    {
+                        "__class__": self.closed_packet_class,
+                        "container": container_id,
+                    },
+                    "Forward",
+                )
+
+    def on_right_click(self, player) -> bool:
+        return self.open_for(player)
+
+    def on_inventory_changed(self) -> None:
+        if self.location is None:
+            return
+        world = self.location.world
+        chests = self._ordered_chests()
+        for chest in chests:
+            rx = int(chest.location.x) // 16
+            world.mark_chunk_dirty(rx)
+            world.invalidate_chunk_packet(rx)
+        chests[0].sync_viewers()
+
+    def on_unload(self) -> None:
+        self.close_all_viewers()
+        self._unlink_pair()
+
+    def on_break(self):
+        if self.location is None:
+            return
+        from src.server.entities.item import Item
+        from src.server.item_class import EmptyItemStack
+
+        world = self.location.world
+        self.close_all_viewers()
+        self._unlink_pair()
+        # ClientWorld performs a predicted local break using the same block
+        # class. It only needs the partner's visual state updated; inventory
+        # drops and persistence remain server-authoritative.
+        if getattr(world, "server", None) is None:
+            return
+        for index in range(len(self.inventory)):
+            stack = self.inventory[index]
+            if stack.is_empty():
+                continue
+            world.spawn_entity(
+                Item(
+                    self.location.x + 0.5,
+                    self.location.y + 0.45,
+                    world,
+                    stack,
+                    int(self.location.z),
+                )
+            )
+            self.inventory[index] = EmptyItemStack()
 
 
 def get_block_by_id(block_id: str) -> Block:

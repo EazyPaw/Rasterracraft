@@ -1,9 +1,8 @@
 import pygame
 
-from server.text import TextColor
 from src.client.GUI.button import Button
 from src.client.GUI.gui import GUI
-from src.server.text import Text
+from src.server.text import Text, TextColor
 
 
 class DisconnectScreen(GUI):

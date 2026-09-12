@@ -125,6 +125,21 @@ class FURNACE(BlockItem):
 
 
 @register_material
+class CHEST(BlockItem):
+    name_id = "chest"
+    name = "tile.chest.name"
+    target_block_id = "chest"
+
+    @classmethod
+    @client_method
+    def get_texture(cls, size, client):
+        # Inventory icons always use the single chest, independent of any
+        # world chest that happens to occupy the player's current coordinates.
+        block = cls.create_block()
+        return block.get_texture(max(1, int(round(16 * size))), client=client)
+
+
+@register_material
 class GLASS(BlockItem):
     name_id = "glass"
     name = "tile.glass.name"

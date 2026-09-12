@@ -359,13 +359,18 @@ def _furnace_type():
     return Furnace
 
 
+def _close_block_container_guis(client: "Client") -> None:
+    container_types = (_furnace_type(), _chest_type())
+    for gui in list(client.render.drawing_GUIs):
+        if isinstance(gui, container_types):
+            gui._server_closed = True
+            client.render.close_gui(gui)
+
+
 @CLIENT_PACKET_DISPATCHER.handler("FurnaceOpen")
 def _handle_furnace_open(packet: dict, client: "Client") -> None:
     furnace_type = _furnace_type()
-    for gui in list(client.render.drawing_GUIs):
-        if isinstance(gui, furnace_type):
-            gui._server_closed = True
-            client.render.close_gui(gui)
+    _close_block_container_guis(client)
     client.render.show_gui(furnace_type(client.render, packet))
 
 
@@ -384,6 +389,40 @@ def _handle_furnace_closed(packet: dict, client: "Client") -> None:
     furnace_type = _furnace_type()
     for gui in list(client.render.drawing_GUIs):
         if isinstance(gui, furnace_type) and gui.container_id == str(
+            packet.get("container", "")
+        ):
+            gui._server_closed = True
+            client.render.close_gui(gui)
+
+
+def _chest_type():
+    from src.client.GUI.inventory.chest import Chest
+
+    return Chest
+
+
+@CLIENT_PACKET_DISPATCHER.handler("ChestOpen")
+def _handle_chest_open(packet: dict, client: "Client") -> None:
+    chest_type = _chest_type()
+    _close_block_container_guis(client)
+    client.render.show_gui(chest_type(client.render, packet))
+
+
+@CLIENT_PACKET_DISPATCHER.handler("ChestUpdate")
+def _handle_chest_update(packet: dict, client: "Client") -> None:
+    chest_type = _chest_type()
+    for gui in list(client.render.drawing_GUIs):
+        if isinstance(gui, chest_type) and gui.container_id == str(
+            packet.get("container", "")
+        ):
+            gui.apply_update(packet)
+
+
+@CLIENT_PACKET_DISPATCHER.handler("ChestClosed")
+def _handle_chest_closed(packet: dict, client: "Client") -> None:
+    chest_type = _chest_type()
+    for gui in list(client.render.drawing_GUIs):
+        if isinstance(gui, chest_type) and gui.container_id == str(
             packet.get("container", "")
         ):
             gui._server_closed = True

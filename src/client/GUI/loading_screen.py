@@ -38,11 +38,11 @@ class LoadingScreen(GUI):
         fill = pygame.Rect(
             bar_rect.x + 2,
             bar_rect.y + 2,
-            max(0, int((bar_width - 4) * progress)),
-            bar_rect.height - 4,
+            max(0, int(bar_width * progress)),
+            bar_rect.height,
         )
         if fill.width:
-            pygame.draw.rect(screen, (101, 173, 68), fill)
+            pygame.draw.rect(screen, (0, 225, 0), fill)
 
     def _draw_background(self, width: int, height: int) -> None:
         cache_key = (width, height)

@@ -7,6 +7,7 @@ import pygame
 from src.client.resources_manager import transkey
 from src.server import save_manager
 from src.client.GUI.button import Button
+from src.client.GUI.create_world_menu import CreateWorldMenu
 from src.client.GUI.gui import GUI
 from src.client.GUI.input_box import InputBox
 from src.server.utils import client_method
@@ -150,13 +151,9 @@ class SavesMenu(GUI):
         if self.starting_world:
             return
         name = self._next_world_name()
-        data = save_manager.create_save(
-            name,
-            version=getattr(self.render.client, "version", ""),
-            game_mode="survival",
-        )
-        self._load_saves(data["id"])
-        self.start_selected()
+        self.search_box.blur()
+        self.render.close_gui(self)
+        self.render.show_gui(CreateWorldMenu(self.render, self, name))
 
     def delete_selected(self):
         if self.starting_world or not self.selected_id:
