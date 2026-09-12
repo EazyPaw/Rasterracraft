@@ -6,6 +6,7 @@
 """
 
 import math
+import random
 
 import pygame
 
@@ -25,6 +26,11 @@ class SurvivalHUD(HotBar):
         """缓存已加载的图标表面，以精灵名称为键。"""
         super().__init__(render)
         self._icons = {}
+        self._health_player = None
+        self._last_health = 0
+        self._display_health = 0
+        self._health_changed_ms = 0
+        self._blink_until = 0
 
     # ------------------------------------------------------------------
     #  内部辅助方法
@@ -37,7 +43,11 @@ class SurvivalHUD(HotBar):
             ``gui.sprites.hud.<name>`` 由资源管理器解析。
 
         """
-        cached = self._icons.get(name)
+        if getattr(self, "_icon_scale", None) != self.render.gui_scale:
+            self._icons.clear()
+            self._icon_scale = self.render.gui_scale
+        key = name
+        cached = self._icons.get(key)
         if cached is not None:
             return cached
         texture = self.render.client.resources_manager.get_texture_img(
@@ -45,38 +55,8 @@ class SurvivalHUD(HotBar):
         )
         size = max(1, round(9 * self.render.gui_scale))
         cached = pygame.transform.scale(texture, (size, size))
-        self._icons[name] = cached
+        self._icons[key] = cached
         return cached
-
-    def _draw_meter(self, value: float, maximum: float, x: int, y: int, *, food: bool):
-        """绘制一行包含10个图标的计量条（生命心或饥饿鸡腿）。
-
-                生命值从左向右填充；饥饿值从右向左填充（镜像），
-                使得两个计量条在快捷栏上方自然相对。
-
-        :param value: 当前玩家属性值（例如 18.0 生命值）。
-        :param maximum: 最大可能值（例如 20.0）。
-        :param x: 第一个（索引0）图标的屏幕左坐标。
-        :param y: 整行图标的屏幕顶部坐标。
-        :param food: ``True`` 渲染饥饿鸡腿，``False`` 渲染生命心。
-
-        """
-        empty = self._icon("food_empty" if food else "heart.container")
-        half = self._icon("food_half" if food else "heart.half")
-        full = self._icon("food_full" if food else "heart.full")
-        icon_w = empty.get_width()
-
-        # 生命值从左向右填充（索引 0→9）；饥饿值镜像（9→0）
-        # 使填充的图标向屏幕中心方向增长。
-        for index in range(10):
-            display_index = 9 - index if food else index
-            px = x + display_index * (icon_w - 4)
-            self.render.blit(empty, (px, y))
-            units = value - index * (maximum / 10)
-            if units >= maximum / 10:
-                self.render.blit(full, (px, y))
-            elif units > 0:
-                self.render.blit(half, (px, y))
 
     def _draw_armor(self, value: float, x: int, y: int) -> bool:
         """Draw the vanilla ten-icon armor bar and report whether it was visible."""
@@ -86,7 +66,7 @@ class SurvivalHUD(HotBar):
         empty = self._icon("armor_empty")
         half = self._icon("armor_half")
         full = self._icon("armor_full")
-        spacing = empty.get_width() - 4
+        spacing = 8 * self.render.gui_scale
         for index in range(10):
             px = x + index * spacing
             self.render.blit(empty, (px, y))
@@ -97,44 +77,77 @@ class SurvivalHUD(HotBar):
                 self.render.blit(half, (px, y))
         return True
 
+    def _health_animation(self, player, now_ms):
+        """Track the delayed damage overlay independently of rendering FPS."""
+        health = max(0, math.ceil(player.health))
+        tick = now_ms // 50
+        if self._health_player is not player:
+            self._health_player = player
+            self._last_health = self._display_health = health
+            self._health_changed_ms = now_ms
+            self._blink_until = 0
+        if health != self._last_health:
+            self._health_changed_ms = now_ms
+            self._blink_until = tick + (20 if health < self._last_health else 10)
+        if now_ms - self._health_changed_ms > 1000:
+            self._display_health = health
+            self._health_changed_ms = now_ms
+        self._last_health = health
+        blink = self._blink_until > tick and (self._blink_until - tick) // 3 % 2 == 1
+        return health, self._display_health, blink
+
     def _draw_health(self, player, x: int, y: int) -> int:
-        """Draw scalable health rows plus absorption hearts; return the top y."""
-        container = self._icon("heart.container")
-        variant = ""
+        """Draw upper rows first so compressed rows overlap like vanilla."""
+        now_ms = pygame.time.get_ticks()
+        tick = now_ms // 50
+        health, old_health, blink = self._health_animation(player, now_ms)
+        rng = random.Random(tick * 312871)
+        scale = self.render.gui_scale
         effects = getattr(player, "active_effects", {})
-        if "wither" in effects:
-            variant = "withered_"
-        elif "poison" in effects:
-            variant = "poisoned_"
-        full = self._icon(f"heart.{variant}full" if variant else "heart.full")
-        half = self._icon(f"heart.{variant}half" if variant else "heart.half")
-        absorbing_full = self._icon("heart.absorbing_full")
-        absorbing_half = self._icon("heart.absorbing_half")
-        spacing = container.get_width() - 4
-        row_step = container.get_height() + max(1, round(self.render.gui_scale))
-        normal_hearts = max(10, math.ceil(max(1.0, float(player.max_health)) / 2.0))
-        absorption = max(0.0, float(getattr(player, "absorption_amount", 0.0)))
-        absorption_hearts = math.ceil(absorption / 2.0)
-        total_hearts = normal_hearts + absorption_hearts
-        for index in range(total_hearts):
+        variant = "poisoned_" if "poison" in effects else "withered_" if "wither" in effects else ""
+        maximum = max(float(player.max_health), health, old_health)
+        normal_hearts = math.ceil(maximum / 2)
+        absorption = max(0, math.ceil(getattr(player, "absorption_amount", 0)))
+        total_hearts = normal_hearts + math.ceil(absorption / 2)
+        rows = max(1, math.ceil((maximum + absorption) / 20))
+        row_step = max(10 - (rows - 2), 3) * scale
+        regen = tick % math.ceil(maximum + 5) if "regeneration" in effects else -1
+        container = self._icon("heart.container_blinking" if blink else "heart.container")
+        for index in range(total_hearts - 1, -1, -1):
             row, column = divmod(index, 10)
-            px = x + column * spacing
-            py = y - row * row_step
+            px = round(x + column * 8 * scale)
+            offset = rng.randrange(2) if health + absorption <= 4 else 0
+            if index < normal_hearts and index == regen:
+                offset -= 2
+            py = round(y - row * row_step + offset * scale)
             self.render.blit(container, (px, py))
-            if index < normal_hearts:
-                units = float(player.health) - index * 2.0
-                if units >= 2.0:
-                    self.render.blit(full, (px, py))
-                elif units > 0.0:
-                    self.render.blit(half, (px, py))
-            else:
-                units = absorption - (index - normal_hearts) * 2.0
-                if units >= 2.0:
-                    self.render.blit(absorbing_full, (px, py))
-                elif units > 0.0:
-                    self.render.blit(absorbing_half, (px, py))
-        rows = max(1, math.ceil(total_hearts / 10.0))
-        return y - (rows - 1) * row_step
+            if index >= normal_hearts:
+                units = absorption - (index - normal_hearts) * 2
+                absorb_variant = "withered_" if variant == "withered_" else "absorbing_"
+                self.render.blit(self._icon(f"heart.{absorb_variant}{'half' if units == 1 else 'full'}"), (px, py))
+            if blink and index * 2 < old_health:
+                kind = "half" if index * 2 + 1 == old_health else "full"
+                self.render.blit(self._icon(f"heart.{variant}{kind}_blinking"), (px, py))
+            if index * 2 < health:
+                kind = "half" if index * 2 + 1 == health else "full"
+                self.render.blit(self._icon(f"heart.{variant}{kind}"), (px, py))
+        return round(y - (rows - 1) * row_step)
+
+    def _draw_food(self, player, right: int, y: int):
+        tick = pygame.time.get_ticks() // 50
+        rng = random.Random(tick * 312871)
+        food = max(0, min(20, int(player.food_level)))
+        hunger = "hunger" in getattr(player, "active_effects", {})
+        suffix = "_hunger" if hunger else ""
+        shake = getattr(player, "saturation", 0) <= 0 and tick % (food * 3 + 1) == 0
+        scale = self.render.gui_scale
+        for index in range(10):
+            px = round(right - (index * 8 + 9) * scale)
+            py = round(y + (rng.randrange(3) - 1) * scale) if shake else y
+            self.render.blit(self._icon(f"food_empty{suffix}"), (px, py))
+            if index * 2 < food:
+                kind = "half" if index * 2 + 1 == food else "full"
+                self.render.blit(self._icon(f"food_{kind}{suffix}"), (px, py))
 
     # ------------------------------------------------------------------
     #  主绘制方法
@@ -179,10 +192,9 @@ class SurvivalHUD(HotBar):
         # 使两个计量条不会紧挨在一起。
         meter_y = experience_y - icon_w - round(self.render.gui_scale * 1)
         health_x = bar_x - (icon_w - self.render.gui_scale * 9)
-        hunger_x = bar_x + hotbar.get_width() - icon_w * 9
 
         health_top_y = self._draw_health(player, health_x, meter_y)
-        self._draw_meter(player.food_level, 20, hunger_x, meter_y, food=True)
+        self._draw_food(player, bar_x + hotbar.get_width(), meter_y)
 
         try:
             armor_value = player.get_attribute_value("armor")
