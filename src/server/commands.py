@@ -6,6 +6,8 @@ import time
 import re
 from typing import TYPE_CHECKING, Callable, List, Dict
 
+import src
+
 from src.client.game_mode import get_gamemode_by_id
 from src.server.blocks import get_block_by_id
 from src.server.entity import Entity
@@ -120,10 +122,17 @@ class CommandExecutor:
             return "python execute is not enabled for this player!"
         code = " ".join(args)
         start_time = time.time()
-        exec(code)
+        namespace = {"server": self.server, "blocks": src.server.blocks, 'Location': src.server.location.Location}
+        try:
+            result = eval(code, namespace, namespace)  # 尝试作为表达式求值
+        except SyntaxError:
+            exec(code, namespace, namespace)  # 作为语句执行
+            result = None
         end_time = time.time()
         execution_time = end_time - start_time
-        return f"Done in {execution_time * 1000} ms."
+        if result is None:
+            result = f"Done in {round(execution_time * 1000, 3)} ms."
+        return result
 
     @register_command("stop")
     def stop_server(self, args, executor: Player | str):
