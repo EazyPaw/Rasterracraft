@@ -151,9 +151,9 @@ class ChatGUI(GUI):
 
         if text[0] == '/':
             self.command_history.append(text)
-            if len(self.command_history) > 50:
-                self.command_history = self.command_history[-50:]
-            self._save_command_history("command_history.txt", 50)
+            if len(self.command_history) > 150:
+                self.command_history = self.command_history[-150:]
+            self._save_command_history("command_history.txt", 150)
 
         if len(self.sent_history) > 50:
             self.sent_history = self.sent_history[-50:]
