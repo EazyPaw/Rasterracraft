@@ -350,6 +350,18 @@ class Player(Entity):
             return False
 
         location = Location(self.world, x, y, z)
+        get_placement_state = getattr(block, "get_state_for_placement", None)
+        if callable(get_placement_state):
+            block = get_placement_state(
+                location,
+                placement_face=getattr(
+                    context, "placement_face", getattr(context, "hit_face", None)
+                ),
+                player=self,
+                context=context,
+            )
+            if block is None:
+                return False
         if self._block_item_intersects_entity(block, location):
             return False
         if block.place_at(location) is False:

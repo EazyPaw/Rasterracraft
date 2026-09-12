@@ -131,10 +131,11 @@ class GameManager:
                 self.last_pressed_time[key] = time.perf_counter()
 
         if self.client.fore_place_switch_mode == "hold":
-            if keys[pygame.K_q]:
-                self.client.client_player.fore_place = True
-            else:
-                self.client.client_player.fore_place = False
+            if self.client.client_player is not None:
+                if keys[pygame.K_q]:
+                    self.client.client_player.fore_place = True
+                else:
+                    self.client.client_player.fore_place = False
 
         if self.client.client_player is None:
             return

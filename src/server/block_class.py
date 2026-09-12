@@ -48,6 +48,11 @@ class PlacementContext:
     target_z: int
     fore_place: bool = False
 
+    @property
+    def placement_face(self) -> str | None:
+        """返回方块应贴着放置的目标面。"""
+        return self.hit_face
+
 
 @dataclass(frozen=True)
 class BlockDrop:
@@ -210,22 +215,72 @@ class Block(ABC):
         fore_place=False,
         context: PlacementContext | None = None,
     ):
-        """返回客户端放置预览应使用的位置。
+        """根据命中方块及其命中面返回实际放置位置。
 
-        普通方块默认沿用项目原有的同格/另一深度层规则。需要根据玩家
-        方向、支撑面或方块状态计算位置的方块覆写此接口，游戏模式本身
-        不需要知道具体方块类型。
+        与原版 ``BlockPlaceContext`` 一致：可替换的目标格直接被替换；
+        否则普通方块放到命中面外侧的相邻格。特殊方块可以覆写此接口，
+        例如火把会同时检查支撑面并选择自己的安装形态。
         """
         target_location = getattr(target, "location", None)
         if target_location is None:
             return None
         world = target_location.world
+        fore_place = bool(fore_place or getattr(context, "fore_place", False))
+
+        # 前景放置时，背景方块朝向玩家的一面就是同一 (x, y) 的前景格。
+        # 这一步必须早于二维命中面偏移，否则点击背景墙中央会错误地把
+        # 方块放到前景层相邻格，而不是墙面正前方。
+        if fore_place and target_location.z == 1:
+            foreground = Location(
+                world, target_location.x, target_location.y, 0
+            )
+            if world.get_block(foreground).replaceable:
+                return foreground
+
         if world.get_block(target_location).replaceable:
             return target_location
 
+        hit_face = getattr(
+            context, "placement_face", getattr(context, "hit_face", None)
+        )
+        face_offsets = {
+            "top": (0, 1),
+            "bottom": (0, -1),
+            "left": (-1, 0),
+            "right": (1, 0),
+        }
+        if hit_face in face_offsets:
+            dx, dy = face_offsets[hit_face]
+            adjacent = Location(
+                world,
+                target_location.x + dx,
+                target_location.y + dy,
+                target_location.z,
+            )
+            if world.get_block(adjacent).replaceable:
+                return adjacent
+
+        # 命中面外侧已被占用时，改为贴到目标方块的另一深度层。这也是
+        # 没有命中面上下文的旧客户端所使用的兼容放置路径。
         other_z = 1 if target_location.z == 0 else 0
         alternative = target_location.add(0, 0, other_z - target_location.z)
         return alternative if world.get_block(alternative).replaceable else None
+
+    def get_state_for_placement(
+        self,
+        location: Location,
+        *,
+        placement_face: str | None = None,
+        player=None,
+        context: PlacementContext | None = None,
+    ):
+        """返回带有放置状态的方块，返回 ``None`` 可拒绝本次放置。
+
+        默认方块没有方向状态，直接返回自身。未来的原木、活塞等定向
+        方块可覆写此接口，并依据 ``placement_face`` 生成朝向；调用方会在
+        碰撞检查和写入世界之前使用返回的方块实例。
+        """
+        return self
 
     def on_generate(self):
         """

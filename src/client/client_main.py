@@ -48,7 +48,7 @@ class Client:
         self.version = "0.0.1 SNAPSHOT - Minecraft 1.8.9"
 
         self.language = "en_US"
-        self.fore_place_switch_mode = "switch"
+        self.fore_place_switch_mode = "hold"
         self.under_dev = True
         if '--notdev' in sys.argv:
             self.under_dev = False

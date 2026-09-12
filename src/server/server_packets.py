@@ -205,10 +205,10 @@ def _read_placement_context(
         )
         if len(direction) != 2 or not all(math.isfinite(value) for value in direction):
             return None
-        context_z = int(raw.get("target_z", target_z))
+        reported_target_z = int(raw.get("target_z", target_z))
     except (TypeError, ValueError, OverflowError):
         return None
-    if context_z not in (0, 1):
+    if reported_target_z not in (0, 1):
         return None
     eye = (
         float(player.x) + float(player.width) * 0.5,
@@ -218,7 +218,9 @@ def _read_placement_context(
         hit_face,
         eye,
         direction,
-        context_z,
+        # 目标层以服务端读取的方块坐标为准。旧客户端在前景放置模式下
+        # 可能上报 0；这里兼容它们，但不让该值改变背景层的射线语义。
+        target_z,
         raw.get("fore_place") is True,
     )
 

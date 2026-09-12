@@ -1277,7 +1277,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             hit_face=hit_face,
             ray_origin=eye,
             ray_direction=direction,
-            target_z=0 if getattr(player, "fore_place", False) else int(location.z),
+            # 命中层始终属于被点击方块；是否优先放到前景层由
+            # fore_place 单独表达，不能把背景射线伪装成前景射线。
+            target_z=int(location.z),
             fore_place=bool(getattr(player, "fore_place", False)),
         )
 
