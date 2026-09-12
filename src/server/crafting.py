@@ -26,6 +26,15 @@ MINECRAFT_1_8_RECIPES = (
         "pattern": ["###", "#X#", "###"],
         "result": {"item": "minecraft:enchanted_golden_apple"},
     },
+    {
+        "type": "minecraft:crafting_shaped",
+        "key": {
+            "W": {"item": "minecraft:white_wool"},
+            "P": {"tag": "minecraft:planks"},
+        },
+        "pattern": ["WWW", "PPP"],
+        "result": {"item": "minecraft:bed"},
+    },
 )
 
 

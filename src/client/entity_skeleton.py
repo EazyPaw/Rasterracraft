@@ -1087,7 +1087,12 @@ class PlayerSkeleton(EntitySkeleton):
         sneaking_changed = was_sneaking != is_sneaking
         self._was_sneaking = is_sneaking
 
-        self._apply_pose(instant=sneaking_changed)
+        is_sleeping = getattr(self.entity, "sleeping", False)
+        was_sleeping = getattr(self, "_was_sleeping", False)
+        sleeping_changed = was_sleeping != is_sleeping
+        self._was_sleeping = is_sleeping
+
+        self._apply_pose(instant=sneaking_changed or sleeping_changed)
         super().update()
         self._sync_armor_parts_to_body()
 
@@ -1139,6 +1144,12 @@ class PlayerSkeleton(EntitySkeleton):
         self._update_held_item_texture()
         self._update_armor_textures()
 
+        if getattr(self.entity, "sleeping", False):
+            facing_changed = self._last_facing != self.facing
+            self._last_facing = self.facing
+            self._write_sleep_pose(instant or facing_changed)
+            return
+
         # 1. 行走/站立基础姿态
         angles = self._calc_walk_angles(direction)
 
@@ -1166,6 +1177,81 @@ class PlayerSkeleton(EntitySkeleton):
 
         # 4. 计算锚点并写入全部部件
         self._write_pose(angles, instant, facing_changed)
+
+    def _write_sleep_pose(self, instant: bool) -> None:
+        """Lay the articulated player flat across the bed from head to foot."""
+        visual_scale = self.size
+        center_x = getattr(self.entity, "width", 1.0) * 0.5
+        direction = self._facing_sign()
+        angle = -direction * 90.0
+        # Limb/body side textures are four skin pixels thick after rotation,
+        # so their centre sits one eighth of a block above the mattress.
+        bed_y = 0.125 * visual_scale
+        head_y = 0.30 * visual_scale
+        shoulder_x = center_x + direction * 0.05 * visual_scale
+        hip_x = shoulder_x - direction * 0.72 * visual_scale
+
+        self._pose_part(
+            "back_arm",
+            (shoulder_x - direction * 0.03 * visual_scale, bed_y + 0.03),
+            (2, 0),
+            angle,
+            flip_x=False,
+        )
+        self._pose_part(
+            "back_leg",
+            (hip_x - direction * 0.03 * visual_scale, bed_y + 0.03),
+            (2, 0),
+            angle,
+            flip_x=False,
+        )
+        self._pose_part(
+            "body", (shoulder_x, bed_y), (2, 0), angle, flip_x=False
+        )
+        self._pose_part(
+            "front_leg",
+            (hip_x + direction * 0.03 * visual_scale, bed_y),
+            (2, 0),
+            angle,
+            flip_x=False,
+        )
+        self._pose_part(
+            "front_arm",
+            (shoulder_x + direction * 0.03 * visual_scale, bed_y),
+            (2, 0),
+            angle,
+            flip_x=False,
+        )
+        self._pose_part(
+            "held_item", (shoulder_x, bed_y), (0, 0), angle, visible=False
+        )
+        self._pose_part(
+            "head", (shoulder_x, head_y), (4, 8), angle, flip_x=False
+        )
+        self._pose_part(
+            "head_overlay", (shoulder_x, head_y), (4, 8), angle, flip_x=False
+        )
+
+        for armor_name, source_name in self.ARMOR_SOURCE_PARTS.items():
+            source = self.body[source_name]
+            self.body[armor_name].set_pose(
+                Pose(
+                    source.target_anchor,
+                    source.target_pivot,
+                    source.target_angle,
+                    self._armor_part_visible.get(armor_name, False)
+                    and source.target_show,
+                    False,
+                )
+            )
+        if instant:
+            for part in self.body.values():
+                part.anchor = part.target_anchor
+                part.pivot = part.target_pivot
+                part.angle = part.target_angle
+                part.show = part.target_show
+                part.flip_x = part.target_flip_x
+            self._sync_armor_parts_to_body()
 
     # ---------- 姿态计算子方法 ----------
 

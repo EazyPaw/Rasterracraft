@@ -358,7 +358,7 @@ class SavesMenu(GUI):
     def _get_preview(self, save: dict, size: int) -> pygame.Surface | None:
         icon_path = save_manager.icon_path(str(save.get("id", "")))
         if not icon_path.exists():
-            return None
+            return pygame.transform.scale(self.client.resources_manager.get_texture_img('rasterracraft.unknow_level'), (size, size))
         mtime = icon_path.stat().st_mtime
         key = (str(icon_path), size, mtime)
         if key in self._preview_cache:

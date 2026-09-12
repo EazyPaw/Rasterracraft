@@ -139,6 +139,96 @@ class CHEST(BlockItem):
         return block.get_texture(max(1, int(round(16 * size))), client=client)
 
 
+class SpriteBlockItem(BlockItem):
+    """Block item whose inventory icon is a dedicated item sprite."""
+
+    texture_size = 1.0
+    texture_shadow = False
+
+    @classmethod
+    @client_method
+    def get_texture(cls, size, client):
+        original = client.resources_manager.get_texture_img(cls._texture_path)
+        if original is None:
+            return None
+        key = (round(float(size), 4), original)
+        cache = cls.__dict__.get("_scaled_texture_cache")
+        if cache is None:
+            cache = {}
+            cls._scaled_texture_cache = cache
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        texture = pygame.transform.scale(
+            original,
+            (
+                max(1, int(round(original.get_width() * size))),
+                max(1, int(round(original.get_height() * size))),
+            ),
+        )
+        cache[key] = texture
+        if len(cache) > 64:
+            cache.pop(next(iter(cache)))
+        return texture
+
+
+@register_material
+class OAK_DOOR(SpriteBlockItem):
+    name_id = "oak_door"
+    name = "item.doorOak.name"
+    target_block_id = "oak_door"
+    _texture_path = "items.door_wood"
+
+
+@register_material
+class SPRUCE_DOOR(SpriteBlockItem):
+    name_id = "spruce_door"
+    name = "item.doorSpruce.name"
+    target_block_id = "spruce_door"
+    _texture_path = "items.door_spruce"
+
+
+@register_material
+class BIRCH_DOOR(SpriteBlockItem):
+    name_id = "birch_door"
+    name = "item.doorBirch.name"
+    target_block_id = "birch_door"
+    _texture_path = "items.door_birch"
+
+
+@register_material
+class JUNGLE_DOOR(SpriteBlockItem):
+    name_id = "jungle_door"
+    name = "item.doorJungle.name"
+    target_block_id = "jungle_door"
+    _texture_path = "items.door_jungle"
+
+
+@register_material
+class ACACIA_DOOR(SpriteBlockItem):
+    name_id = "acacia_door"
+    name = "item.doorAcacia.name"
+    target_block_id = "acacia_door"
+    _texture_path = "items.door_acacia"
+
+
+@register_material
+class DARK_OAK_DOOR(SpriteBlockItem):
+    name_id = "dark_oak_door"
+    name = "item.doorDarkOak.name"
+    target_block_id = "dark_oak_door"
+    _texture_path = "items.door_dark_oak"
+
+
+@register_material(aliases=("red_bed",))
+class BED(SpriteBlockItem):
+    name_id = "bed"
+    name = "item.bed.name"
+    target_block_id = "bed"
+    _texture_path = "items.bed"
+    max_stack_size = 1
+
+
 @register_material
 class GLASS(BlockItem):
     name_id = "glass"
@@ -403,9 +493,197 @@ class DIAMOND_BLOCK(BlockItem):
 @register_material
 class OAK_SLAB(BlockItem):
     name_id = "oak_slab"
-    name = "tile.woodSlab.name"
+    name = "tile.woodSlab.oak.name"
     target_block_id = "oak_slab"
 
+
+@register_material
+class SPRUCE_SLAB(BlockItem):
+    name_id = "spruce_slab"
+    name = "tile.woodSlab.spruce.name"
+    target_block_id = "spruce_slab"
+
+
+@register_material
+class BIRCH_SLAB(BlockItem):
+    name_id = "birch_slab"
+    name = "tile.woodSlab.birch.name"
+    target_block_id = "birch_slab"
+
+
+@register_material
+class JUNGLE_SLAB(BlockItem):
+    name_id = "jungle_slab"
+    name = "tile.woodSlab.jungle.name"
+    target_block_id = "jungle_slab"
+
+
+@register_material
+class ACACIA_SLAB(BlockItem):
+    name_id = "acacia_slab"
+    name = "tile.woodSlab.acacia.name"
+    target_block_id = "acacia_slab"
+
+
+@register_material
+class DARK_OAK_SLAB(BlockItem):
+    name_id = "dark_oak_slab"
+    name = "tile.woodSlab.big_oak.name"
+    target_block_id = "dark_oak_slab"
+
+
+@register_material
+class STONE_SLAB(BlockItem):
+    name_id = "stone_slab"
+    name = "tile.stoneSlab.stone.name"
+    target_block_id = "stone_slab"
+
+
+@register_material
+class COBBLESTONE_SLAB(BlockItem):
+    name_id = "cobblestone_slab"
+    name = "tile.stoneSlab.cobble.name"
+    target_block_id = "cobblestone_slab"
+
+
+@register_material
+class SANDSTONE_SLAB(BlockItem):
+    name_id = "sandstone_slab"
+    name = "tile.stoneSlab.sand.name"
+    target_block_id = "sandstone_slab"
+
+
+@register_material
+class RED_SANDSTONE_SLAB(BlockItem):
+    name_id = "red_sandstone_slab"
+    name = "tile.stoneSlab2.red_sandstone.name"
+    target_block_id = "red_sandstone_slab"
+
+
+@register_material
+class OAK_STAIRS(BlockItem):
+    name_id = "oak_stairs"
+    name = "tile.stairsWood.name"
+    target_block_id = "oak_stairs"
+
+
+@register_material
+class SPRUCE_STAIRS(BlockItem):
+    name_id = "spruce_stairs"
+    name = "tile.stairsWoodSpruce.name"
+    target_block_id = "spruce_stairs"
+
+
+@register_material
+class BIRCH_STAIRS(BlockItem):
+    name_id = "birch_stairs"
+    name = "tile.stairsWoodBirch.name"
+    target_block_id = "birch_stairs"
+
+
+@register_material
+class JUNGLE_STAIRS(BlockItem):
+    name_id = "jungle_stairs"
+    name = "tile.stairsWoodJungle.name"
+    target_block_id = "jungle_stairs"
+
+
+@register_material
+class ACACIA_STAIRS(BlockItem):
+    name_id = "acacia_stairs"
+    name = "tile.stairsWoodAcacia.name"
+    target_block_id = "acacia_stairs"
+
+
+@register_material
+class DARK_OAK_STAIRS(BlockItem):
+    name_id = "dark_oak_stairs"
+    name = "tile.stairsWoodDarkOak.name"
+    target_block_id = "dark_oak_stairs"
+
+
+@register_material
+class STONE_STAIRS(BlockItem):
+    name_id = "stone_stairs"
+    name = "tile.stairsStone.name"
+    target_block_id = "stone_stairs"
+
+
+@register_material
+class COBBLESTONE_STAIRS(BlockItem):
+    name_id = "cobblestone_stairs"
+    name = "tile.stairsStone.name"
+    target_block_id = "cobblestone_stairs"
+
+
+@register_material
+class SANDSTONE_STAIRS(BlockItem):
+    name_id = "sandstone_stairs"
+    name = "tile.stairsSandStone.name"
+    target_block_id = "sandstone_stairs"
+
+
+@register_material
+class RED_SANDSTONE_STAIRS(BlockItem):
+    name_id = "red_sandstone_stairs"
+    name = "tile.stairsRedSandStone.name"
+    target_block_id = "red_sandstone_stairs"
+
+
+@register_material
+class OAK_FENCE(BlockItem):
+    name_id = "oak_fence"
+    name = "tile.fence.name"
+    target_block_id = "oak_fence"
+
+
+@register_material
+class SPRUCE_FENCE(BlockItem):
+    name_id = "spruce_fence"
+    name = "tile.spruceFence.name"
+    target_block_id = "spruce_fence"
+
+
+@register_material
+class BIRCH_FENCE(BlockItem):
+    name_id = "birch_fence"
+    name = "tile.birchFence.name"
+    target_block_id = "birch_fence"
+
+
+@register_material
+class JUNGLE_FENCE(BlockItem):
+    name_id = "jungle_fence"
+    name = "tile.jungleFence.name"
+    target_block_id = "jungle_fence"
+
+
+@register_material
+class ACACIA_FENCE(BlockItem):
+    name_id = "acacia_fence"
+    name = "tile.acaciaFence.name"
+    target_block_id = "acacia_fence"
+
+
+@register_material
+class DARK_OAK_FENCE(BlockItem):
+    name_id = "dark_oak_fence"
+    name = "tile.darkOakFence.name"
+    target_block_id = "dark_oak_fence"
+
+
+@register_material
+class COBBLESTONE_WALL(BlockItem):
+    name_id = "cobblestone_wall"
+    name = "tile.cobbleWall.normal.name"
+    target_block_id = "cobblestone_wall"
+
+
+@register_material
+class LADDER(BlockItem):
+    name_id = "ladder"
+    name = "tile.ladder.name"
+    target_block_id = "ladder"
 
 @register_material
 class MYCELIUM(BlockItem):
@@ -975,7 +1253,343 @@ class WHITE_WOOL(BlockItem):
     target_block_id = "white_wool"
 
 
+
+class ColoredBlockItem(BlockItem):
+    pass
+
+class ColoredGlass(ColoredBlockItem):
+    texture_shadow = False
+
 @register_material
+class WHITE_STAINED_GLASS(ColoredGlass):
+    name_id = "white_stained_glass"
+    name = "tile.stainedGlass.white.name"
+    target_block_id = "white_stained_glass"
+
+
+@register_material
+class ORANGE_WOOL(ColoredBlockItem):
+    name_id = "orange_wool"
+    name = "tile.cloth.orange.name"
+    target_block_id = "orange_wool"
+
+
+@register_material
+class ORANGE_STAINED_GLASS(ColoredGlass):
+    name_id = "orange_stained_glass"
+    name = "tile.stainedGlass.orange.name"
+    target_block_id = "orange_stained_glass"
+
+
+@register_material
+class MAGENTA_WOOL(ColoredBlockItem):
+    name_id = "magenta_wool"
+    name = "tile.cloth.magenta.name"
+    target_block_id = "magenta_wool"
+
+
+@register_material
+class MAGENTA_STAINED_GLASS(ColoredGlass):
+    name_id = "magenta_stained_glass"
+    name = "tile.stainedGlass.magenta.name"
+    target_block_id = "magenta_stained_glass"
+
+
+@register_material
+class LIGHT_BLUE_WOOL(ColoredBlockItem):
+    name_id = "light_blue_wool"
+    name = "tile.cloth.light_blue.name"
+    target_block_id = "light_blue_wool"
+
+
+@register_material
+class LIGHT_BLUE_STAINED_GLASS(ColoredGlass):
+    name_id = "light_blue_stained_glass"
+    name = "tile.stainedGlass.light_blue.name"
+    target_block_id = "light_blue_stained_glass"
+
+
+@register_material
+class YELLOW_WOOL(ColoredBlockItem):
+    name_id = "yellow_wool"
+    name = "tile.cloth.yellow.name"
+    target_block_id = "yellow_wool"
+
+
+@register_material
+class YELLOW_STAINED_GLASS(ColoredGlass):
+    name_id = "yellow_stained_glass"
+    name = "tile.stainedGlass.yellow.name"
+    target_block_id = "yellow_stained_glass"
+
+
+@register_material
+class LIME_WOOL(ColoredBlockItem):
+    name_id = "lime_wool"
+    name = "tile.cloth.lime.name"
+    target_block_id = "lime_wool"
+
+
+@register_material
+class LIME_STAINED_GLASS(ColoredGlass):
+    name_id = "lime_stained_glass"
+    name = "tile.stainedGlass.lime.name"
+    target_block_id = "lime_stained_glass"
+
+
+@register_material
+class PINK_WOOL(ColoredBlockItem):
+    name_id = "pink_wool"
+    name = "tile.cloth.pink.name"
+    target_block_id = "pink_wool"
+
+
+@register_material
+class PINK_STAINED_GLASS(ColoredGlass):
+    name_id = "pink_stained_glass"
+    name = "tile.stainedGlass.pink.name"
+    target_block_id = "pink_stained_glass"
+
+
+@register_material
+class GRAY_WOOL(ColoredBlockItem):
+    name_id = "gray_wool"
+    name = "tile.cloth.gray.name"
+    target_block_id = "gray_wool"
+
+
+@register_material
+class GRAY_STAINED_GLASS(ColoredGlass):
+    name_id = "gray_stained_glass"
+    name = "tile.stainedGlass.gray.name"
+    target_block_id = "gray_stained_glass"
+
+
+@register_material
+class LIGHT_GRAY_WOOL(ColoredBlockItem):
+    name_id = "light_gray_wool"
+    name = "tile.cloth.silver.name"
+    target_block_id = "light_gray_wool"
+
+
+@register_material
+class LIGHT_GRAY_STAINED_GLASS(ColoredGlass):
+    name_id = "light_gray_stained_glass"
+    name = "tile.stainedGlass.silver.name"
+    target_block_id = "light_gray_stained_glass"
+
+
+@register_material
+class CYAN_WOOL(ColoredBlockItem):
+    name_id = "cyan_wool"
+    name = "tile.cloth.cyan.name"
+    target_block_id = "cyan_wool"
+
+
+@register_material
+class CYAN_STAINED_GLASS(ColoredGlass):
+    name_id = "cyan_stained_glass"
+    name = "tile.stainedGlass.cyan.name"
+    target_block_id = "cyan_stained_glass"
+
+
+@register_material
+class PURPLE_WOOL(ColoredBlockItem):
+    name_id = "purple_wool"
+    name = "tile.cloth.purple.name"
+    target_block_id = "purple_wool"
+
+
+@register_material
+class PURPLE_STAINED_GLASS(ColoredGlass):
+    name_id = "purple_stained_glass"
+    name = "tile.stainedGlass.purple.name"
+    target_block_id = "purple_stained_glass"
+
+
+@register_material
+class BLUE_WOOL(ColoredBlockItem):
+    name_id = "blue_wool"
+    name = "tile.cloth.blue.name"
+    target_block_id = "blue_wool"
+
+
+@register_material
+class BLUE_STAINED_GLASS(ColoredGlass):
+    name_id = "blue_stained_glass"
+    name = "tile.stainedGlass.blue.name"
+    target_block_id = "blue_stained_glass"
+
+
+@register_material
+class BROWN_WOOL(ColoredBlockItem):
+    name_id = "brown_wool"
+    name = "tile.cloth.brown.name"
+    target_block_id = "brown_wool"
+
+
+@register_material
+class BROWN_STAINED_GLASS(ColoredGlass):
+    name_id = "brown_stained_glass"
+    name = "tile.stainedGlass.brown.name"
+    target_block_id = "brown_stained_glass"
+
+
+@register_material
+class GREEN_WOOL(ColoredBlockItem):
+    name_id = "green_wool"
+    name = "tile.cloth.green.name"
+    target_block_id = "green_wool"
+
+
+@register_material
+class GREEN_STAINED_GLASS(ColoredGlass):
+    name_id = "green_stained_glass"
+    name = "tile.stainedGlass.green.name"
+    target_block_id = "green_stained_glass"
+
+
+@register_material
+class RED_WOOL(ColoredBlockItem):
+    name_id = "red_wool"
+    name = "tile.cloth.red.name"
+    target_block_id = "red_wool"
+
+
+@register_material
+class RED_STAINED_GLASS(ColoredGlass):
+    name_id = "red_stained_glass"
+    name = "tile.stainedGlass.red.name"
+    target_block_id = "red_stained_glass"
+
+
+@register_material
+class BLACK_WOOL(ColoredBlockItem):
+    name_id = "black_wool"
+    name = "tile.cloth.black.name"
+    target_block_id = "black_wool"
+
+
+@register_material
+class BLACK_STAINED_GLASS(ColoredGlass):
+    name_id = "black_stained_glass"
+    name = "tile.stainedGlass.black.name"
+    target_block_id = "black_stained_glass"
+
+
+
+@register_material
+class BRICKS(BlockItem):
+    name_id = "bricks"
+    name = "tile.bricks.name"
+    target_block_id = "bricks"
+
+
+@register_material
+class BOOKSHELF(BlockItem):
+    name_id = "bookshelf"
+    name = "tile.bookshelf.name"
+    target_block_id = "bookshelf"
+
+
+@register_material
+class END_STONE(BlockItem):
+    name_id = "end_stone"
+    name = "tile.whiteStone.name"
+    target_block_id = "end_stone"
+
+
+@register_material
+class HAY_BLOCK(BlockItem):
+    name_id = "hay_block"
+    name = "tile.hayBlock.name"
+    target_block_id = "hay_block"
+
+
+@register_material
+class NETHER_BRICKS(BlockItem):
+    name_id = "nether_bricks"
+    name = "tile.netherBrick.name"
+    target_block_id = "nether_bricks"
+
+
+@register_material
+class NETHERRACK(BlockItem):
+    name_id = "netherrack"
+    name = "tile.netherrack.name"
+    target_block_id = "netherrack"
+
+
+@register_material
+class PRISMARINE(BlockItem):
+    name_id = "prismarine"
+    name = "tile.prismarine.rough.name"
+    target_block_id = "prismarine"
+
+
+@register_material
+class PRISMARINE_BRICKS(BlockItem):
+    name_id = "prismarine_bricks"
+    name = "tile.prismarine.bricks.name"
+    target_block_id = "prismarine_bricks"
+
+
+@register_material
+class DARK_PRISMARINE(BlockItem):
+    name_id = "dark_prismarine"
+    name = "tile.prismarine.dark.name"
+    target_block_id = "dark_prismarine"
+
+
+@register_material
+class QUARTZ_BLOCK(BlockItem):
+    name_id = "quartz_block"
+    name = "tile.quartz_block.name"
+    target_block_id = "quartz_block"
+
+
+@register_material
+class QUARTZ_COLUMN(BlockItem):
+    name_id = "quartz_column"
+    name = "tile.quartz_block_lines.name"
+    target_block_id = "quartz_column"
+
+
+@register_material
+class CHISELED_QUARTZ_BLOCK(BlockItem):
+    name_id = "chiseled_quartz_block"
+    name = "tile.quartz_block_chiseled.name"
+    target_block_id = "chiseled_quartz_block"
+
+
+@register_material
+class STONE_BRICKS(BlockItem):
+    name_id = "stone_bricks"
+    name = "tile.stonebrick.name"
+    target_block_id = "stone_bricks"
+
+
+@register_material
+class MOSSY_STONE_BRICKS(BlockItem):
+    name_id = "mossy_stone_bricks"
+    name = "tile.stonebrick.mossy.name"
+    target_block_id = "mossy_stone_bricks"
+
+
+@register_material
+class CRACKED_STONE_BRICKS(BlockItem):
+    name_id = "cracked_stone_bricks"
+    name = "tile.stonebrick.cracked.name"
+    target_block_id = "cracked_stone_bricks"
+
+
+@register_material
+class CHISELED_STONE_BRICKS(BlockItem):
+    name_id = "chiseled_stone_bricks"
+    name = "tile.stonebrick.chiseled.name"
+    target_block_id = "chiseled_stone_bricks"
+
+
 class STICK(Material):
     name_id = "stick"
     name = "item.stick.name"

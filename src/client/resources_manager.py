@@ -187,14 +187,19 @@ class ResourcesManager:
             logging.warning(f"Invalid texture key format: '{key}'")
             return self.missing_texture
 
-        # 第一个部分是类别（blocks, gui, items等）
-        category = parts[0]
-        # 剩余部分组成文件路径
-        file_path = "/".join(parts[1:])
+        if parts[0] == 'rasterracraft':
+            file_path = "/".join(parts[1:])
+            full_path = f"assets/rasterracraft/{file_path}.png"
+            meta_path = f"assets/rasterracraft/{file_path}.png.mcmeta"
+        else:
+            # 第一个部分是类别（blocks, gui, items等）
+            category = parts[0]
+            # 剩余部分组成文件路径
+            file_path = "/".join(parts[1:])
 
-        # 构建完整路径：assets/minecraft/textures/{category}/{subpath}.png
-        full_path = f"assets/minecraft/textures/{category}/{file_path}.png"
-        meta_path = f"assets/minecraft/textures/{category}/{file_path}.png.mcmeta"
+            # 构建完整路径：assets/minecraft/textures/{category}/{subpath}.png
+            full_path = f"assets/minecraft/textures/{category}/{file_path}.png"
+            meta_path = f"assets/minecraft/textures/{category}/{file_path}.png.mcmeta"
 
         try:
             if not os.path.exists(full_path):

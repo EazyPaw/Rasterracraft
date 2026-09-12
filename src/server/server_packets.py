@@ -59,6 +59,8 @@ def _encode_packet_object(obj, obj_type, args) -> Packet | dict:
             "experience_level": getattr(obj, "experience_level", 0),
             "experience_total": getattr(obj, "experience_total", 0),
             "score": getattr(obj, "score", 0),
+            "sleeping": bool(getattr(obj, "sleeping", False)),
+            "sleeping_bed": getattr(obj, "sleeping_bed", None),
             "selected_slot": getattr(obj, "selected_slot", 0),
             "teleport_id": getattr(obj, "_pending_teleport_id", None),
             "inventory": serialize_inventory(obj.inventory),
@@ -229,7 +231,7 @@ def _read_placement_context(
 def _process_right_click(packet: dict, player: Player) -> None:
     if not _allow_action_this_tick(player, "right_click"):
         return
-    if player.health <= 0:
+    if player.health <= 0 or player.sleeping:
         return
 
     position_keys = ("x", "y", "z")
@@ -333,6 +335,8 @@ def _handle_player_move(packet: dict, player: Player) -> None:
         return
     if player.health <= 0:
         return
+    if player.sleeping:
+        return
     try:
         new_x = float(packet.get("x"))
         new_y = float(packet.get("y"))
@@ -433,6 +437,8 @@ def _handle_chunk_ready(packet: dict, player: Player) -> None:
 
 @SERVER_PACKET_DISPATCHER.handler("PlayerAction")
 def _handle_player_action(packet: dict, player: Player) -> None:
+    if player.sleeping:
+        return
     action = packet.get("action")
     if action == "abort_breaking":
         player.clear_breaking()
@@ -456,6 +462,8 @@ def _handle_player_action(packet: dict, player: Player) -> None:
 
 @SERVER_PACKET_DISPATCHER.handler("BreakBlock")
 def _handle_break_block(packet: dict, player: Player) -> None:
+    if player.sleeping:
+        return
     position = _read_block_position(packet)
     if position is not None:
         player.finish_breaking(*position)
@@ -468,6 +476,8 @@ def _handle_right_click(packet: dict, player: Player) -> None:
 
 @SERVER_PACKET_DISPATCHER.handler("PickupItem")
 def _handle_pickup_item(packet: dict, player: Player) -> None:
+    if player.sleeping:
+        return
     from src.server.entities.item import Item
 
     entity = player.world.entities.get(str(packet.get("uuid", "")))
@@ -477,6 +487,8 @@ def _handle_pickup_item(packet: dict, player: Player) -> None:
 
 @SERVER_PACKET_DISPATCHER.handler("AttackEntity")
 def _handle_attack_entity(packet: dict, player: Player) -> None:
+    if player.sleeping:
+        return
     target = _find_attack_target(player, packet.get("uuid", ""))
     current_tick = int(getattr(player.world.server, "server_ticks", 0))
     if (
@@ -494,6 +506,8 @@ def _handle_attack_entity(packet: dict, player: Player) -> None:
 
 @SERVER_PACKET_DISPATCHER.handler("InteractEntity")
 def _handle_interact_entity(packet: dict, player: Player) -> None:
+    if player.sleeping:
+        return
     target = _find_attack_target(player, packet.get("uuid", ""))
     if target is not None and _can_player_reach_entity(player, target):
         slot = max(0, min(len(player.inventory) - 1, int(player.selected_slot)))
@@ -806,9 +820,44 @@ def _handle_request_respawn(packet: dict, player: Player) -> None:
     player.clear_breaking()
     player.clear_eating()
     player.clear_blocking()
-    block = player.world.find_top_block(player.spawn_point, 0)
+
+    saved_spawn = player.spawn_point
+    if isinstance(saved_spawn, dict):
+        server = player.world.server
+        world = server.worlds.get(str(saved_spawn.get("world", "")))
+        try:
+            bed_x = int(saved_spawn["x"])
+            bed_y = int(saved_spawn["y"])
+            bed_z = int(saved_spawn["z"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            world = None
+        if world is not None and 0 <= bed_y < world.attribute.MAX_BUILD_HEIGHT:
+            if not world.is_chunk_loaded(bed_x // 16):
+                world.generate_chunk(bed_x // 16)
+            bed = world.get_block(bed_x, bed_y, bed_z)
+            counterpart_location = getattr(
+                bed, "get_counterpart_location", lambda: None
+            )()
+            if (
+                counterpart_location is not None
+                and not world.is_chunk_loaded(int(counterpart_location.x) // 16)
+            ):
+                world.generate_chunk(int(counterpart_location.x) // 16)
+            respawn_position = getattr(bed, "get_respawn_position", lambda _p: None)(
+                player
+            )
+            if respawn_position is not None:
+                respawn_x, respawn_y, respawn_z = respawn_position
+                player.z = int(respawn_z)
+                player.teleport_to(respawn_x, respawn_y, world)
+                return
+        server.send_chat_to_player(player, "Your home bed was missing or obstructed.")
+
+    spawn_x = int(getattr(player.world, "spawn_point", 0))
+    block = player.world.find_top_block(spawn_x, 0)
     if block is not None:
-        player.teleport_to(0.0, block.location.y + 1)
+        player.z = 0
+        player.teleport_to(float(spawn_x), block.location.y + 1)
 
 
 def _read_structure_point(value) -> tuple[int, int, int] | None:

@@ -218,6 +218,9 @@ class BlockItem(Material):
             math.floor(player.y) if player is not None else 0,
             0,
         )
+        prepare_preview = getattr(block, "prepare_item_preview", None)
+        if callable(prepare_preview):
+            prepare_preview()
         return block.get_texture(block_size, client=client)
 
     @classmethod

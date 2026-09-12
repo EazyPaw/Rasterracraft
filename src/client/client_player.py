@@ -36,6 +36,8 @@ class ClientPlayer(Entity):
         self.food_level = 20
         self.saturation = 5.0
         self.blocking = False
+        self.sleeping = False
+        self.sleeping_bed = None
         self.hurt_time = 0
         self.dead = False
         self.experience = 0
@@ -95,6 +97,12 @@ class ClientPlayer(Entity):
 
     def move_update(self):
         if self.dead:
+            return
+        if self.sleeping:
+            self.motion.x = 0
+            self.motion.y = 0
+            self.sneaking = False
+            self.sprinting = False
             return
         if not self.client.can_simulate_player(self):
             self.motion.x = 0

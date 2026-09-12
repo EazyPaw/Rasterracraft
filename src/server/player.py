@@ -30,6 +30,7 @@ class Player(Entity):
     NATURAL_REGEN_FOOD_LEVEL = 18
     NATURAL_REGEN_TICKS = 80
     STARVATION_TICKS = 80
+    SLEEP_DURATION_TICKS = 100
 
     MAIN_TOP_LEFT_ORDER = (
         tuple(range(27, 36)) + tuple(range(18, 27)) + tuple(range(9, 18))
@@ -103,6 +104,9 @@ class Player(Entity):
         self._blocking_slot: int | None = None
         self._blocking_material_id: str | None = None
         self._last_block_action_tick = -10_000
+        self.sleeping = False
+        self.sleep_ticks = 0
+        self.sleeping_bed: dict[str, int | str] | None = None
         self._last_move_tick = -1
         self.attack_strength_ticker = 20
         self._last_attribute_attack_tick: int | None = None
@@ -419,6 +423,111 @@ class Player(Entity):
                 int(self.x), int(self.y), getattr(self, "z", 0)
             ):
                 self.world.server.send_client_socket(observer, self, "EntityUpdate")
+
+    def _sync_sleeping_state(self) -> None:
+        server = getattr(self.world, "server", None)
+        if server is None or self not in getattr(server, "players", ()):
+            return
+        # The local player is normally omitted from entity replication, but
+        # sleeping is server-authoritative and must drive its own skeleton too.
+        server.send_client_socket(self, self, "EntityUpdate")
+        self._broadcast_action_state()
+
+    def _get_sleeping_bed(self):
+        state = self.sleeping_bed
+        if not isinstance(state, dict):
+            return None
+        if str(state.get("world")) != str(getattr(self.world, "id_name", "")):
+            return None
+        try:
+            location = Location(
+                self.world,
+                int(state["x"]),
+                int(state["y"]),
+                int(state["z"]),
+            )
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+        bed = self.world.get_block(location)
+        if getattr(bed, "block_id", None) != "bed" or getattr(
+            bed, "part", None
+        ) != "head":
+            return None
+        return bed
+
+    def start_sleeping(self, bed) -> bool:
+        """Enter the authoritative lying state at a bed's head block."""
+        location = getattr(bed, "location", None)
+        if self.health <= 0 or location is None or location.world is not self.world:
+            return False
+        sleeping_bed = {
+            "world": str(self.world.id_name),
+            "x": int(location.x),
+            "y": int(location.y),
+            "z": int(location.z),
+        }
+        if self.sleeping and self.sleeping_bed == sleeping_bed:
+            return True
+        if self.sleeping:
+            self.stop_sleeping(reposition=True)
+
+        self.teleport_to(
+            float(location.x) + 0.5 - self.width * 0.5,
+            float(location.y) + 9 / 16,
+        )
+        self.facing = 1 if int(getattr(bed, "facing", 1)) == 1 else 0
+        self.sneaking = False
+        self.sprinting = False
+        self.sleeping = True
+        self.sleep_ticks = 0
+        self.sleeping_bed = sleeping_bed
+        self._sync_sleeping_state()
+        return True
+
+    def stop_sleeping(self, *, reposition: bool = True, sync: bool = True) -> None:
+        """Leave the bed and, when possible, stand at its safe exit position."""
+        if not self.sleeping and self.sleeping_bed is None:
+            return
+        bed = self._get_sleeping_bed()
+        wake_position = (
+            bed.get_respawn_position(self)
+            if reposition and bed is not None and hasattr(bed, "get_respawn_position")
+            else None
+        )
+        self.sleeping = False
+        self.sleep_ticks = 0
+        self.sleeping_bed = None
+        if wake_position is not None:
+            wake_x, wake_y, wake_z = wake_position
+            self.z = int(wake_z)
+            if sync:
+                self.teleport_to(wake_x, wake_y)
+            else:
+                self.x = float(wake_x)
+                self.y = float(wake_y)
+                self.motion.x = 0.0
+                self.motion.y = 0.0
+                self.fall_distance = 0.0
+        elif sync:
+            self._sync_sleeping_state()
+        if sync and wake_position is not None:
+            self._broadcast_action_state()
+
+    def tick_sleeping(self) -> None:
+        if not self.sleeping:
+            return
+        if self._get_sleeping_bed() is None or self.health <= 0:
+            self.stop_sleeping(reposition=False)
+            return
+        time_of_day = int(self.world.world_time) % 24000
+        if not 12542 <= time_of_day <= 23459:
+            self.stop_sleeping(reposition=True)
+            return
+        self.motion.x = 0.0
+        self.motion.y = 0.0
+        self.sprinting = False
+        self.sneaking = False
+        self.sleep_ticks = min(self.SLEEP_DURATION_TICKS, self.sleep_ticks + 1)
 
     def clear_breaking(self, *, notify: bool = True) -> None:
         old_target = self.breaking_target
@@ -959,6 +1068,7 @@ class Player(Entity):
             self.exhaustion = min(40.0, self.exhaustion + amount)
 
     def tick_server(self) -> None:
+        self.tick_sleeping()
         self.tick_damage_state()
         if self.tick_status_effects():
             self.sync_effects()
@@ -1139,6 +1249,8 @@ class Player(Entity):
         damage_type: type[DamageType],
         source,
     ) -> None:
+        if self.sleeping:
+            self.stop_sleeping(reposition=True)
         super().on_damage_applied(actual_damage, raw_damage, damage_type, source)
         if self.health <= 0 and self.blocking:
             self.clear_blocking(sync=True)
@@ -1899,6 +2011,8 @@ class Player(Entity):
             )
 
     def teleport_to(self, x, y, world=None):
+        if self.sleeping:
+            self.stop_sleeping(reposition=False, sync=False)
         self.x = x
         self.y = y
         if world:

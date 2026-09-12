@@ -732,6 +732,700 @@ class DARK_OAK_PLANK(Block):
     preferred_tool = "axe"
 
 
+class WoodenFence(FENCES):
+    break_sound = "dig.wood"
+    hardness = 2.0
+    blast_resistance = 3.0
+    preferred_tool = "axe"
+
+
+@register_block
+class OAK_FENCE(WoodenFence):
+    block_id = "oak_fence"
+    name = "tile.fence.name"
+    _texture_path = "blocks.planks_oak"
+
+
+@register_block
+class SPRUCE_FENCE(WoodenFence):
+    block_id = "spruce_fence"
+    name = "tile.spruceFence.name"
+    _texture_path = "blocks.planks_spruce"
+
+
+@register_block
+class BIRCH_FENCE(WoodenFence):
+    block_id = "birch_fence"
+    name = "tile.birchFence.name"
+    _texture_path = "blocks.planks_birch"
+
+
+@register_block
+class JUNGLE_FENCE(WoodenFence):
+    block_id = "jungle_fence"
+    name = "tile.jungleFence.name"
+    _texture_path = "blocks.planks_jungle"
+
+
+@register_block
+class ACACIA_FENCE(WoodenFence):
+    block_id = "acacia_fence"
+    name = "tile.acaciaFence.name"
+    _texture_path = "blocks.planks_acacia"
+
+
+@register_block
+class DARK_OAK_FENCE(WoodenFence):
+    block_id = "dark_oak_fence"
+    name = "tile.darkOakFence.name"
+    _texture_path = "blocks.planks_big_oak"
+
+
+@register_block
+class COBBLESTONE_WALL(WALLS):
+    block_id = "cobblestone_wall"
+    name = "tile.cobbleWall.normal.name"
+    _texture_path = "blocks.cobblestone"
+    break_sound = "dig.stone"
+    hardness = 2.0
+    blast_resistance = 6.0
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+class PairedBlock(Block):
+    """Shared lifecycle for blocks represented by two world cells."""
+
+    def get_counterpart_location(self):
+        raise NotImplementedError
+
+    def make_counterpart(self):
+        raise NotImplementedError
+
+    def get_counterpart(self):
+        if self.location is None:
+            return None
+        location = self.get_counterpart_location()
+        counterpart = self.location.world.get_block(location)
+        return counterpart if self.is_matching_counterpart(counterpart) else None
+
+    def is_matching_counterpart(self, counterpart) -> bool:
+        return type(counterpart) is type(self)
+
+    @staticmethod
+    def _set_block(world, block, location, *, block_update=False):
+        try:
+            world.set_block(
+                block,
+                location,
+                send_packet=True,
+                block_update=block_update,
+            )
+        except TypeError:
+            # ClientWorld has a smaller signature. This path is used by local
+            # break prediction, while authoritative placement stays server-side.
+            world.set_block(block, location)
+
+    def _remove_counterpart(self) -> None:
+        counterpart = self.get_counterpart()
+        if counterpart is not None:
+            self._set_block(
+                self.location.world,
+                AIR(),
+                counterpart.location,
+                block_update=False,
+            )
+
+    @staticmethod
+    def _has_full_top_support(world, location) -> bool:
+        support = world.get_block(location.add(0, -1, 0))
+        shape = support.get_collision_box()
+        return any(
+            box.min_x <= 0 and box.max_x >= 1 and box.max_y >= 1
+            for box in shape
+        )
+
+    def on_break(self):
+        self._remove_counterpart()
+
+    def place_at(self, location: Location) -> bool:
+        world = location.world
+        counterpart_location = self.get_counterpart_location_for(location)
+        if (
+            not world.get_block(location).replaceable
+            or not world.get_block(counterpart_location).replaceable
+            or not getattr(world, "is_chunk_loaded", lambda _rx: True)(
+                int(counterpart_location.x) // 16
+            )
+        ):
+            return False
+
+        counterpart = self.make_counterpart()
+        self._set_block(
+            world,
+            counterpart,
+            counterpart_location,
+            block_update=False,
+        )
+        self._set_block(world, self, location, block_update=True)
+        if world.get_block(location) is self and world.get_block(
+            counterpart_location
+        ) is counterpart:
+            return True
+
+        if world.get_block(counterpart_location) is counterpart:
+            self._set_block(world, AIR(), counterpart_location, block_update=False)
+        return False
+
+    def _discard_orphan(self) -> None:
+        if self.location is not None:
+            self._set_block(
+                self.location.world,
+                AIR(),
+                self.location,
+                block_update=False,
+            )
+
+
+class DoorBlock(PairedBlock):
+    """Two-cell wooden door adapted from Minecraft's DoorBlock state model."""
+
+    solid = False
+    collision_box = FULL_BLOCK
+    suffocating = False
+    redstone_conducting = False
+    light_attenuation = 1
+    has_transparent_pixels = True
+    break_sound = "dig.wood"
+    hardness = 3.0
+    blast_resistance = 3.0
+    preferred_tool = "axe"
+    texture_stem = "wood"
+    _state_texture_cache = {}
+
+    def __init__(self, nbt=None):
+        self.half = "lower"
+        self.open = False
+        self.hinge = "left"
+        self.facing = 1
+        super().__init__(nbt)
+
+    def write_nbt(self, nbt):
+        super().write_nbt(nbt)
+        self.half = self.half if self.half in ("lower", "upper") else "lower"
+        self.hinge = self.hinge if self.hinge in ("left", "right") else "left"
+        self.facing = 1 if self.facing >= 0 else -1
+        self.open = bool(self.open)
+
+    def get_counterpart_location_for(self, location):
+        return location.add(0, 1 if self.half == "lower" else -1, 0)
+
+    def get_counterpart_location(self):
+        return self.get_counterpart_location_for(self.location)
+
+    def is_matching_counterpart(self, counterpart) -> bool:
+        return (
+            type(counterpart) is type(self)
+            and counterpart.half != self.half
+            and counterpart.facing == self.facing
+            and counterpart.hinge == self.hinge
+        )
+
+    def make_counterpart(self):
+        counterpart = type(self)()
+        counterpart.half = "upper" if self.half == "lower" else "lower"
+        counterpart.open = self.open
+        counterpart.hinge = self.hinge
+        counterpart.facing = self.facing
+        return counterpart
+
+    @staticmethod
+    def _has_support(world, location) -> bool:
+        return PairedBlock._has_full_top_support(world, location)
+
+    @staticmethod
+    def _is_full_collision_block(block) -> bool:
+        """Match Java's sturdy full-block check for hinge weighting."""
+        return any(
+            box.min_x <= 0
+            and box.min_y <= 0
+            and box.max_x >= 1
+            and box.max_y >= 1
+            for box in block.get_collision_box()
+        )
+
+    @staticmethod
+    def _pointed_hinge(location, context, player) -> str:
+        """Use the half of the placement cell the player's ray points at."""
+        try:
+            pointed_x = float(context.ray_origin[0]) + float(
+                context.ray_direction[0]
+            )
+        except (AttributeError, IndexError, TypeError, ValueError):
+            pointed_x = float(getattr(player, "x", location.x)) + float(
+                getattr(player, "width", 0.6)
+            ) * 0.5
+        return "left" if pointed_x < float(location.x) + 0.5 else "right"
+
+    def _get_hinge_for_placement(self, location, context, player) -> str:
+        """Apply Java's adjacent-door/full-block rules before the click tie-break."""
+        world = location.world
+        left_lower = world.get_block(location.add(-1, 0, 0))
+        right_lower = world.get_block(location.add(1, 0, 0))
+        left_is_door = isinstance(left_lower, DoorBlock) and getattr(
+            left_lower, "half", None
+        ) == "lower"
+        right_is_door = isinstance(right_lower, DoorBlock) and getattr(
+            right_lower, "half", None
+        ) == "lower"
+
+        # A new half of a double door uses the opposite hinge. This takes
+        # precedence over solid neighbours, as it does in Java DoorBlock.
+        if left_is_door and not right_is_door:
+            return "right"
+        if right_is_door and not left_is_door:
+            return "left"
+
+        left_full = sum(
+            self._is_full_collision_block(
+                world.get_block(location.add(-1, vertical_offset, 0))
+            )
+            for vertical_offset in (0, 1)
+        )
+        right_full = sum(
+            self._is_full_collision_block(
+                world.get_block(location.add(1, vertical_offset, 0))
+            )
+            for vertical_offset in (0, 1)
+        )
+        if left_full > right_full:
+            return "left"
+        if right_full > left_full:
+            return "right"
+        return self._pointed_hinge(location, context, player)
+
+    def get_state_for_placement(
+        self,
+        location,
+        *,
+        placement_face=None,
+        player=None,
+        context=None,
+    ):
+        world = location.world
+        upper_location = location.add(0, 1, 0)
+        if (
+            location.y + 1 >= world.attribute.MAX_BUILD_HEIGHT
+            or not world.get_block(upper_location).replaceable
+            or not world.is_chunk_loaded(int(upper_location.x) // 16)
+        ):
+            return None
+        if not world.structure_build_mode and not self._has_support(world, location):
+            return None
+
+        self.half = "lower"
+        self.facing = 1 if int(getattr(player, "facing", 1)) == 1 else -1
+        self.hinge = self._get_hinge_for_placement(location, context, player)
+
+        if player is not None:
+            upper = self.make_counterpart()
+            intersects = getattr(player, "_block_item_intersects_entity", None)
+            if callable(intersects) and intersects(upper, upper_location):
+                return None
+        return self
+
+    def get_collision_box(self):
+        if self.open:
+            return EMPTY
+        if self.hinge == "left":
+            return BlockCollisionBox.from_box(0, 0, 2 / 16, 1)
+        return BlockCollisionBox.from_box(14 / 16, 0, 1, 1)
+
+    def get_texture_path(self):
+        return f"blocks.door_{self.texture_stem}_{self.half}"
+
+    @client_method
+    def get_texture(self, size, client=None):
+        size = max(1, int(round(size)))
+        texture = client.resources_manager.get_texture_img(
+            self.get_texture_path(), flip=self.facing < 0
+        )
+        cache_key = (
+            type(self),
+            texture,
+            size,
+            self.half,
+            self.open,
+            self.hinge,
+            self.facing,
+        )
+        cached = self._state_texture_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if self.open:
+            rendered = pygame.transform.scale(texture, (size, size))
+        else:
+            # A closed 2-D door is the edge-on projection of the 3-D slab.
+            # Preserve both authored edge columns instead of squeezing all 16
+            # columns into a blurry strip. Keeping their original left/right
+            # order also leaves the hinge-side column on the outer edge.
+            source_width, source_height = texture.get_size()
+            native_edge = pygame.Surface((2, source_height), pygame.SRCALPHA)
+            native_edge.blit(texture.subsurface((0, 0, 1, source_height)), (0, 0))
+            native_edge.blit(
+                texture.subsurface((source_width - 1, 0, 1, source_height)),
+                (1, 0),
+            )
+            thickness = max(1, int(round(size * 2 / 16)))
+            edge = pygame.transform.scale(native_edge, (thickness, size))
+            rendered = pygame.Surface((size, size), pygame.SRCALPHA)
+            x = 0 if self.hinge == "left" else size - thickness
+            rendered.blit(edge, (x, 0))
+        self._state_texture_cache[cache_key] = rendered
+        if len(self._state_texture_cache) > 96:
+            self._state_texture_cache.pop(next(iter(self._state_texture_cache)))
+        return rendered
+
+    def on_right_click(self, player) -> bool:
+        counterpart = self.get_counterpart()
+        if counterpart is None:
+            return False
+        opened = not self.open
+        self.open = opened
+        counterpart.open = opened
+        self.notify_state_changed()
+        counterpart.notify_state_changed()
+        server = self.get_server()
+        if server is not None:
+            server.broadcast_sound(
+                "random.door_open" if opened else "random.door_close",
+                self.location.x + 0.5,
+                self.location.y + 0.5,
+                self.location.z,
+            )
+        return True
+
+    def on_update(self):
+        if self.get_counterpart() is None:
+            self._discard_orphan()
+            return
+        lower_location = (
+            self.location if self.half == "lower" else self.location.add(0, -1, 0)
+        )
+        if not self.location.world.structure_build_mode and not self._has_support(
+            self.location.world, lower_location
+        ):
+            self.location.world.break_block(self.location)
+
+
+@register_block
+class OAK_DOOR(DoorBlock):
+    block_id = "oak_door"
+    name = "item.doorOak.name"
+    texture_stem = "wood"
+
+
+@register_block
+class SPRUCE_DOOR(DoorBlock):
+    block_id = "spruce_door"
+    name = "item.doorSpruce.name"
+    texture_stem = "spruce"
+
+
+@register_block
+class BIRCH_DOOR(DoorBlock):
+    block_id = "birch_door"
+    name = "item.doorBirch.name"
+    texture_stem = "birch"
+
+
+@register_block
+class JUNGLE_DOOR(DoorBlock):
+    block_id = "jungle_door"
+    name = "item.doorJungle.name"
+    texture_stem = "jungle"
+
+
+@register_block
+class ACACIA_DOOR(DoorBlock):
+    block_id = "acacia_door"
+    name = "item.doorAcacia.name"
+    texture_stem = "acacia"
+
+
+@register_block
+class DARK_OAK_DOOR(DoorBlock):
+    block_id = "dark_oak_door"
+    name = "item.doorDarkOak.name"
+    texture_stem = "dark_oak"
+
+
+@register_block
+class BED(PairedBlock):
+    """Horizontal two-cell bed with server-authoritative sleep and respawn."""
+
+    block_id = "bed"
+    name = "tile.bed.name"
+    solid = False
+    collision_box = BlockCollisionBox.from_box(0, 0, 1, 9 / 16)
+    suffocating = False
+    redstone_conducting = False
+    light_attenuation = 1
+    has_transparent_pixels = True
+    break_sound = "dig.wood"
+    hardness = 0.2
+    blast_resistance = 0.2
+    bounce_restitution = 0.66
+    _state_texture_cache = {}
+
+    def __init__(self, nbt=None):
+        self.part = "foot"
+        self.facing = 1
+        super().__init__(nbt)
+
+    def write_nbt(self, nbt):
+        super().write_nbt(nbt)
+        self.part = self.part if self.part in ("foot", "head") else "foot"
+        self.facing = 1 if self.facing >= 0 else -1
+
+    def get_counterpart_location_for(self, location):
+        direction = self.facing if self.part == "foot" else -self.facing
+        return location.add(direction, 0, 0)
+
+    def get_counterpart_location(self):
+        return self.get_counterpart_location_for(self.location)
+
+    def is_matching_counterpart(self, counterpart) -> bool:
+        return (
+            type(counterpart) is type(self)
+            and counterpart.part != self.part
+            and counterpart.facing == self.facing
+        )
+
+    def make_counterpart(self):
+        counterpart = type(self)()
+        counterpart.part = "head" if self.part == "foot" else "foot"
+        counterpart.facing = self.facing
+        return counterpart
+
+    @staticmethod
+    def _has_support(world, location) -> bool:
+        return PairedBlock._has_full_top_support(world, location)
+
+    def get_state_for_placement(
+        self,
+        location,
+        *,
+        placement_face=None,
+        player=None,
+        context=None,
+    ):
+        world = location.world
+        self.part = "foot"
+        self.facing = 1 if int(getattr(player, "facing", 1)) == 1 else -1
+        head_location = location.add(self.facing, 0, 0)
+        if (
+            not world.get_block(head_location).replaceable
+            or not world.is_chunk_loaded(int(head_location.x) // 16)
+        ):
+            return None
+        if not world.structure_build_mode and not (
+            self._has_support(world, location)
+            and self._has_support(world, head_location)
+        ):
+            return None
+        if player is not None:
+            head = self.make_counterpart()
+            intersects = getattr(player, "_block_item_intersects_entity", None)
+            if callable(intersects) and intersects(head, head_location):
+                return None
+        return self
+
+    def get_texture_path(self):
+        return f"blocks.bed_{'head' if self.part == 'head' else 'feet'}_side"
+
+    @client_method
+    def get_texture(self, size, client=None):
+        size = max(1, int(round(size)))
+        # The legacy side textures face toward positive x by default: foot leg
+        # and head pillow belong on the two outer ends of the assembled bed.
+        flip = self.facing < 0
+        texture = client.resources_manager.get_texture_img(
+            self.get_texture_path(), flip=flip
+        )
+        cache_key = (texture, size, self.part, self.facing)
+        cached = self._state_texture_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        rendered = pygame.transform.scale(texture, (size, size))
+        self._state_texture_cache[cache_key] = rendered
+        if len(self._state_texture_cache) > 32:
+            self._state_texture_cache.pop(next(iter(self._state_texture_cache)))
+        return rendered
+
+    def on_update(self):
+        counterpart = self.get_counterpart()
+        if counterpart is None:
+            self._discard_orphan()
+            return
+        world = self.location.world
+        if not world.structure_build_mode and not (
+            self._has_support(world, self.location)
+            and self._has_support(world, counterpart.location)
+        ):
+            world.break_block(self.location)
+
+    def on_break(self):
+        head = self._head()
+        if head is not None and head.location is not None:
+            server = getattr(head.location.world, "server", None)
+            if server is not None:
+                head_key = {
+                    "world": str(head.location.world.id_name),
+                    "x": int(head.location.x),
+                    "y": int(head.location.y),
+                    "z": int(head.location.z),
+                }
+                for sleeper in tuple(server.players):
+                    if getattr(sleeper, "sleeping_bed", None) == head_key:
+                        sleeper.stop_sleeping(reposition=False)
+        super().on_break()
+
+    def _head(self):
+        if self.part == "head":
+            return self
+        counterpart = self.get_counterpart()
+        return counterpart if counterpart is not None else None
+
+    def _nearby_monster(self) -> bool:
+        if self.location is None:
+            return False
+        for entity in tuple(getattr(self.location.world, "entities", {}).values()):
+            if getattr(entity, "removed", False) or getattr(entity, "health", 1) <= 0:
+                continue
+            if getattr(entity, "entity_id", None) != "zombie":
+                continue
+            if int(getattr(entity, "z", 0)) != int(self.location.z):
+                continue
+            if (
+                abs(float(entity.x) - float(self.location.x)) <= 8
+                and abs(float(entity.y) - float(self.location.y)) <= 5
+            ):
+                return True
+        return False
+
+    def on_right_click(self, player) -> bool:
+        head = self._head()
+        if head is None or head.location is None:
+            return False
+        world = head.location.world
+        server = getattr(world, "server", None)
+        foot = head.get_counterpart()
+        if foot is None or any(
+            not world.get_block(location.add(0, 1, 0)).replaceable
+            for location in (foot.location, head.location)
+        ):
+            if server is not None:
+                server.send_chat_to_player(
+                    player, "This bed is obstructed."
+                )
+            return True
+
+        player.spawn_point = {
+            "world": str(world.id_name),
+            "x": int(head.location.x),
+            "y": int(head.location.y),
+            "z": int(head.location.z),
+        }
+        if server is not None:
+            server.send_chat_to_player(player, "Respawn point set.", (85, 255, 85))
+
+        time_of_day = int(world.world_time) % 24000
+        if not 12542 <= time_of_day <= 23459:
+            if server is not None:
+                server.send_chat_to_player(player, "You can only sleep at night.")
+            return True
+
+        if (
+            getattr(getattr(player, "gamemode", None), "name_id", "survival")
+            != "creative"
+            and self._nearby_monster()
+        ):
+            if server is not None:
+                server.send_chat_to_player(
+                    player, "You may not rest now; there are monsters nearby."
+                )
+            return True
+
+        bed_key = {
+            "world": str(world.id_name),
+            "x": int(head.location.x),
+            "y": int(head.location.y),
+            "z": int(head.location.z),
+        }
+        if server is not None and any(
+            other is not player
+            and getattr(other, "sleeping", False)
+            and getattr(other, "sleeping_bed", None) == bed_key
+            for other in tuple(server.players)
+        ):
+            server.send_chat_to_player(player, "This bed is occupied.")
+            return True
+
+        start_sleeping = getattr(player, "start_sleeping", None)
+        if callable(start_sleeping) and start_sleeping(head) and server is not None:
+            sleeping = sum(
+                1
+                for other in tuple(server.players)
+                if other.world is world
+                and other.health > 0
+                and getattr(other, "sleeping", False)
+            )
+            eligible = sum(
+                1
+                for other in tuple(server.players)
+                if other.world is world and other.health > 0
+            )
+            server.send_chat_to_player(
+                player, f"Sleeping ({sleeping}/{eligible} players).", (85, 255, 85)
+            )
+        return True
+
+    def get_respawn_position(self, player):
+        head = self._head()
+        if head is None or head.location is None:
+            return None
+        world = head.location.world
+        foot = head.get_counterpart()
+        if foot is None:
+            return None
+        bed_locations = (foot.location, head.location)
+
+        for location in (
+            foot.location.add(-head.facing, 0, 0),
+            head.location.add(head.facing, 0, 0),
+        ):
+            if (
+                world.get_block(location).replaceable
+                and world.get_block(location.add(0, 1, 0)).replaceable
+                and self._has_support(world, location)
+            ):
+                return float(location.x) + 0.2, float(location.y), int(location.z)
+
+        for location in bed_locations:
+            if (
+                world.get_block(location.add(0, 1, 0)).replaceable
+                and world.get_block(location.add(0, 2, 0)).replaceable
+            ):
+                return (
+                    float(location.x) + 0.2,
+                    float(location.y) + 9 / 16,
+                    int(location.z),
+                )
+        return None
+
+
 @register_block
 class CRAFTING_TABLE(Block):
     block_id = "crafting_table"
@@ -1854,11 +2548,172 @@ class TORCH(ParticleEmitterBlock):
         return oriented
 
 
+class WoodenSlab(SLABS):
+    break_sound = "dig.wood"
+    hardness = 2.0
+    preferred_tool = "axe"
+
+
+class StoneSlab(SLABS):
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
 @register_block
-class OAK_SLAB(SLABS):
+class OAK_SLAB(WoodenSlab):
     block_id = "oak_slab"
-    name = "tile.woodSlab.name"
+    name = "tile.woodSlab.oak.name"
     _texture_path = "blocks.planks_oak"
+
+
+@register_block
+class SPRUCE_SLAB(WoodenSlab):
+    block_id = "spruce_slab"
+    name = "tile.woodSlab.spruce.name"
+    _texture_path = "blocks.planks_spruce"
+
+
+@register_block
+class BIRCH_SLAB(WoodenSlab):
+    block_id = "birch_slab"
+    name = "tile.woodSlab.birch.name"
+    _texture_path = "blocks.planks_birch"
+
+
+@register_block
+class JUNGLE_SLAB(WoodenSlab):
+    block_id = "jungle_slab"
+    name = "tile.woodSlab.jungle.name"
+    _texture_path = "blocks.planks_jungle"
+
+
+@register_block
+class ACACIA_SLAB(WoodenSlab):
+    block_id = "acacia_slab"
+    name = "tile.woodSlab.acacia.name"
+    _texture_path = "blocks.planks_acacia"
+
+
+@register_block
+class DARK_OAK_SLAB(WoodenSlab):
+    block_id = "dark_oak_slab"
+    name = "tile.woodSlab.big_oak.name"
+    _texture_path = "blocks.planks_big_oak"
+
+
+@register_block
+class STONE_SLAB(StoneSlab):
+    block_id = "stone_slab"
+    name = "tile.stoneSlab.stone.name"
+    _texture_path = "blocks.stone"
+    blast_resistance = 6.0
+
+
+@register_block
+class COBBLESTONE_SLAB(StoneSlab):
+    block_id = "cobblestone_slab"
+    name = "tile.stoneSlab.cobble.name"
+    _texture_path = "blocks.cobblestone"
+    blast_resistance = 6.0
+
+
+@register_block
+class SANDSTONE_SLAB(StoneSlab):
+    block_id = "sandstone_slab"
+    name = "tile.stoneSlab.sand.name"
+    _texture_path = "blocks.sandstone_normal"
+    hardness = 0.8
+
+
+@register_block
+class RED_SANDSTONE_SLAB(SANDSTONE_SLAB):
+    block_id = "red_sandstone_slab"
+    name = "tile.stoneSlab2.red_sandstone.name"
+    _texture_path = "blocks.red_sandstone_normal"
+
+
+class WoodenStairs(STAIRS):
+    break_sound = "dig.wood"
+    hardness = 2.0
+    preferred_tool = "axe"
+
+
+class StoneStairs(STAIRS):
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class OAK_STAIRS(WoodenStairs):
+    block_id = "oak_stairs"
+    name = "tile.stairsWood.name"
+    _texture_path = "blocks.planks_oak"
+
+
+@register_block
+class SPRUCE_STAIRS(WoodenStairs):
+    block_id = "spruce_stairs"
+    name = "tile.stairsWoodSpruce.name"
+    _texture_path = "blocks.planks_spruce"
+
+
+@register_block
+class BIRCH_STAIRS(WoodenStairs):
+    block_id = "birch_stairs"
+    name = "tile.stairsWoodBirch.name"
+    _texture_path = "blocks.planks_birch"
+
+
+@register_block
+class JUNGLE_STAIRS(WoodenStairs):
+    block_id = "jungle_stairs"
+    name = "tile.stairsWoodJungle.name"
+    _texture_path = "blocks.planks_jungle"
+
+
+@register_block
+class ACACIA_STAIRS(WoodenStairs):
+    block_id = "acacia_stairs"
+    name = "tile.stairsWoodAcacia.name"
+    _texture_path = "blocks.planks_acacia"
+
+
+@register_block
+class DARK_OAK_STAIRS(WoodenStairs):
+    block_id = "dark_oak_stairs"
+    name = "tile.stairsWoodDarkOak.name"
+    _texture_path = "blocks.planks_big_oak"
+
+
+@register_block
+class STONE_STAIRS(StoneStairs):
+    block_id = "stone_stairs"
+    name = "tile.stairsStone.name"
+    _texture_path = "blocks.stone"
+    blast_resistance = 6.0
+
+
+@register_block
+class COBBLESTONE_STAIRS(StoneStairs):
+    block_id = "cobblestone_stairs"
+    name = "tile.stairsStone.name"
+    _texture_path = "blocks.cobblestone"
+    blast_resistance = 6.0
+
+
+@register_block
+class SANDSTONE_STAIRS(StoneStairs):
+    block_id = "sandstone_stairs"
+    name = "tile.stairsSandStone.name"
+    _texture_path = "blocks.sandstone_normal"
+    hardness = 0.8
+
+
+@register_block
+class RED_SANDSTONE_STAIRS(SANDSTONE_STAIRS):
+    block_id = "red_sandstone_stairs"
+    name = "tile.stairsRedSandStone.name"
+    _texture_path = "blocks.red_sandstone_normal"
 
 
 @register_block
@@ -1947,12 +2802,388 @@ class FIRE(Block):
     def get_collision_box(self):
         return EMPTY
 
+class ColoredWool(Block):
+    break_sound = "dig.cloth"
+
+
 @register_block
-class WHITE_WOOL(Block):
+class WHITE_WOOL(ColoredWool):
     block_id = "white_wool"
     name = "tile.cloth.white.name"
     _texture_path = "blocks.wool_colored_white"
-    break_sound = 'dig.cloth'
+
+
+class ColoredStainedGlass(Block):
+    break_sound = "dig.glass"
+    hardness = 0.3
+    light_attenuation = 1
+    suffocating = False
+    redstone_conducting = False
+    drops = ()
+
+@register_block
+class WHITE_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "white_stained_glass"
+    name = "tile.stainedGlass.white.name"
+    _texture_path = "blocks.glass_white"
+
+
+@register_block
+class ORANGE_WOOL(ColoredWool):
+    block_id = "orange_wool"
+    name = "tile.cloth.orange.name"
+    _texture_path = "blocks.wool_colored_orange"
+
+
+@register_block
+class ORANGE_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "orange_stained_glass"
+    name = "tile.stainedGlass.orange.name"
+    _texture_path = "blocks.glass_orange"
+
+
+@register_block
+class MAGENTA_WOOL(ColoredWool):
+    block_id = "magenta_wool"
+    name = "tile.cloth.magenta.name"
+    _texture_path = "blocks.wool_colored_magenta"
+
+
+@register_block
+class MAGENTA_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "magenta_stained_glass"
+    name = "tile.stainedGlass.magenta.name"
+    _texture_path = "blocks.glass_magenta"
+
+
+@register_block
+class LIGHT_BLUE_WOOL(ColoredWool):
+    block_id = "light_blue_wool"
+    name = "tile.cloth.light_blue.name"
+    _texture_path = "blocks.wool_colored_light_blue"
+
+
+@register_block
+class LIGHT_BLUE_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "light_blue_stained_glass"
+    name = "tile.stainedGlass.light_blue.name"
+    _texture_path = "blocks.glass_light_blue"
+
+
+@register_block
+class YELLOW_WOOL(ColoredWool):
+    block_id = "yellow_wool"
+    name = "tile.cloth.yellow.name"
+    _texture_path = "blocks.wool_colored_yellow"
+
+
+@register_block
+class YELLOW_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "yellow_stained_glass"
+    name = "tile.stainedGlass.yellow.name"
+    _texture_path = "blocks.glass_yellow"
+
+
+@register_block
+class LIME_WOOL(ColoredWool):
+    block_id = "lime_wool"
+    name = "tile.cloth.lime.name"
+    _texture_path = "blocks.wool_colored_lime"
+
+
+@register_block
+class LIME_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "lime_stained_glass"
+    name = "tile.stainedGlass.lime.name"
+    _texture_path = "blocks.glass_lime"
+
+
+@register_block
+class PINK_WOOL(ColoredWool):
+    block_id = "pink_wool"
+    name = "tile.cloth.pink.name"
+    _texture_path = "blocks.wool_colored_pink"
+
+
+@register_block
+class PINK_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "pink_stained_glass"
+    name = "tile.stainedGlass.pink.name"
+    _texture_path = "blocks.glass_pink"
+
+
+@register_block
+class GRAY_WOOL(ColoredWool):
+    block_id = "gray_wool"
+    name = "tile.cloth.gray.name"
+    _texture_path = "blocks.wool_colored_gray"
+
+
+@register_block
+class GRAY_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "gray_stained_glass"
+    name = "tile.stainedGlass.gray.name"
+    _texture_path = "blocks.glass_gray"
+
+
+@register_block
+class LIGHT_GRAY_WOOL(ColoredWool):
+    block_id = "light_gray_wool"
+    name = "tile.cloth.silver.name"
+    _texture_path = "blocks.wool_colored_silver"
+
+
+@register_block
+class LIGHT_GRAY_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "light_gray_stained_glass"
+    name = "tile.stainedGlass.silver.name"
+    _texture_path = "blocks.glass_silver"
+
+
+@register_block
+class CYAN_WOOL(ColoredWool):
+    block_id = "cyan_wool"
+    name = "tile.cloth.cyan.name"
+    _texture_path = "blocks.wool_colored_cyan"
+
+
+@register_block
+class CYAN_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "cyan_stained_glass"
+    name = "tile.stainedGlass.cyan.name"
+    _texture_path = "blocks.glass_cyan"
+
+
+@register_block
+class PURPLE_WOOL(ColoredWool):
+    block_id = "purple_wool"
+    name = "tile.cloth.purple.name"
+    _texture_path = "blocks.wool_colored_purple"
+
+
+@register_block
+class PURPLE_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "purple_stained_glass"
+    name = "tile.stainedGlass.purple.name"
+    _texture_path = "blocks.glass_purple"
+
+
+@register_block
+class BLUE_WOOL(ColoredWool):
+    block_id = "blue_wool"
+    name = "tile.cloth.blue.name"
+    _texture_path = "blocks.wool_colored_blue"
+
+
+@register_block
+class BLUE_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "blue_stained_glass"
+    name = "tile.stainedGlass.blue.name"
+    _texture_path = "blocks.glass_blue"
+
+
+@register_block
+class BROWN_WOOL(ColoredWool):
+    block_id = "brown_wool"
+    name = "tile.cloth.brown.name"
+    _texture_path = "blocks.wool_colored_brown"
+
+
+@register_block
+class BROWN_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "brown_stained_glass"
+    name = "tile.stainedGlass.brown.name"
+    _texture_path = "blocks.glass_brown"
+
+
+@register_block
+class GREEN_WOOL(ColoredWool):
+    block_id = "green_wool"
+    name = "tile.cloth.green.name"
+    _texture_path = "blocks.wool_colored_green"
+
+
+@register_block
+class GREEN_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "green_stained_glass"
+    name = "tile.stainedGlass.green.name"
+    _texture_path = "blocks.glass_green"
+
+
+@register_block
+class RED_WOOL(ColoredWool):
+    block_id = "red_wool"
+    name = "tile.cloth.red.name"
+    _texture_path = "blocks.wool_colored_red"
+
+
+@register_block
+class RED_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "red_stained_glass"
+    name = "tile.stainedGlass.red.name"
+    _texture_path = "blocks.glass_red"
+
+
+@register_block
+class BLACK_WOOL(ColoredWool):
+    block_id = "black_wool"
+    name = "tile.cloth.black.name"
+    _texture_path = "blocks.wool_colored_black"
+
+
+@register_block
+class BLACK_STAINED_GLASS(ColoredStainedGlass):
+    block_id = "black_stained_glass"
+    name = "tile.stainedGlass.black.name"
+    _texture_path = "blocks.glass_black"
+
+
+
+
+@register_block
+class BRICKS(Block):
+    block_id = "bricks"
+    name = "tile.bricks.name"
+    _texture_path = "blocks.brick"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class BOOKSHELF(Block):
+    block_id = "bookshelf"
+    name = "tile.bookshelf.name"
+    _texture_path = "blocks.bookshelf"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class END_STONE(Block):
+    block_id = "end_stone"
+    name = "tile.whiteStone.name"
+    _texture_path = "blocks.end_stone"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class HAY_BLOCK(Block):
+    block_id = "hay_block"
+    name = "tile.hayBlock.name"
+    _texture_path = "blocks.hay_block_side"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class NETHER_BRICKS(Block):
+    block_id = "nether_bricks"
+    name = "tile.netherBrick.name"
+    _texture_path = "blocks.nether_brick"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class NETHERRACK(Block):
+    block_id = "netherrack"
+    name = "tile.netherrack.name"
+    _texture_path = "blocks.netherrack"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class PRISMARINE(Block):
+    block_id = "prismarine"
+    name = "tile.prismarine.rough.name"
+    _texture_path = "blocks.prismarine_rough"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class PRISMARINE_BRICKS(Block):
+    block_id = "prismarine_bricks"
+    name = "tile.prismarine.bricks.name"
+    _texture_path = "blocks.prismarine_bricks"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class DARK_PRISMARINE(Block):
+    block_id = "dark_prismarine"
+    name = "tile.prismarine.dark.name"
+    _texture_path = "blocks.prismarine_dark"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class QUARTZ_BLOCK(Block):
+    block_id = "quartz_block"
+    name = "tile.quartz_block.name"
+    _texture_path = "blocks.quartz_block_side"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class QUARTZ_COLUMN(Block):
+    block_id = "quartz_column"
+    name = "tile.quartz_block_lines.name"
+    _texture_path = "blocks.quartz_block_lines"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class CHISELED_QUARTZ_BLOCK(Block):
+    block_id = "chiseled_quartz_block"
+    name = "tile.quartz_block_chiseled.name"
+    _texture_path = "blocks.quartz_block_chiseled"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class STONE_BRICKS(Block):
+    block_id = "stone_bricks"
+    name = "tile.stonebrick.name"
+    _texture_path = "blocks.stonebrick"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class MOSSY_STONE_BRICKS(Block):
+    block_id = "mossy_stone_bricks"
+    name = "tile.stonebrick.mossy.name"
+    _texture_path = "blocks.stonebrick_mossy"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class CRACKED_STONE_BRICKS(Block):
+    block_id = "cracked_stone_bricks"
+    name = "tile.stonebrick.cracked.name"
+    _texture_path = "blocks.stonebrick_cracked"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
+@register_block
+class CHISELED_STONE_BRICKS(Block):
+    block_id = "chiseled_stone_bricks"
+    name = "tile.stonebrick.chiseled.name"
+    _texture_path = "blocks.stonebrick_carved"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+
+
 
 
 class ChestInventory(Inventory):
@@ -2482,6 +3713,13 @@ class CHEST(Block):
                 )
             )
             self.inventory[index] = EmptyItemStack()
+
+@register_block
+class LADDER(Block):
+    block_id = "ladder"
+    name = "tile.ladder.name"
+    _texture_path = "blocks.ladder"
+    light_attenuation = 1
 
 
 def get_block_by_id(block_id: str) -> Block:

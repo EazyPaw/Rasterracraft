@@ -462,6 +462,15 @@ class ClientWorld:
         if not entity_uuid:
             return
         if entity_uuid == getattr(self.client, "server_player_uuid", None):
+            player = getattr(self.client, "client_player", None)
+            if player is not None:
+                for key in ("x", "y", "z", "facing", "sleeping", "sleeping_bed"):
+                    if key in packet:
+                        setattr(player, key, packet[key])
+                motion = packet.get("motion")
+                if isinstance(motion, dict):
+                    player.motion.x = float(motion.get("x", player.motion.x))
+                    player.motion.y = float(motion.get("y", player.motion.y))
             self.remove_entity(entity_uuid)
             return
         with self._entities_lock:

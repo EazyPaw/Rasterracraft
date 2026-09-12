@@ -148,6 +148,8 @@ def _handle_teleport(packet: dict, client: "Client") -> None:
     client.client_player.x = packet["x"]
     client.client_player.y = packet["y"]
     client.client_player.blocking = bool(packet.get("blocking", False))
+    client.client_player.sleeping = bool(packet.get("sleeping", False))
+    client.client_player.sleeping_bed = packet.get("sleeping_bed")
 
     client.client_player.motion.x = 0
     client.client_player.motion.y = 0

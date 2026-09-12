@@ -197,6 +197,8 @@ class ClientEntity:
         self.breaking = bool(packet.get("breaking", False))
         self.eating = bool(packet.get("eating", False))
         self.blocking = bool(packet.get("blocking", False))
+        self.sleeping = bool(packet.get("sleeping", False))
+        self.sleeping_bed = packet.get("sleeping_bed")
         self.break_progress = float(packet.get("break_progress", 0.0))
         raw_break_target = packet.get("break_target")
         self.break_target = (
@@ -282,6 +284,9 @@ class ClientEntity:
         self.breaking = bool(packet.get("breaking", self.breaking))
         self.eating = bool(packet.get("eating", self.eating))
         self.blocking = bool(packet.get("blocking", self.blocking))
+        self.sleeping = bool(packet.get("sleeping", self.sleeping))
+        if "sleeping_bed" in packet:
+            self.sleeping_bed = packet.get("sleeping_bed")
         self.break_progress = float(packet.get("break_progress", self.break_progress))
         if "break_target" in packet:
             raw_break_target = packet.get("break_target")

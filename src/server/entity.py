@@ -573,6 +573,11 @@ class Entity:
             data["break_progress"] = float(getattr(self, "break_progress", 0.0))
             data["eating"] = bool(getattr(self, "eating", False))
             data["blocking"] = bool(getattr(self, "blocking", False))
+            data["sleeping"] = bool(getattr(self, "sleeping", False))
+            sleeping_bed = getattr(self, "sleeping_bed", None)
+            data["sleeping_bed"] = (
+                dict(sleeping_bed) if isinstance(sleeping_bed, dict) else None
+            )
             if breaking_target is not None:
                 data["break_target"] = list(breaking_target[:3])
         data.update(self.get_synced_data())

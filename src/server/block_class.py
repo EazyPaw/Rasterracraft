@@ -20,6 +20,7 @@ from src.server.block_collision import (
     FULL_BLOCK,
     HALF_BOTTOM,
     HALF_TOP,
+    CollisionBox,
     BlockCollisionBox,
     coerce_collision_shape,
 )
@@ -1217,21 +1218,160 @@ class GravityBlock(Block):
 
 
 class SLABS(Block):
+    """Minecraft-style slab state adapted to the two-dimensional world.
+
+    ``slab_type`` is public so it is included in block NBT and therefore in
+    chunk saves and block-update packets.  ``_type`` remains as a compatibility
+    alias for worlds/code written against the former oak-only implementation.
+    """
+
     _texture_cache = {}
     has_transparent_pixels = True
+    suffocating = False
+    redstone_conducting = False
 
-    def __init__(self, _type="bottom"):
-        super().__init__()
-        self._type = _type
+    def __init__(self, slab_type="bottom", nbt=None):
+        if isinstance(slab_type, dict) and nbt is None:
+            nbt, slab_type = slab_type, "bottom"
+        self.slab_type = self._normalize_slab_type(slab_type)
+        super().__init__(nbt)
+
+    @staticmethod
+    def _normalize_slab_type(value) -> str:
+        value = str(value).lower()
+        return value if value in ("bottom", "top", "double") else "bottom"
+
+    @property
+    def _type(self):
+        return self.slab_type
+
+    @_type.setter
+    def _type(self, value):
+        self.slab_type = self._normalize_slab_type(value)
+
+    def write_nbt(self, nbt):
+        super().write_nbt(nbt)
+        self.slab_type = self._normalize_slab_type(self.slab_type)
+
+    @staticmethod
+    def _pointed_height(location, context) -> float:
+        """Return the click height within a cell from the transmitted ray."""
+        try:
+            pointed_y = float(context.ray_origin[1]) + float(
+                context.ray_direction[1]
+            )
+            return max(0.0, min(1.0, pointed_y - float(location.y)))
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return 0.5
+
+    @classmethod
+    def _can_merge_with_target(cls, target, context) -> bool:
+        if type(target) is not cls or target.slab_type == "double":
+            return False
+        face = getattr(
+            context, "placement_face", getattr(context, "hit_face", None)
+        )
+        if target.slab_type == "bottom":
+            return face == "top" or (
+                face in ("left", "right")
+                and cls._pointed_height(target.location, context) > 0.5
+            )
+        return face == "bottom" or (
+            face in ("left", "right")
+            and cls._pointed_height(target.location, context) <= 0.5
+        )
+
+    def get_placement_location(
+        self,
+        target,
+        *,
+        player=None,
+        fore_place=False,
+        context=None,
+    ):
+        # Slabs are the one non-replaceable block that can consume another
+        # placement in the same cell.  Match SlabBlock.canBeReplaced: only the
+        # exposed opposite half (or the corresponding horizontal half) merges.
+        foreground_requested = bool(
+            fore_place or getattr(context, "fore_place", False)
+        )
+        target_location = getattr(target, "location", None)
+        if not (
+            foreground_requested
+            and target_location is not None
+            and int(target_location.z) == 1
+        ) and self._can_merge_with_target(target, context):
+            return target.location
+        return super().get_placement_location(
+            target,
+            player=player,
+            fore_place=fore_place,
+            context=context,
+        )
+
+    def get_state_for_placement(
+        self,
+        location,
+        *,
+        placement_face=None,
+        player=None,
+        context=None,
+    ):
+        existing = location.world.get_block(location)
+        if type(existing) is type(self) and existing.slab_type != "double":
+            self.slab_type = "double"
+            return self
+
+        if placement_face == "bottom":
+            self.slab_type = "top"
+        elif placement_face == "top":
+            self.slab_type = "bottom"
+        else:
+            self.slab_type = (
+                "top"
+                if self._pointed_height(location, context) > 0.5
+                else "bottom"
+            )
+        return self
+
+    def place_at(self, location: Location) -> bool:
+        existing = location.world.get_block(location)
+        if (
+            self.slab_type == "double"
+            and type(existing) is type(self)
+            and existing.slab_type != "double"
+        ):
+            location.world.set_block(self, location)
+            return location.world.get_block(location) is self
+        return super().place_at(location)
+
+    @staticmethod
+    def _double_drop_amount(stacks, multiplier):
+        if multiplier == 1:
+            return stacks
+        for stack in stacks:
+            stack.amount *= multiplier
+        return stacks
+
+    def get_drops(self, material):
+        return self._double_drop_amount(
+            super().get_drops(material), 2 if self.slab_type == "double" else 1
+        )
+
+    def get_explosion_drops(self):
+        return self._double_drop_amount(
+            super().get_explosion_drops(),
+            2 if self.slab_type == "double" else 1,
+        )
 
     def get_collision_box(self) -> BlockCollisionBox:
-        if self._type == "bottom":
+        if self.slab_type == "bottom":
             return HALF_BOTTOM
-        if self._type == "top":
+        if self.slab_type == "top":
             return HALF_TOP
-        if self._type == "double":
+        if self.slab_type == "double":
             return FULL_BLOCK
-        raise ValueError(f"Unknown slabs type {self._type}")
+        raise ValueError(f"Unknown slab type {self.slab_type}")
 
     @client_method
     def get_texture(self, size, client=None):
@@ -1242,19 +1382,19 @@ class SLABS(Block):
 
         # get_texture_img 返回的是原始资源尺寸（通常为 16×16），而渲染器传入的
         # size 是屏幕上的方块尺寸。先缩放，否则在 size 大于原图时 subsurface 会越界。
-        cache_key = (self._texture_path, full, self._type, size)
+        cache_key = (self._texture_path, full, self.slab_type, size)
         if cache_key in self._texture_cache:
             return self._texture_cache[cache_key]
 
         scaled = pygame.transform.scale(full, (size, size)).convert_alpha()
-        if self._type == "double":
+        if self.slab_type == "double":
             texture = scaled
-        elif self._type in ("bottom", "top"):
+        elif self.slab_type in ("bottom", "top"):
             # 保持与普通方块相同的 size×size 画布，以便渲染器正确处理顶部、
             # 底部半砖的位置；未占用的半边保持透明。
             texture = pygame.Surface((size, size), pygame.SRCALPHA)
             half = size // 2
-            if self._type == "bottom":
+            if self.slab_type == "bottom":
                 source = scaled.subsurface((0, half, size, size - half))
                 texture.blit(source, (0, half))
             else:
@@ -1267,6 +1407,279 @@ class SLABS(Block):
         if len(self._texture_cache) > 512:
             self._texture_cache.pop(next(iter(self._texture_cache)))
         return texture
+
+
+class STAIRS(Block):
+    """Straight two-dimensional stairs with vanilla half/facing placement."""
+
+    _texture_cache = {}
+    has_transparent_pixels = True
+    suffocating = False
+    redstone_conducting = False
+
+    def __init__(self, nbt=None):
+        self.half = "bottom"
+        self.facing = 1
+        super().__init__(nbt)
+
+    def write_nbt(self, nbt):
+        super().write_nbt(nbt)
+        self.half = self.half if self.half in ("bottom", "top") else "bottom"
+        self.facing = 1 if int(self.facing) == 1 else -1
+
+    def get_state_for_placement(
+        self,
+        location,
+        *,
+        placement_face=None,
+        player=None,
+        context=None,
+    ):
+        self.facing = 1 if int(getattr(player, "facing", 1)) == 1 else -1
+        if placement_face == "bottom":
+            self.half = "top"
+        elif placement_face == "top":
+            self.half = "bottom"
+        else:
+            self.half = (
+                "top"
+                if SLABS._pointed_height(location, context) > 0.5
+                else "bottom"
+            )
+        return self
+
+    def get_collision_box(self) -> BlockCollisionBox:
+        if self.half == "bottom":
+            base = CollisionBox(0, 0, 1, 0.5)
+            step = (
+                CollisionBox(0.5, 0.5, 1, 1)
+                if self.facing > 0
+                else CollisionBox(0, 0.5, 0.5, 1)
+            )
+        else:
+            base = CollisionBox(0, 0.5, 1, 1)
+            step = (
+                CollisionBox(0.5, 0, 1, 0.5)
+                if self.facing > 0
+                else CollisionBox(0, 0, 0.5, 0.5)
+            )
+        return BlockCollisionBox((base, step))
+
+    @client_method
+    def get_texture(self, size, client=None):
+        size = max(1, int(round(size)))
+        full: Surface = client.resources_manager.get_texture_img(self._texture_path)
+        if full is None:
+            return None
+        cache_key = (self._texture_path, full, self.half, self.facing, size)
+        cached = self._texture_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        scaled = pygame.transform.scale(full, (size, size)).convert_alpha()
+        texture = pygame.Surface((size, size), pygame.SRCALPHA)
+        split = size // 2
+        side_x = split if self.facing > 0 else 0
+        side_width = size - split if self.facing > 0 else split
+        if self.half == "bottom":
+            texture.blit(scaled, (0, split), (0, split, size, size - split))
+            if side_width:
+                texture.blit(
+                    scaled, (side_x, 0), (side_x, 0, side_width, split)
+                )
+        else:
+            texture.blit(scaled, (0, 0), (0, 0, size, split))
+            if side_width:
+                texture.blit(
+                    scaled,
+                    (side_x, split),
+                    (side_x, split, side_width, size - split),
+                )
+
+        self._texture_cache[cache_key] = texture
+        if len(self._texture_cache) > 512:
+            self._texture_cache.pop(next(iter(self._texture_cache)))
+        return texture
+
+
+class ConnectableBarrier(Block):
+    """Two-dimensional fence/wall base with persistent left/right arms."""
+
+    _texture_cache = {}
+    solid = False
+    suffocating = False
+    redstone_conducting = False
+    light_attenuation = 1
+    has_transparent_pixels = True
+    post_bounds = (6 / 16, 0.0, 10 / 16, 1.0)
+    # Model-space heights from fence_n.json. Rendering converts world-up Y to
+    # Pygame's screen-down Y, so keep these in their original 12..15 and 6..9
+    # ranges rather than pre-flipping them here.
+    rail_ranges = ((12 / 16, 15 / 16), (6 / 16, 9 / 16))
+
+    def __init__(self, nbt=None):
+        self.left = False
+        self.right = False
+        self._item_preview = False
+        super().__init__(nbt)
+
+    def write_nbt(self, nbt):
+        super().write_nbt(nbt)
+        self.left = bool(self.left)
+        self.right = bool(self.right)
+
+    @staticmethod
+    def _is_full_connection_block(block) -> bool:
+        getter = getattr(block, "get_collision_box", None)
+        if not callable(getter):
+            return False
+        shape = coerce_collision_shape(getter())
+        if len(shape) != 1:
+            return False
+        bounds = next(iter(shape))
+        return (
+            bounds.min_x <= 0
+            and bounds.min_y <= 0
+            and bounds.max_x >= 1
+            and bounds.max_y >= 1
+        )
+
+    def connects_to(self, block) -> bool:
+        # In the 2.5-D projection fences and walls share the same horizontal
+        # connection plane, so both families deliberately connect to each
+        # other in addition to full sturdy blocks.
+        return isinstance(block, ConnectableBarrier) or self._is_full_connection_block(
+            block
+        )
+
+    def _connections_at(self, location) -> tuple[bool, bool]:
+        world = location.world
+        return (
+            self.connects_to(world.get_block(location.add(-1, 0, 0))),
+            self.connects_to(world.get_block(location.add(1, 0, 0))),
+        )
+
+    def _refresh_connections(self, location=None) -> bool:
+        location = location or self.location
+        if location is None:
+            return False
+        left, right = self._connections_at(location)
+        changed = (left, right) != (self.left, self.right)
+        self.left, self.right = left, right
+        return changed
+
+    def get_state_for_placement(
+        self,
+        location,
+        *,
+        placement_face=None,
+        player=None,
+        context=None,
+    ):
+        self._refresh_connections(location)
+        return self
+
+    def on_update(self):
+        self._refresh_connections()
+
+    def get_collision_box(self) -> BlockCollisionBox:
+        min_x, _min_y, max_x, _max_y = self.post_bounds
+        boxes = [CollisionBox(min_x, 0, max_x, 1.5)]
+        if self.left:
+            boxes.append(CollisionBox(0, 0, 0.5, 1.5))
+        if self.right:
+            boxes.append(CollisionBox(0.5, 0, 1, 1.5))
+        return BlockCollisionBox(tuple(boxes))
+
+    def prepare_item_preview(self):
+        self.left = True
+        self.right = True
+        self._item_preview = True
+
+    def should_render_post(self) -> bool:
+        return True
+
+    @staticmethod
+    def _pixel_bounds(size, start, end) -> tuple[int, int]:
+        low = max(0, min(size, int(round(size * start))))
+        high = max(low, min(size, int(round(size * end))))
+        return low, high
+
+    @classmethod
+    def _blit_region(cls, target, source, size, x0, y0, x1, y1):
+        left, right = cls._pixel_bounds(size, x0, x1)
+        top, bottom = cls._pixel_bounds(size, y0, y1)
+        if right > left and bottom > top:
+            area = pygame.Rect(left, top, right - left, bottom - top)
+            target.blit(source, area.topleft, area)
+
+    @client_method
+    def get_texture(self, size, client=None):
+        size = max(1, int(round(size)))
+        full: Surface = client.resources_manager.get_texture_img(self._texture_path)
+        if full is None:
+            return None
+        cache_key = (
+            type(self),
+            full,
+            self.left,
+            self.right,
+            self._item_preview,
+            size,
+        )
+        cached = self._texture_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        scaled = pygame.transform.scale(full, (size, size)).convert_alpha()
+        texture = pygame.Surface((size, size), pygame.SRCALPHA)
+        min_x, min_y, max_x, max_y = self.post_bounds
+        if self.should_render_post():
+            self._blit_region(
+                texture, scaled, size, min_x, 1 - max_y, max_x, 1 - min_y
+            )
+        for rail_min_y, rail_max_y in self.rail_ranges:
+            screen_top = 1 - rail_max_y
+            screen_bottom = 1 - rail_min_y
+            if self.left:
+                self._blit_region(
+                    texture,
+                    scaled,
+                    size,
+                    0,
+                    screen_top,
+                    0.5,
+                    screen_bottom,
+                )
+            if self.right:
+                self._blit_region(
+                    texture,
+                    scaled,
+                    size,
+                    0.5,
+                    screen_top,
+                    1,
+                    screen_bottom,
+                )
+
+        self._texture_cache[cache_key] = texture
+        if len(self._texture_cache) > 512:
+            self._texture_cache.pop(next(iter(self._texture_cache)))
+        return texture
+
+
+class FENCES(ConnectableBarrier):
+    """Wooden fence silhouette: a central post and two horizontal rails."""
+
+
+class WALLS(ConnectableBarrier):
+    """Stone wall silhouette with a low straight section and optional post."""
+
+    post_bounds = (4 / 16, 0.0, 12 / 16, 1.0)
+    rail_ranges = ((0.0, 13 / 16),)
+
+    def should_render_post(self) -> bool:
+        return self._item_preview or not (self.left and self.right)
 
 
 class SupportedBlock(Block):

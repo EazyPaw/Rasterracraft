@@ -58,61 +58,62 @@ class HotBar(GUI):
         slot_width = (self.render.gui_scale * self.bar_width - 6) / 9
         x_start = x + self.render.gui_scale * self.bar_width / 36
 
-        for i in range(9):
-            item = self.render.client.client_player.inventory[i]
-            # 计算当前槽位的起始x坐标
-            slot_x = x_start + i * slot_width
+        if self.render.client.client_player is not None:
+            for i in range(9):
+                item = self.render.client.client_player.inventory[i]
+                # 计算当前槽位的起始x坐标
+                slot_x = x_start + i * slot_width
 
-            # 绘制选择框
-            if self.render.client.client_player.selected_slot == i:
-                sx = x + i * slot_width - self.render.gui_scale
-                sy = y - self.render.gui_scale
-                self.render.blit(self.selection_texture, (sx, sy))
+                # 绘制选择框
+                if self.render.client.client_player.selected_slot == i:
+                    sx = x + i * slot_width - self.render.gui_scale
+                    sy = y - self.render.gui_scale
+                    self.render.blit(self.selection_texture, (sx, sy))
 
-            if item.is_empty():
-                continue
-            texture_ = item.get_gui_texture(self.render.gui_scale)
+                if item.is_empty():
+                    continue
+                texture_ = item.get_gui_texture(self.render.gui_scale)
 
-            if texture_ is None:
-                continue
+                if texture_ is None:
+                    continue
 
-            # 物品在槽位内水平居中
-            item_x = (
-                slot_x
-                + (slot_width - texture_.get_width()) / 2
-                - self.render.gui_scale * self.bar_width / 48
-            )
-
-            # 物品在槽位内垂直居中
-            item_y = (
-                y
-                + self.render.gui_scale * self.bar_height / 2
-                - texture_.get_height() / 2
-            )
-
-            self.render.blit(texture_, (item_x, item_y))
-            slot_left = slot_x - self.render.gui_scale * self.bar_width / 48
-            item.draw_durability_bar(
-                self.render,
-                slot_left,
-                y + (self.render.gui_scale * self.bar_height - slot_width) / 2,
-                slot_width,
-            )
-
-            # 绘制物品数量
-            if item.amount > 1:
-                a = self.render.get_font(20).render(
-                    str(item.amount), True, (255, 255, 255)
+                # 物品在槽位内水平居中
+                item_x = (
+                    slot_x
+                    + (slot_width - texture_.get_width()) / 2
+                    - self.render.gui_scale * self.bar_width / 48
                 )
-                c = len(str(abs(item.amount))) - 1  # 物品数量位数，用于确定偏移量
-                self.render.screen.blit(
-                    a,
-                    (
-                        x + (i + 1) * slot_width - self.render.gui_scale * (4 + c * 4),
-                        y + self.render.gui_scale * 15,
-                    ),
+
+                # 物品在槽位内垂直居中
+                item_y = (
+                    y
+                    + self.render.gui_scale * self.bar_height / 2
+                    - texture_.get_height() / 2
                 )
-        self._draw_status_effects()
+
+                self.render.blit(texture_, (item_x, item_y))
+                slot_left = slot_x - self.render.gui_scale * self.bar_width / 48
+                item.draw_durability_bar(
+                    self.render,
+                    slot_left,
+                    y + (self.render.gui_scale * self.bar_height - slot_width) / 2,
+                    slot_width,
+                )
+
+                # 绘制物品数量
+                if item.amount > 1:
+                    a = self.render.get_font(20).render(
+                        str(item.amount), True, (255, 255, 255)
+                    )
+                    c = len(str(abs(item.amount))) - 1  # 物品数量位数，用于确定偏移量
+                    self.render.screen.blit(
+                        a,
+                        (
+                            x + (i + 1) * slot_width - self.render.gui_scale * (4 + c * 4),
+                            y + self.render.gui_scale * 15,
+                        ),
+                    )
+            self._draw_status_effects()
 
     def _effect_icon(self, path: str, size: int) -> pygame.Surface:
         cache_key = (path, size)

@@ -151,6 +151,16 @@ def get_fuel_burn_time(stack: ItemStack | None) -> int:
         for wood in ("oak", "birch", "spruce", "jungle", "acacia", "dark_oak")
     ):
         return 150
+    if item_id.endswith("_stairs") and any(
+        item_id == f"{wood}_stairs"
+        for wood in ("oak", "birch", "spruce", "jungle", "acacia", "dark_oak")
+    ):
+        return 300
+    if item_id.endswith("_fence") and any(
+        item_id == f"{wood}_fence"
+        for wood in ("oak", "birch", "spruce", "jungle", "acacia", "dark_oak")
+    ):
+        return 300
     if item_id.endswith(("_log", "_plank", "_planks")):
         return 300
     if item_id in {

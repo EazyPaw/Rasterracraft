@@ -548,6 +548,7 @@ class Server:
             world.tick_weather()
             world.tick_block_entities()
             world.tick_random_blocks()
+        self._finish_sleeping_nights()
         finish_section("block_ticks")
         if self.server_ticks % 5 == 0:
             for player in self.players:
@@ -585,6 +586,27 @@ class Server:
             self.save_all()
         finish_section("autosave")
         self.last_tick_sections_ms = timings
+
+    def _finish_sleeping_nights(self) -> None:
+        """Skip dawn only after every living player in a world slept 100 ticks."""
+        for world in self.worlds.values():
+            eligible = [
+                player
+                for player in tuple(self.players)
+                if player.world is world and player.health > 0
+            ]
+            if not eligible or not all(
+                player.sleeping
+                and player.sleep_ticks >= player.SLEEP_DURATION_TICKS
+                for player in eligible
+            ):
+                continue
+            world.world_time = 0
+            set_weather = getattr(world, "set_weather", None)
+            if callable(set_weather):
+                set_weather("clear")
+            for player in eligible:
+                player.stop_sleeping(reposition=True)
 
     def get_player_spawn(self, player_data: dict | None = None) -> tuple[float, float]:
         if player_data is None and self.level_data:
@@ -1313,6 +1335,7 @@ class Server:
             return
         player.clear_breaking()
         player.clear_eating()
+        player.stop_sleeping(reposition=True, sync=False)
         self.save_all(player, force=True)
         # 广播离开消息（黄色，排除已离开的玩家）
         self.broadcast_chat(
