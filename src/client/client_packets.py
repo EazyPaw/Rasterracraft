@@ -578,6 +578,38 @@ def _handle_gamemode_update(packet: dict, client: "Client") -> None:
         client.render.show_gui(client.loading_screen)
 
 
+@CLIENT_PACKET_DISPATCHER.handler("StructureBuildState")
+def _handle_structure_build_state(packet: dict, client: "Client") -> None:
+    client.structure_build_mode = packet.get("mode") is True
+    bounds = packet.get("bounds")
+    if isinstance(bounds, (list, tuple)) and len(bounds) == 4:
+        try:
+            client.structure_bounds = tuple(int(value) for value in bounds)
+        except (TypeError, ValueError):
+            client.structure_bounds = None
+    else:
+        client.structure_bounds = None
+    def read_cells(key):
+        cells = set()
+        for value in packet.get(key, ()):
+            if not isinstance(value, (list, tuple)) or len(value) != 3:
+                continue
+            try:
+                cells.add(tuple(int(part) for part in value))
+            except (TypeError, ValueError):
+                continue
+        return cells
+
+    if packet.get("full", True):
+        client.structure_void_cells = read_cells("void_cells")
+    else:
+        client.structure_void_cells.update(read_cells("void_add"))
+        client.structure_void_cells.difference_update(read_cells("void_remove"))
+    if client.structure_build_mode and client.client_player is not None:
+        client.client_player.flyable = True
+        client.client_player.flying = True
+
+
 CLIENT_PACKET_DISPATCHER.validate_handlers()
 
 

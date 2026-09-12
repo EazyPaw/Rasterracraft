@@ -115,10 +115,12 @@ class Block(ABC):
     def __init__(self, nbt=None):
         # 方块应该带有的属性
         self.location = None
-        if self.place_sound is None:
-            self.place_sound = self.break_sound
         if nbt:
             self.write_nbt(nbt)
+
+    def get_place_sound(self):
+        """Return the effective placement sound without creating NBT state."""
+        return self.place_sound or self.break_sound
 
     def get_collision_box(self) -> BlockCollisionBox:
         return coerce_collision_shape(self.collision_box)
@@ -172,6 +174,10 @@ class Block(ABC):
         safe_data = {}
         # 使用 vars(self) 获取实例变量（适用于普通类，不处理 __slots__）
         for key, value in vars(self).items():
+            # World attachment and private implementation details are runtime
+            # state, not persistent block NBT.
+            if key == "location" or key.startswith("_"):
+                continue
             if is_safe_value(value):
                 safe_data[key] = value
         return safe_data
@@ -1167,7 +1173,11 @@ class GravityBlock(Block):
 
     def place_at(self, location: Location) -> bool:
         placed = super().place_at(location)
-        if placed and hasattr(location.world, "spawn_entity"):
+        if (
+            placed
+            and not getattr(location.world, "structure_build_mode", False)
+            and hasattr(location.world, "spawn_entity")
+        ):
             self.on_update()
         return placed
 
@@ -1316,6 +1326,8 @@ class SupportedBlock(Block):
         """预检放置位置，避免短暂生成一个无支撑方块。"""
         if location is None or not location.world.get_block(location).replaceable:
             return False
+        if getattr(location.world, "structure_build_mode", False):
+            return True
         old_location = self.location
         self.location = location
         try:
@@ -1327,7 +1339,7 @@ class SupportedBlock(Block):
         if not self.can_place_at(location):
             return False
         placed = super().place_at(location)
-        if placed:
+        if placed and not getattr(location.world, "structure_build_mode", False):
             # Block.place_at 只负责写入世界；新方块本身不会收到邻居更新。
             self.on_update()
         return placed

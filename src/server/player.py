@@ -4,6 +4,7 @@ import random as _random
 
 from src.client.game_mode import SurvivalMode
 from src.server.attributes import BLOCKING_SPEED_MODIFIER, EATING_SPEED_MODIFIER
+from src.server.block_class import Block
 from src.server.damange_type import DamageType, FALL, GENERIC, STARVE
 from src.server.entity import Entity
 from src.server.experience import (
@@ -128,12 +129,6 @@ class Player(Entity):
         )
 
         if getattr(self.gamemode, "name_id", "survival") == "creative":
-            for i in range(4):
-                self.inventory[i] = ItemStack(GLOWSTONE(), 64)
-            for i in range(8, 16):
-                self.inventory[i] = ItemStack(SAND(), 64)
-            for i in range(4, 8):
-                self.inventory[i] = ItemStack(WATER(), 64)
             self.inventory[9] = ItemStack(get_material_by_id("tnt"), 64)
             self.inventory[10] = ItemStack(FLINT_AND_STEEL(), 1)
         else:
@@ -328,6 +323,18 @@ class Player(Entity):
             fore_place=bool(getattr(context, "fore_place", False)),
             context=context,
         )
+        if place_location is None and self.world.structure_build_mode:
+            # Template editing must allow intentionally unsupported states
+            # (for example a floating torch).  Preserve a block's normal
+            # orientation logic when it succeeds, but fall back to the base
+            # replaceable-cell placement rule when survival checks reject it.
+            place_location = Block.get_placement_location(
+                block,
+                target,
+                player=self,
+                fore_place=bool(getattr(context, "fore_place", False)),
+                context=context,
+            )
         if place_location is None:
             return False
         try:
@@ -371,7 +378,7 @@ class Player(Entity):
         server = getattr(self.world, "server", None)
         if server is not None:
             server.broadcast_sound(
-                block.place_sound, x + 0.5, y + 0.5, z
+                block.get_place_sound(), x + 0.5, y + 0.5, z
             )
         return True
 

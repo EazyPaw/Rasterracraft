@@ -108,6 +108,9 @@ class Client:
         self.key_map = {}
         self.current_save_id: str | None = None
         self.current_game_mode: str = "survival"
+        self.structure_build_mode = False
+        self.structure_bounds: tuple[int, int, int, int] | None = None
+        self.structure_void_cells: set[tuple[int, int, int]] = set()
         self.connection_target = ("127.0.0.1", 14525)
         self.integrated_session = False
         self.saves_menu: SavesMenu | None = None
@@ -337,6 +340,9 @@ class Client:
         self.integrated_session = False
         self.current_save_id = None
         self.current_game_mode = "survival"
+        self.structure_build_mode = False
+        self.structure_bounds = None
+        self.structure_void_cells.clear()
         self._prepare_game_session(loading_title_key="connect.connecting")
         self.socket_thread.start()
 
@@ -569,6 +575,9 @@ class Client:
         self.game_manager.last_pressed_time.clear()
         self.current_save_id = None
         self.current_game_mode = "survival"
+        self.structure_build_mode = False
+        self.structure_bounds = None
+        self.structure_void_cells.clear()
         self.connection_target = ("127.0.0.1", 14525)
         self.integrated_session = False
         self.server = None

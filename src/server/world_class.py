@@ -228,7 +228,13 @@ class World:
         self._legacy_saved_entities_by_chunk: dict[int, list[dict]] = {}
         self._unresolved_entities_by_chunk: dict[int, list[dict]] = {}
         self.last_entity_timings_ms: list[tuple[str, float, float, float]] = []
-        self.disable_mob_generation = False
+        self.structure_build_mode = type(self.generator).__name__ == "StructureBuild"
+        self.disable_mob_generation = self.structure_build_mode
+        self.structure_bounds: tuple[int, int, int, int] | None = None
+        self.structure_void_positions: set[tuple[int, int, int]] = set()
+        self.structure_air_positions: set[tuple[int, int, int]] = set()
+        self.structure_content_positions: set[tuple[int, int, int]] = set()
+        self._structure_lock = threading.RLock()
         # 每次方块变动都会影响整区块光照。把同一 tick 的变动合并处理，
         # 避免重力/流体连锁时反复重算并发送相同的大型光照包。
         self._pending_light_recalc_chunks: set[int] = set()
@@ -283,6 +289,8 @@ class World:
             self.set_weather(next_weather)
 
     def tick_random_blocks(self) -> None:
+        if self.structure_build_mode:
+            return
         section_count = (self.attribute.MAX_BUILD_HEIGHT + 15) // 16
         for rx, chunk in list(self.regions.items()):
             for section in range(section_count):
@@ -311,6 +319,8 @@ class World:
             self._ticking_blocks.discard(block)
 
     def tick_block_entities(self) -> None:
+        if self.structure_build_mode:
+            return
         with self._ticking_blocks_lock:
             ticking = tuple(self._ticking_blocks)
         for block in ticking:
@@ -467,6 +477,8 @@ class World:
         return int(x) // 16 in self.regions
 
     def schedule_fluid_tick(self, x_loc: int | Location, y: int = None, z: int = None):
+        if self.structure_build_mode:
+            return
         x, y, z = decide_x_or_loc(x_loc, y, z)
         x, y, z = int(x), int(y), int(z)
         if not self.is_position_loaded(x, y, z):
@@ -492,6 +504,8 @@ class World:
     def schedule_chunk_fluids(self, rx: int):
         from src.server.block_class import FluidBlock
 
+        if self.structure_build_mode:
+            return
         chunk = self.regions.get(rx)
         if chunk is None:
             return
@@ -508,6 +522,9 @@ class World:
 
     def tick_fluids(self, max_updates: int = 4096):
         from src.server.block_class import FluidBlock
+
+        if self.structure_build_mode:
+            return
 
         with self._fluid_lock:
             if not self._scheduled_fluid_ticks:
@@ -882,14 +899,15 @@ class World:
         chunk.region_array[rela_x][y][z] = block
         chunk.invalidate_packet_cache()
         self.mark_chunk_dirty(chunk.x)
-        self.schedule_fluid_around(x, y, z)
+        if not self.structure_build_mode:
+            self.schedule_fluid_around(x, y, z)
         if old_block.get_light_state() != block.get_light_state():
             self.schedule_light_recalculation(chunk.x)
         if send_packet:
             for player in self.server.players:
                 if player.is_loading_position(x, y, z):
                     self.server.send_client_socket(player, block, "BlockUpdate")
-        if block_update:
+        if block_update and not self.structure_build_mode:
             # 收集需要触发 on_update 的邻居坐标
             neighbors = [
                 (x, y + 1, z),
@@ -916,15 +934,155 @@ class World:
                             self.server.send_client_socket(
                                 player, neighbor_block, "BlockUpdate"
                             )
-        if getattr(old_block, "is_fluid", False) or getattr(
-            placed_block, "is_fluid", False
+        if not self.structure_build_mode and (
+            getattr(old_block, "is_fluid", False)
+            or getattr(placed_block, "is_fluid", False)
         ):
             self.schedule_fluid_around(x, y, z)
         on_load = getattr(block, "on_load", None)
-        if callable(on_load):
+        if callable(on_load) and not self.structure_build_mode:
             on_load()
 
+        if self.structure_build_mode:
+            self.note_structure_block_change(x, y, z, block)
+
         return set()
+
+    def load_structure_build_state(self, data) -> None:
+        """Restore editor-only template semantics from level metadata."""
+        if not self.structure_build_mode or not isinstance(data, dict):
+            return
+
+        def read_positions(key):
+            result = set()
+            for value in data.get(key, ()):
+                try:
+                    x, y, z = (int(part) for part in value)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= y < self.attribute.MAX_BUILD_HEIGHT and z in (0, 1):
+                    result.add((x, y, z))
+            return result
+
+        with self._structure_lock:
+            self.structure_void_positions = read_positions("void")
+            self.structure_air_positions = read_positions("air")
+            self.structure_content_positions = read_positions("content")
+            self._refresh_structure_bounds()
+
+    def structure_build_state_data(self) -> dict:
+        with self._structure_lock:
+            return {
+                "bounds": list(self.structure_bounds) if self.structure_bounds else None,
+                "void": [list(value) for value in sorted(self.structure_void_positions)],
+                "air": [list(value) for value in sorted(self.structure_air_positions)],
+                "content": [
+                    list(value) for value in sorted(self.structure_content_positions)
+                ],
+            }
+
+    def structure_build_packet(self) -> dict:
+        with self._structure_lock:
+            return {
+                "__class__": "StructureBuildState",
+                "mode": bool(self.structure_build_mode),
+                "bounds": list(self.structure_bounds) if self.structure_bounds else None,
+                "full": True,
+                "void_cells": [
+                    list(value) for value in sorted(self.structure_void_positions)
+                ],
+            }
+
+    def send_structure_build_state(self, players=None) -> None:
+        packet = self.structure_build_packet()
+        recipients = players if players is not None else self.server.players
+        for player in tuple(recipients):
+            if getattr(player, "world", None) is self:
+                self.server.send_client_socket(player, packet, "Forward")
+
+    def send_structure_build_delta(
+        self, *, void_add=(), void_remove=(), players=None
+    ) -> None:
+        with self._structure_lock:
+            packet = {
+                "__class__": "StructureBuildState",
+                "mode": True,
+                "bounds": list(self.structure_bounds) if self.structure_bounds else None,
+                "full": False,
+                "void_add": [list(value) for value in void_add],
+                "void_remove": [list(value) for value in void_remove],
+            }
+        recipients = players if players is not None else self.server.players
+        for player in tuple(recipients):
+            if getattr(player, "world", None) is self:
+                self.server.send_client_socket(player, packet, "Forward")
+
+    def _refresh_structure_bounds(self) -> None:
+        positions = (
+            self.structure_content_positions
+            | self.structure_void_positions
+            | self.structure_air_positions
+        )
+        if not positions:
+            self.structure_bounds = None
+            return
+        xs = [position[0] for position in positions]
+        ys = [position[1] for position in positions]
+        self.structure_bounds = (min(xs), min(ys), max(xs), max(ys))
+
+    def note_structure_block_change(self, x: int, y: int, z: int, block) -> None:
+        if not self.structure_build_mode:
+            return
+        position = (int(x), int(y), int(z))
+        with self._structure_lock:
+            was_void = position in self.structure_void_positions
+            if getattr(block, "block_id", "air") == "air":
+                self.structure_content_positions.discard(position)
+                self.structure_void_positions.discard(position)
+                self.structure_air_positions.discard(position)
+            else:
+                self.structure_content_positions.add(position)
+                self.structure_void_positions.discard(position)
+                self.structure_air_positions.discard(position)
+            self._refresh_structure_bounds()
+        self.send_structure_build_delta(
+            void_remove=(position,) if was_void else ()
+        )
+
+    def note_structure_region_change(
+        self,
+        origin_x: int,
+        origin_y: int,
+        origin_z: int,
+        width: int,
+        height: int,
+        depth: int,
+    ) -> None:
+        if not self.structure_build_mode:
+            return
+        with self._structure_lock:
+            for x in range(origin_x, origin_x + width):
+                for y in range(origin_y, origin_y + height):
+                    for z in range(origin_z, min(2, origin_z + depth)):
+                        position = (x, y, z)
+                        block = self.get_block(x, y, z)
+                        if getattr(block, "block_id", "air") == "air":
+                            self.structure_content_positions.discard(position)
+                        else:
+                            self.structure_content_positions.add(position)
+                            self.structure_void_positions.discard(position)
+                            self.structure_air_positions.discard(position)
+            for z in range(origin_z, min(2, origin_z + depth)):
+                self.structure_air_positions.update(
+                    {
+                        (origin_x, origin_y, z),
+                        (origin_x, origin_y + height - 1, z),
+                        (origin_x + width - 1, origin_y, z),
+                        (origin_x + width - 1, origin_y + height - 1, z),
+                    }
+                )
+            self._refresh_structure_bounds()
+        self.send_structure_build_state()
 
     def generate_chunk(self, rx: int):
         save_id = getattr(self.server, "save_id", None)
@@ -944,7 +1102,8 @@ class World:
                     self._initialize_chunk_blocks(saved_chunk)
                     self.mark_chunk_dirty(rx)
                     changed = self.recalculate_light_for_chunks({rx})
-                    self.schedule_chunk_and_boundary_fluids(rx)
+                    if not self.structure_build_mode:
+                        self.schedule_chunk_and_boundary_fluids(rx)
                     self._restore_entities_for_chunk(rx)
                     return changed
 
@@ -972,7 +1131,8 @@ class World:
             self.mark_chunk_dirty(rx)
             # 使用世界上下文重新计算光照以支持跨区块传播
             changed = self.recalculate_light_for_chunks({rx})
-            self.schedule_chunk_and_boundary_fluids(rx)
+            if not self.structure_build_mode:
+                self.schedule_chunk_and_boundary_fluids(rx)
             self._restore_entities_for_chunk(rx)
             from src.server.entity_spawning import spawn_animals_for_chunk
 
@@ -985,6 +1145,8 @@ class World:
         普通方块没有这个钩子，因此不会增加加载成本；需要持续效果的
         方块（例如火把）可以在这里恢复定时器，而不依赖玩家重新放置。
         """
+        if self.structure_build_mode:
+            return
         for block in chunk.region_array.flat:
             on_load = getattr(block, "on_load", None)
             if callable(on_load):

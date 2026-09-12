@@ -1,4 +1,5 @@
 # Commented and arranged by ChatGPT
+import math
 import time
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,9 @@ class GameManager:
         self._wait_for_input_release = False
         self._pressed_keys: set[int] = set()
         self._pressed_mouse_buttons: set[int] = set()
+        self.structure_drag_start: tuple[int, int, int] | None = None
+        self.structure_drag_end: tuple[int, int, int] | None = None
+        self.structure_drag_kind: str | None = None
 
     def acquire_game_input(self):
         """让 GUI 独占键鼠输入。"""
@@ -51,6 +55,7 @@ class GameManager:
         self._wait_for_input_release = False
         self._pressed_keys.clear()
         self._pressed_mouse_buttons.clear()
+        self._cancel_structure_drag()
         self.client.hold_mouse_buttons = [False, False, False]
 
     def gameplay_input_blocked(self) -> bool:
@@ -140,6 +145,11 @@ class GameManager:
         if self.client.client_player is None:
             return
 
+        if self.structure_drag_start is not None:
+            point = self._structure_target(require_empty_hand=True, require_air=False)
+            if point is not None and point[2] == self.structure_drag_start[2]:
+                self.structure_drag_end = point
+
         if self.ing_mouse_lock == 0:
             player = self.client.client_player
             player.choosing_entity = self.client.render.get_hovered_entity()
@@ -222,6 +232,8 @@ class GameManager:
         for event in events:
             if not self.client.in_game or self.client.client_player is None:
                 continue
+            if self._handle_structure_mouse_event(event):
+                continue
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.client.open_pause_menu()
@@ -239,6 +251,99 @@ class GameManager:
                     action()
             if event.type == pygame.MOUSEWHEEL:
                 self.client.client_player.game_mode.mouse_wheel(event.y)
+
+    def _structure_target(
+        self, *, require_empty_hand: bool, require_air: bool
+    ) -> tuple[int, int, int] | None:
+        if not getattr(self.client, "structure_build_mode", False):
+            return None
+        player = self.client.client_player
+        if player is None:
+            return None
+        if require_empty_hand and not player.inventory[player.selected_slot].is_empty():
+            return None
+        # Structure-mask editing is a screen-space editor action.  Unlike
+        # ordinary block interaction it deliberately ignores player reach.
+        world_x, world_y = self.client.render.get_mouse_world_position()
+        x, y = math.floor(world_x), math.floor(world_y)
+        z = 0 if player.fore_place else 1
+        block = self.client.client_world.get_block(x, y, z)
+        if require_air and getattr(block, "block_id", "air") != "air":
+            return None
+        return int(x), int(y), z
+
+    def _cancel_structure_drag(self) -> None:
+        self.structure_drag_start = None
+        self.structure_drag_end = None
+        self.structure_drag_kind = None
+
+    def _finish_structure_drag(self) -> None:
+        if (
+            self.structure_drag_start is not None
+            and self.structure_drag_end is not None
+            and self.structure_drag_kind is not None
+        ):
+            self.client.sent_packet(
+                {
+                    "__class__": "StructureEdit",
+                    "action": "fill",
+                    "kind": self.structure_drag_kind,
+                    "start": list(self.structure_drag_start),
+                    "end": list(self.structure_drag_end),
+                }
+            )
+        self._cancel_structure_drag()
+
+    def _handle_structure_mouse_event(self, event) -> bool:
+        if not getattr(self.client, "structure_build_mode", False):
+            return False
+        middle = 2
+        upper_side = getattr(pygame, "BUTTON_X1", 4)
+        lower_side = getattr(pygame, "BUTTON_X2", 5)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == middle:
+            if upper_side in self._pressed_mouse_buttons:
+                point = self._structure_target(
+                    require_empty_hand=True, require_air=False
+                )
+                if point is None:
+                    return False
+                self.structure_drag_start = point
+                self.structure_drag_end = point
+                self.structure_drag_kind = "structure_void"
+            elif lower_side in self._pressed_mouse_buttons:
+                point = self._structure_target(
+                    require_empty_hand=True, require_air=False
+                )
+                if point is None:
+                    return False
+                self.structure_drag_start = point
+                self.structure_drag_end = point
+                self.structure_drag_kind = "air"
+            else:
+                point = self._structure_target(
+                    require_empty_hand=True, require_air=True
+                )
+                if point is None:
+                    return False
+                self.client.sent_packet(
+                    {
+                        "__class__": "StructureEdit",
+                        "action": "toggle",
+                        "start": list(point),
+                        "end": list(point),
+                    }
+                )
+            return True
+        if event.type == pygame.MOUSEBUTTONUP and self.structure_drag_start is not None:
+            if event.button in (middle, upper_side, lower_side):
+                self._finish_structure_drag()
+                return True
+        if event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP) and event.button in (
+            upper_side,
+            lower_side,
+        ):
+            return True
+        return False
 
     def start_game_loop(self):
         """启动游戏主循环"""

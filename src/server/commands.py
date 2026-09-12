@@ -23,6 +23,12 @@ from src.server.status_effects import (
     StatusEffectInstance,
     get_status_effect,
 )
+from src.server.structure import (
+    capture_structure,
+    list_structures,
+    place_structure,
+    write_structure_data,
+)
 
 if TYPE_CHECKING:
     from src.server.server_main import Server
@@ -827,7 +833,10 @@ class CommandExecutor:
         for rx in affected_chunks:
             world.mark_chunk_dirty(rx)
             world.invalidate_chunk_packet(rx)
-            if hasattr(world, "schedule_chunk_and_boundary_fluids"):
+            if (
+                not world.structure_build_mode
+                and hasattr(world, "schedule_chunk_and_boundary_fluids")
+            ):
                 world.schedule_chunk_and_boundary_fluids(rx)
         changed_light_chunks = world.recalculate_light_for_chunks(affected_chunks)
         for rx in affected_chunks:
@@ -838,8 +847,99 @@ class CommandExecutor:
                 if rx in player.loading_regions:
                     world.server.send_client_socket(player, chunk, "Chunk")
         world.send_light_updates(changed_light_chunks - affected_chunks)
+        if world.structure_build_mode:
+            world.note_structure_region_change(
+                x_min,
+                y_min,
+                z_min,
+                area_width,
+                area_height,
+                area_depth,
+            )
 
         return f"Filled {filled} block(s) with {block_id}"
+
+    @register_command("structure")
+    def structure_command(self, args, executor: Player | str):
+        """Save build-world selections or place a saved structure template."""
+        if not args:
+            raise ValueError(
+                "Usage: /structure <save <name> [json|serialized|both]|"
+                "load <name> [x y z]|list>"
+            )
+        action = args[0].lower()
+        if action == "list":
+            names = list_structures()
+            return "Structures: " + (", ".join(names) if names else "(none)")
+
+        if action == "save":
+            if len(args) not in (2, 3):
+                raise ValueError(
+                    "Usage: /structure save <name> [json|serialized|both]"
+                )
+            if not isinstance(executor, Player):
+                raise ValueError("Only a player in a Structure Build world can save")
+            if not executor.world.structure_build_mode:
+                raise ValueError("Structures can only be saved from a Structure Build world")
+            file_format = args[2].lower() if len(args) == 3 else "json"
+            aliases = {
+                "bin": "serialized",
+                "binary": "serialized",
+                "msgpack": "serialized",
+                "structure": "serialized",
+            }
+            file_format = aliases.get(file_format, file_format)
+            if file_format not in {"json", "serialized", "both"}:
+                raise ValueError("Format must be json, serialized, or both")
+            if file_format == "both":
+                json_path, data = capture_structure(
+                    executor.world, args[1], "json"
+                )
+                serialized_path = write_structure_data(
+                    data["id"], data, "serialized"
+                )
+                paths = f"{json_path}, {serialized_path}"
+            else:
+                path, data = capture_structure(
+                    executor.world, args[1], file_format
+                )
+                paths = str(path)
+            return (
+                f"Saved {data['id']} ({data['size'][0]}x{data['size'][1]}x"
+                f"{data['size'][2]}, {len(data['entities'])} entities) to {paths}"
+            )
+
+        if action == "load":
+            if len(args) not in (2, 5):
+                raise ValueError("Usage: /structure load <name> [x y z]")
+            if isinstance(executor, Player):
+                if not executor.is_operator and not executor.world.structure_build_mode:
+                    raise ValueError("You do not have permission to load structures")
+                world = executor.world
+            else:
+                world = self.server.worlds[self.server.main_world_id]
+            ref_x, ref_y, ref_z = self._get_reference_position(executor)
+            if len(args) == 5:
+                try:
+                    origin = (
+                        int(self._parse_coord(args[2], ref_x)),
+                        int(self._parse_coord(args[3], ref_y)),
+                        int(self._parse_coord(args[4], ref_z)),
+                    )
+                except ValueError as exc:
+                    raise ValueError(f"Invalid structure origin: {exc}") from exc
+            else:
+                origin = (int(ref_x), int(ref_y), 0)
+            result = place_structure(world, args[1], origin)
+            return (
+                f"Loaded {args[1]} at {origin}: {result['placed']} cells, "
+                f"{result['skipped']} void, {result['entities']} entities"
+            )
+
+        raise ValueError(
+            "Usage: /structure <save <name> [json|serialized|both]|"
+            "load <name> [x y z]|list>"
+        )
 
     def execute_command(self, executor: Player | str, args: list) -> str | Text:
         cmd = args.pop(0)

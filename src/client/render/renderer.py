@@ -815,8 +815,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     background_entities, foreground_entities = (
                         self._collect_visible_entities()
                     )
+                    self.draw_structure_build_overlay()
                     self.draw_entities(z_filter=1, entities=background_entities)
                     self.draw_block()  # 方块绘制（来自 BlockRenderMixin）
+                    self.draw_structure_build_outline()
                     if self.debug:
                         self.draw_biome_debug_overlay()
                     self.draw_precipitation()
@@ -1321,6 +1323,121 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             )
             return
         pygame.draw.rect(self.screen, (0, 0, 0), outline_rect, 1)
+
+    def _structure_screen_rect(
+        self, bounds: tuple[int, int, int, int]
+    ) -> pygame.Rect:
+        x_min, y_min, x_max, y_max = bounds
+        left, top = self.trans_world_location((x_min, y_max + 1))
+        right, bottom = self.trans_world_location((x_max + 1, y_min))
+        return pygame.Rect(
+            round(left),
+            round(top),
+            max(1, round(right - left)),
+            max(1, round(bottom - top)),
+        )
+
+    def draw_structure_build_overlay(self) -> None:
+        """Draw air/structure-void tint below real block sprites."""
+        if not getattr(self.client, "structure_build_mode", False):
+            return
+        bounds = getattr(self.client, "structure_bounds", None)
+        drag_start = self.client.game_manager.structure_drag_start
+        drag_end = self.client.game_manager.structure_drag_end
+        all_bounds = []
+        if bounds is not None:
+            all_bounds.append(tuple(bounds))
+        if drag_start is not None and drag_end is not None:
+            all_bounds.append(
+                (
+                    min(drag_start[0], drag_end[0]),
+                    min(drag_start[1], drag_end[1]),
+                    max(drag_start[0], drag_end[0]),
+                    max(drag_start[1], drag_end[1]),
+                )
+            )
+        if not all_bounds:
+            return
+
+        overlay = self.create_surface((self.SCREEN_WIDTH, self.SCREEN_HEIGHT), alpha=True)
+        self.fill_surface(overlay, (0, 0, 0, 0))
+        active_z = 0 if self.client.client_player.fore_place else 1
+        void_cells = getattr(self.client, "structure_void_cells", set())
+        if bounds is not None:
+            x_min, y_min, x_max, y_max = bounds
+            half_w = self.SCREEN_WIDTH / max(1, self.block_size) / 2
+            half_h = self.SCREEN_HEIGHT / max(1, self.block_size) / 2
+            x_min = max(x_min, _math.floor(self.camera.x + 0.5 - half_w) - 1)
+            x_max = min(x_max, _math.ceil(self.camera.x + 0.5 + half_w) + 1)
+            y_min = max(y_min, _math.floor(self.camera.y - 0.5 - half_h) - 1)
+            y_max = min(y_max, _math.ceil(self.camera.y - 0.5 + half_h) + 1)
+            for x in range(x_min, x_max + 1):
+                for y in range(y_min, y_max + 1):
+                    cell = self._structure_screen_rect((x, y, x, y))
+                    if not cell.colliderect(overlay.get_rect()):
+                        continue
+                    color = (
+                        (218, 184, 255, 74)
+                        if (x, y, active_z) in void_cells
+                        else (178, 226, 255, 48)
+                    )
+                    pygame.draw.rect(overlay, color, cell)
+
+        if drag_start is not None and drag_end is not None:
+            drag_bounds = all_bounds[-1]
+            color = (
+                (218, 184, 255, 90)
+                if self.client.game_manager.structure_drag_kind == "structure_void"
+                else (178, 226, 255, 75)
+            )
+            pygame.draw.rect(overlay, color, self._structure_screen_rect(drag_bounds))
+        self.blit(overlay, (0, 0))
+
+    def draw_structure_build_outline(self) -> None:
+        if not getattr(self.client, "structure_build_mode", False):
+            return
+        active_layer = (
+            "Foreground (z=0)" if self.client.client_player.fore_place else "Background (z=1)"
+        )
+        self.render_text(
+            f"Structure Build | {active_layer} | Air: cyan | Void: purple",
+            (12, 64),
+            (225, 240, 255),
+            max(14, min(20, round(self.SCREEN_HEIGHT * 0.022))),
+            shadow=True,
+        )
+        self.render_text(
+            "Empty hand: MMB toggle | X1+MMB drag Void | X2+MMB drag Air",
+            (12, 88),
+            (190, 215, 230),
+            max(12, min(17, round(self.SCREEN_HEIGHT * 0.019))),
+            shadow=True,
+        )
+        bounds = getattr(self.client, "structure_bounds", None)
+        if bounds is not None:
+            pygame.draw.rect(
+                self.screen,
+                (205, 235, 255),
+                self._structure_screen_rect(tuple(bounds)),
+                max(1, round(self.block_size / 16)),
+            )
+        start = self.client.game_manager.structure_drag_start
+        end = self.client.game_manager.structure_drag_end
+        if start is not None and end is not None:
+            drag_bounds = (
+                min(start[0], end[0]),
+                min(start[1], end[1]),
+                max(start[0], end[0]),
+                max(start[1], end[1]),
+            )
+            pygame.draw.rect(
+                self.screen,
+                (235, 205, 255)
+                if self.client.game_manager.structure_drag_kind == "structure_void"
+                else (205, 240, 255),
+                self._structure_screen_rect(drag_bounds),
+                2,
+            )
 
     def draw_destroy_progress(self) -> None:
         states = self.client_world.iter_break_progress()

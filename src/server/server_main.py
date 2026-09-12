@@ -206,6 +206,8 @@ class Server:
                 player.name = player_name
                 player.is_operator = is_main_player
                 self.server.restore_player_state(player, player_data)
+                if player.world.structure_build_mode:
+                    player.flying = True
                 # The current client's identity wins over an old display name in the profile.
                 player.name = player_name
                 self.connections[player] = (client_sock, client_addr)
@@ -245,6 +247,7 @@ class Server:
                     "Forward",
                 )
                 self.server.send_client_socket(player, player, "GamemodeUpdate")
+                player.world.send_structure_build_state((player,))
                 client_thread = threading.Thread(
                     target=self.handle_client,
                     args=(client_sock, client_addr, player),
@@ -487,9 +490,21 @@ class Server:
             self.worlds["overworld"].disable_mob_generation = bool(
                 world_meta.get("disable_mob_generation", False)
             )
+            if self.worlds["overworld"].structure_build_mode:
+                self.level_data["game_mode"] = "creative"
+                self.worlds["overworld"].disable_mob_generation = True
+                self.worlds["overworld"].load_structure_build_state(
+                    world_meta.get("structure_build_state", {})
+                )
             self.worlds["overworld"].queue_saved_entities(
                 world_meta.get("entities", ())
             )
+            if self.worlds["overworld"].structure_build_mode:
+                world_meta["disable_mob_generation"] = True
+                world_meta["structure_build_state"] = self.worlds[
+                    "overworld"
+                ].structure_build_state_data()
+                save_manager.save_level(self.save_id, self.level_data)
         weather_name = (
             str(world_meta.get("weather", Weather.CLEAR.value))
             if self.save_id
@@ -588,9 +603,14 @@ class Server:
 
     def get_player_gamemode(self, player_data: dict | None = None):
         """Resolve saved player mode, then fall back to the world's default mode."""
-        mode_name = None
+        overworld = self.worlds.get(self.main_world_id)
+        mode_name = (
+            "creative"
+            if overworld is not None and overworld.structure_build_mode
+            else None
+        )
         if isinstance(player_data, dict):
-            mode_name = player_data.get("gamemode")
+            mode_name = mode_name or player_data.get("gamemode")
         if not mode_name and self.level_data:
             mode_name = self.level_data.get("game_mode")
         mode_name = str(mode_name or "survival").lower()
@@ -812,6 +832,10 @@ class Server:
                 "weather_tick": int(world.weather_tick),
                 "disable_mob_generation": bool(world.disable_mob_generation),
             })
+            if world.structure_build_mode:
+                world_meta["structure_build_state"] = world.structure_build_state_data()
+            else:
+                world_meta.pop("structure_build_state", None)
             settings_writer = getattr(world.generator, "to_settings_dict", None)
             if callable(settings_writer):
                 world_meta["generator_options"] = settings_writer()

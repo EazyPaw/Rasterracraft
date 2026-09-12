@@ -202,7 +202,9 @@ class CreateWorldMenu(_DirtMenu):
             shadow=True,
         )
         self.render.render_text(
-            "Villages, dungeons etc",
+            "Empty template workspace"
+            if self.world_type == "structure_build"
+            else "Villages, dungeons etc",
             (self.structures_button.rect.x, self.structures_button.rect.bottom + 5),
             GRAY,
             self.detail_size,
@@ -231,6 +233,8 @@ class CreateWorldMenu(_DirtMenu):
                 events.remove(event)
 
     def toggle_game_mode(self) -> None:
+        if self.world_type == "structure_build":
+            return
         self.game_mode = "creative" if self.game_mode == "survival" else "survival"
         self._refresh_buttons()
 
@@ -247,11 +251,22 @@ class CreateWorldMenu(_DirtMenu):
         self._refresh_buttons()
 
     def toggle_structures(self) -> None:
+        if self.world_type == "structure_build":
+            return
         self.generate_structures = not self.generate_structures
         self._refresh_buttons()
 
     def toggle_world_type(self) -> None:
-        self.world_type = "superflat" if self.world_type == "default" else "default"
+        if pygame.key.get_mods() & pygame.KMOD_ALT:
+            self.world_type = "structure_build"
+            self.game_mode = "creative"
+            self.generate_structures = False
+            self.allow_cheats = True
+            self.bonus_chest = False
+        else:
+            self.world_type = (
+                "superflat" if self.world_type == "default" else "default"
+            )
         self._refresh_buttons()
 
     def toggle_cheats(self) -> None:
@@ -280,9 +295,11 @@ class CreateWorldMenu(_DirtMenu):
             button.enabled = False
         self.name_box.enabled = False
         self.seed_box.enabled = False
-        generator_name = (
-            "ClassicFlat" if self.world_type == "superflat" else "MinecraftLike2D"
-        )
+        generator_name = {
+            "default": "MinecraftLike2D",
+            "superflat": "ClassicFlat",
+            "structure_build": "StructureBuild",
+        }[self.world_type]
         generator_options = (
             self.flat_settings.to_dict() if self.world_type == "superflat" else None
         )
@@ -311,13 +328,19 @@ class CreateWorldMenu(_DirtMenu):
         self.structures_button.text = (
             f"Generate Structures: {'ON' if self.generate_structures else 'OFF'}"
         )
-        type_name = "Superflat" if self.world_type == "superflat" else "Default"
+        type_name = {
+            "default": "Default",
+            "superflat": "Superflat",
+            "structure_build": "Structure Build",
+        }[self.world_type]
         self.world_type_button.text = f"World Type: {type_name}"
         self.cheats_button.text = f"Allow Cheats: {'ON' if self.allow_cheats else 'OFF'}"
         self.bonus_chest_button.text = (
             f"Bonus Chest: {'ON' if self.bonus_chest else 'OFF'}"
         )
         self.customize_button.visible = self.advanced and self.world_type == "superflat"
+        self.structures_button.enabled = not self.creating and self.world_type != "structure_build"
+        self.game_mode_button.enabled = not self.creating and self.world_type != "structure_build"
         self.game_mode_button.visible = not self.advanced
         self.more_options_button.visible = not self.advanced
         self.structures_button.visible = self.advanced

@@ -14,6 +14,7 @@ from src.server.item_class import EmptyItemStack
 from src.server.particles import ParticleEffect
 from src.server.player import Player
 from src.server.world_class import Chunk
+from src.server.structure import apply_structure_mask
 from src.protocol import (
     CLIENTBOUND,
     SERVERBOUND,
@@ -808,6 +809,63 @@ def _handle_request_respawn(packet: dict, player: Player) -> None:
     block = player.world.find_top_block(player.spawn_point, 0)
     if block is not None:
         player.teleport_to(0.0, block.location.y + 1)
+
+
+def _read_structure_point(value) -> tuple[int, int, int] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return None
+    try:
+        numbers = tuple(float(part) for part in value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not all(math.isfinite(part) and part.is_integer() for part in numbers):
+        return None
+    return tuple(int(part) for part in numbers)
+
+
+@SERVER_PACKET_DISPATCHER.handler("StructureEdit")
+def _handle_structure_edit(packet: dict, player: Player) -> None:
+    world = player.world
+    if not world.structure_build_mode:
+        return
+    held = player.inventory[player.selected_slot]
+    if not held.is_empty() or getattr(player.gamemode, "name_id", "") != "creative":
+        return
+    action = str(packet.get("action", ""))
+    start = _read_structure_point(packet.get("start"))
+    end = _read_structure_point(packet.get("end"))
+    if start is None or end is None:
+        return
+    if action == "toggle":
+        end = start
+        position = start
+        if getattr(world.get_block(*position), "block_id", "air") != "air":
+            return
+        kind = (
+            "air"
+            if position in world.structure_void_positions
+            else "structure_void"
+        )
+    elif action == "fill":
+        kind = str(packet.get("kind", ""))
+    else:
+        return
+    if kind not in {"air", "structure_void"}:
+        return
+    if start[2] != end[2]:
+        return
+    for point in (start, end):
+        x, y, z = point
+        if (
+            not 0 <= y < world.attribute.MAX_BUILD_HEIGHT
+            or z not in (0, 1)
+            or x // 16 not in player.client_loaded_regions
+        ):
+            return
+    try:
+        apply_structure_mask(world, kind, start, end)
+    except ValueError as exc:
+        logging.warning("Rejected structure edit from %s: %s", player.name, exc)
 
 
 # ClientHello is consumed before a Player exists in SocketServer.receive_client_hello.

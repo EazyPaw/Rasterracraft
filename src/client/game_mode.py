@@ -10,6 +10,7 @@ from src.client.GUI.survival_hud import SurvivalHUD
 from src.server.block_class import Block
 from src.server.blocks import AIR
 from src.server.entity import Entity
+from src.server.location import Location
 from abc import ABC
 
 if TYPE_CHECKING:
@@ -44,6 +45,22 @@ class GameMode(ABC):
         target = self.player.choosing_block
         packet = {"__class__": "RightClick"}
         location = getattr(target, "location", None)
+        if location is None and isinstance(target, AIR):
+            # Compact chunks share one location-less AIR instance.  A void
+            # world therefore has no solid block from which placement can
+            # inherit coordinates, so materialize a positioned AIR target
+            # from the renderer's selected grid cell for this interaction.
+            block_x, block_y = self.player.client.render.choosing_position
+            target_z = 0 if self.player.fore_place else 1
+            location = Location(
+                self.player.client.client_world,
+                int(block_x),
+                int(block_y),
+                target_z,
+            )
+            positioned_air = AIR()
+            positioned_air.location = location
+            target = positioned_air
         if location is not None:
             packet.update(
                 {
