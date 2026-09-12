@@ -196,7 +196,12 @@ class Server:
                     player_uuid, is_main_player=is_main_player
                 )
                 spawn_x, spawn_y = self.server.get_player_spawn(player_data)
-                player = Player(spawn_x, spawn_y, self.server.worlds["overworld"])
+                player = Player(
+                    spawn_x,
+                    spawn_y,
+                    self.server.worlds["overworld"],
+                    gamemode=self.server.get_player_gamemode(player_data),
+                )
                 player.uuid = player_uuid
                 player.name = player_name
                 player.is_operator = is_main_player
@@ -581,6 +586,23 @@ class Server:
         spawn_y = height_getter(spawn_x) if callable(height_getter) else 100.0
         return spawn_x, float(spawn_y)
 
+    def get_player_gamemode(self, player_data: dict | None = None):
+        """Resolve saved player mode, then fall back to the world's default mode."""
+        mode_name = None
+        if isinstance(player_data, dict):
+            mode_name = player_data.get("gamemode")
+        if not mode_name and self.level_data:
+            mode_name = self.level_data.get("game_mode")
+        mode_name = str(mode_name or "survival").lower()
+
+        from src.client.game_mode import get_gamemode_by_id
+
+        try:
+            return get_gamemode_by_id(mode_name)
+        except ValueError:
+            logging.warning("Unknown saved gamemode %r; using survival", mode_name)
+            return get_gamemode_by_id("survival")
+
     def load_player_state(
         self, player_uuid: UUID, *, is_main_player: bool = False
     ) -> dict[str, Any] | None:
@@ -690,13 +712,7 @@ class Server:
         if "spawn_point" in data:
             player.spawn_point = data["spawn_point"]
         # 恢复玩家的游戏模式（优先读取玩家存档，回退到世界默认模式）
-        saved_gamemode = data.get("gamemode") or (
-            self.level_data.get("game_mode") if self.level_data else None
-        )
-        if saved_gamemode:
-            from src.client.game_mode import get_gamemode_by_id
-
-            player.gamemode = get_gamemode_by_id(saved_gamemode)
+        player.gamemode = self.get_player_gamemode(data)
         saved_inventory = data.get("inventory")
         if isinstance(saved_inventory, list):
             restore_inventory(player.inventory, saved_inventory)
