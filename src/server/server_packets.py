@@ -53,6 +53,7 @@ def _encode_packet_object(obj, obj_type, args) -> Packet | dict:
             "absorption_amount": getattr(obj, "absorption_amount", 0.0),
             "hurt_time": obj.hurt_time,
             "last_hurt_damage": obj.last_hurt_damage,
+            "fire_ticks": max(0, int(obj.fire_ticks)),
             "food_level": getattr(obj, "food_level", 20),
             "saturation": getattr(obj, "saturation", 5.0),
             "experience": getattr(obj, "experience", 0),

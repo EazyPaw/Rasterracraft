@@ -262,7 +262,7 @@ packet_spec("StructureEdit", SERVERBOUND, fields=("action", "kind", "start", "en
 
 packet_spec("Disconnect", CLIENTBOUND, fields=("reason", "reason_is_translation_key"), required=("reason",))
 packet_spec("Chunk", CLIENTBOUND, fields=("x", "format", "payload", "region_array", "biome_array", "light_array", "sky_light_array", "block_light_array"), required=("x",))
-packet_spec("Teleport", CLIENTBOUND, fields=("x", "y", "uuid", "name", "health", "absorption_amount", "hurt_time", "last_hurt_damage", "food_level", "saturation", "experience", "experience_level", "experience_total", "score", "sleeping", "sleeping_bed", "selected_slot", "teleport_id", "inventory", "cursor", "equipment", "attributes", "active_effects"), required=("x", "y"))
+packet_spec("Teleport", CLIENTBOUND, fields=("x", "y", "uuid", "name", "health", "absorption_amount", "hurt_time", "last_hurt_damage", "fire_ticks", "food_level", "saturation", "experience", "experience_level", "experience_total", "score", "sleeping", "sleeping_bed", "selected_slot", "teleport_id", "inventory", "cursor", "equipment", "attributes", "active_effects"), required=("x", "y"))
 packet_spec("BlockBreakProgress", CLIENTBOUND, fields=("x", "y", "z", "miner_uuid", "progress", "active"), required=("x", "y", "z"))
 packet_spec("BlockBreakCorrection", CLIENTBOUND, fields=("x", "y", "z", "block_data"), required=("x", "y", "z", "block_data"))
 packet_spec("BlockUpdate", CLIENTBOUND, fields=("x", "y", "z", "block_data"), required=("x", "y", "z", "block_data"))
@@ -283,7 +283,7 @@ packet_spec("ChestOpen", CLIENTBOUND, fields=("container", "slots", "rows", "x",
 packet_spec("ChestUpdate", CLIENTBOUND, fields=("container", "slots", "rows", "x", "y", "z"), required=("container",))
 packet_spec("ChestClosed", CLIENTBOUND, fields=("container",), required=("container",))
 packet_spec("CraftingTableOpen", CLIENTBOUND, fields=("width", "height"))
-packet_spec("PlayerHurt", CLIENTBOUND, fields=("health", "absorption_amount", "hurt_time", "last_hurt_damage", "motion", "death_message", "score", "cause", "damage"), required=("health",))
+packet_spec("PlayerHurt", CLIENTBOUND, fields=("health", "absorption_amount", "hurt_time", "last_hurt_damage", "fire_ticks", "motion", "death_message", "score", "cause", "damage"), required=("health",))
 packet_spec("AttributeUpdate", CLIENTBOUND, fields=("uuid", "attributes", "max_health"), required=("attributes",))
 packet_spec("EffectUpdate", CLIENTBOUND, fields=("uuid", "active_effects", "attributes", "health", "max_health", "absorption_amount"), required=("active_effects",))
 packet_spec("PlayerVelocity", CLIENTBOUND, fields=("motion", "sprinting"), required=("motion",))

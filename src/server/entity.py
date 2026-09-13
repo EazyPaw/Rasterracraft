@@ -9,6 +9,7 @@ from uuid import UUID
 from src.server.damange_type import (
     DamageType,
     GENERIC,
+    LAVA,
     MOB_ATTACK,
     ON_FIRE,
     PLAYER_ATTACK,
@@ -39,6 +40,7 @@ class Entity:
 
     blocks_block_placement = True
     attackable = True
+    fire_immune = False
     translation_key: str | None = None
     ambient_sound_interval = (160, 360)
     initial_ambient_sound_interval = (80, 220)
@@ -70,6 +72,8 @@ class Entity:
         self.health = self.max_health
         self.hurt_time = 0
         self.on_ground = False
+        self.horizontal_collision = False
+        self.vertical_collision = False
         self.flying = False
         self.sneaking = False
         self.interact_range = 3.5
@@ -836,6 +840,42 @@ class Entity:
             if callable(callback):
                 callback(self)
 
+    def get_climbable_block(self):
+        """Return the climbable block at the entity's feet, if any.
+
+        Minecraft performs this test at the living entity's in-block position,
+        rather than treating ladders as solid collision geometry.  ``x`` is the
+        left edge in this project, so sample the horizontal centre to preserve
+        the vanilla centre-position behaviour.
+        """
+        if self.flying:
+            return None
+        if (
+            getattr(getattr(self, "gamemode", None), "name_id", None)
+            == "spectator"
+        ):
+            return None
+        block = self._get_block_at(
+            self.x + self.width * 0.5,
+            self.y + 0.001,
+            getattr(self, "z", 0),
+        )
+        return block if getattr(block, "climbable", False) else None
+
+    def is_on_climbable(self) -> bool:
+        return self.get_climbable_block() is not None
+
+    def _handle_on_climbable(self) -> bool:
+        if self.in_fluid or not self.is_on_climbable():
+            return False
+        self.motion.x = max(-0.15, min(0.15, self.motion.x))
+        self.motion.y = max(-0.15, self.motion.y)
+        if self.sneaking and self.motion.y < 0.0:
+            self.motion.y = 0.0
+        if hasattr(self, "fall_distance"):
+            self.fall_distance = 0.0
+        return True
+
     def get_ground_block(self):
         return self._get_block_at(self.x + self.width * 0.5, self.y - 0.05)
 
@@ -1124,6 +1164,8 @@ class Entity:
             else:
                 self.motion.y = 0.0
 
+        self.horizontal_collision = collided_x
+        self.vertical_collision = collided_y
         self.on_ground = (collided_y and requested_dy < 0) or self._check_support_at()
 
     def escape_solid_block(self) -> bool:
@@ -1233,6 +1275,8 @@ class Entity:
             self.motion += Vector(0, self.jump_height * 1.5)
         elif self._get_fluid_interaction()[0]:
             self.swimming_up = True
+        elif self.is_on_climbable():
+            self.motion.y = max(0.2, self.motion.y)
         elif self.on_ground:
             self.motion.y = self.jump_height * self.get_ground_jump_factor()
             self._jumped_this_tick = True
@@ -1296,7 +1340,10 @@ class Entity:
         if self.on_ground:
             self.flying = False
 
+        on_climbable = self._handle_on_climbable()
         self.collision_check(steps=4)
+        if on_climbable and self.horizontal_collision and not self.sneaking:
+            self.motion.y = max(0.2, self.motion.y)
         self.call_inside_block_hooks()
 
         if self.in_fluid and not self.flying:
@@ -1335,6 +1382,8 @@ class Entity:
         self.update_ai()
         self._tick_ambient_sound()
         self.move_update()
+        if self.in_lava:
+            self.lava_hurt()
 
     def update_ai(self) -> None:
         pass
@@ -1367,14 +1416,54 @@ class Entity:
                 sound, self.x, self.y, getattr(self, "z", 0), volume=0.9
             )
 
-    def tick_damage_state(self) -> None:
+    def is_burning(self) -> bool:
+        return not self.fire_immune and self.fire_ticks > 0
+
+    def can_ignite(self) -> bool:
+        mode = getattr(getattr(self, "gamemode", None), "name_id", None)
+        return (
+            not self.fire_immune
+            and mode not in {"creative", "spectator"}
+            and not self.has_status_effect("fire_resistance")
+        )
+
+    def _sync_fire_state(self) -> None:
+        server = getattr(self.world, "server", None)
+        send = getattr(server, "send_client_socket", None)
+        if not callable(send):
+            return
+        players = tuple(getattr(server, "players", ()))
+        if self not in players:
+            return
+        packet = {
+            "__class__": "EntityUpdate",
+            "uuid": str(self.uuid),
+            "fire_ticks": max(0, int(self.fire_ticks)),
+        }
+        send(self, packet, "Forward")
+
+    def clear_fire(self) -> None:
+        if self.fire_ticks <= 0:
+            self.fire_ticks = 0
+            return
+        self.fire_ticks = 0
+        self._sync_fire_state()
+
+    def tick_damage_state(self, *, apply_fire_damage: bool = True) -> None:
         if self.fire_ticks > 0:
-            if self.in_water:
-                self.fire_ticks = 0
+            if self.in_water or self.fire_immune:
+                self.clear_fire()
             else:
-                self.fire_ticks -= 1
-                if self.fire_ticks % 20 == 0:
+                if (
+                    apply_fire_damage
+                    and not self.in_lava
+                    and self.fire_ticks % 20 == 0
+                ):
                     self.apply_damage(1.0, ON_FIRE, source=None)
+                self.fire_ticks -= 1
+                if self.fire_ticks <= 0:
+                    self.fire_ticks = 0
+                    self._sync_fire_state()
         if self.hurt_time <= 0:
             self.hurt_time = 0
             self.last_hurt_damage = 0.0
@@ -1386,11 +1475,28 @@ class Entity:
 
     def set_seconds_on_fire(self, seconds: float) -> None:
         try:
-            ticks = max(0, int(round(float(seconds) * 20.0)))
+            ticks = max(
+                0,
+                int(
+                    math.ceil(
+                        float(seconds)
+                        * 20.0
+                        * self.get_attribute_value("burning_time")
+                    )
+                ),
+            )
         except (TypeError, ValueError, OverflowError):
             return
-        if not self.has_status_effect("fire_resistance"):
-            self.fire_ticks = max(self.fire_ticks, ticks)
+        if not self.can_ignite() or ticks <= self.fire_ticks:
+            return
+        self.fire_ticks = ticks
+        self._sync_fire_state()
+
+    def lava_hurt(self) -> float:
+        if not self.can_ignite():
+            return 0.0
+        self.set_seconds_on_fire(15.0)
+        return self.apply_damage(4.0, LAVA, source=None)
 
     def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
         return not self.removed and self.health > 0

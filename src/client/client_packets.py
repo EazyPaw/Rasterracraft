@@ -169,6 +169,7 @@ def _handle_teleport(packet: dict, client: "Client") -> None:
             "absorption_amount",
             "hurt_time",
             "last_hurt_damage",
+            "fire_ticks",
             "food_level",
             "saturation",
             "experience",
@@ -475,6 +476,9 @@ def _handle_player_hurt(packet: dict, client: "Client") -> None:
         player.last_hurt_damage = float(
             packet.get("last_hurt_damage", player.last_hurt_damage)
         )
+        player.fire_ticks = max(
+            0, int(packet.get("fire_ticks", getattr(player, "fire_ticks", 0)))
+        )
         motion = packet.get("motion", {})
         player.motion.x = float(motion.get("x", player.motion.x))
         player.motion.y = float(motion.get("y", player.motion.y))
@@ -552,6 +556,15 @@ def _handle_experience(packet: dict, client: "Client") -> None:
 @CLIENT_PACKET_DISPATCHER.handler("EntitySpawn")
 @CLIENT_PACKET_DISPATCHER.handler("EntityUpdate")
 def _handle_entity_update(packet: dict, client: "Client") -> None:
+    player = client.client_player
+    target_uuid = str(packet.get("uuid", ""))
+    if player is not None and target_uuid in {
+        str(getattr(player, "uuid", "")),
+        str(getattr(client, "server_player_uuid", "")),
+    }:
+        if "fire_ticks" in packet:
+            player.fire_ticks = max(0, int(packet["fire_ticks"]))
+        return
     client.client_world.update_entity(packet)
 
 

@@ -207,7 +207,9 @@ class ClientPlayer(Entity):
 
     def _update_survival_state(self):
 
-        self.tick_damage_state()
+        # The client predicts the visible countdown only. Health changes are
+        # authoritative on the server and arrive in PlayerHurt packets.
+        self.tick_damage_state(apply_fire_damage=False)
         for effect_id, instance in tuple(self.active_effects.items()):
             if instance.duration > 0:
                 instance.duration -= 1

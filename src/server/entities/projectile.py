@@ -578,7 +578,6 @@ class Projectile(Entity, ABC):
 
         self._update_left_owner()
         self.in_fluid = bool(self._get_fluid_interaction()[0])
-        self.in_water = self.in_fluid
         drag = self.water_drag if self.in_fluid else self.air_drag
         self.motion.x *= drag
         self.motion.y = self.motion.y * drag - self.gravity

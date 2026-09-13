@@ -91,6 +91,7 @@ class Block(ABC):
     speed_factor = 1.0
     jump_factor = 1.0
     bounce_restitution = 0
+    climbable = False
     replaceable = False
     flame_odds = 0
     burn_odds = 0

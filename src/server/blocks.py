@@ -3,6 +3,7 @@ import os
 
 import src.server.materials as materials
 from src.server.biome import get_biome_by_id, get_precipitation_type
+from src.server.damange_type import IN_FIRE
 
 if os.environ.get("PYCRAFT_CLIENT") == "1":
     pass
@@ -2808,6 +2809,18 @@ class FIRE(Block):
     def get_collision_box(self):
         return EMPTY
 
+    def on_entity_inside(self, entity) -> None:
+        # Client movement prediction also invokes block hooks. Health and fire
+        # state remain server-authoritative and arrive through entity packets.
+        if getattr(getattr(entity, "world", None), "server", None) is None:
+            return
+        ignite = getattr(entity, "set_seconds_on_fire", None)
+        if callable(ignite):
+            ignite(8.0)
+        damage = getattr(entity, "apply_damage", None)
+        if callable(damage):
+            damage(1.0, IN_FIRE, source=None)
+
 class ColoredWool(Block):
     break_sound = "dig.cloth"
 
@@ -3725,6 +3738,11 @@ class LADDER(Block):
     block_id = "ladder"
     name = "tile.ladder.name"
     _texture_path = "blocks.ladder"
+    solid = False
+    collision_box = EMPTY
+    climbable = True
+    suffocating = False
+    redstone_conducting = False
     light_attenuation = 1
 
 

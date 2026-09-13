@@ -1043,6 +1043,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         player = self.client.client_player
         if "invisibility" not in getattr(player, "active_effects", {}):
             player.skeleton.draw()
+        player.skeleton.draw_fire_overlay()
         if getattr(self, "show_entity_hitboxes", False):
             self.draw_skeleton_hitbox(player, player.skeleton)
 
@@ -1116,11 +1117,13 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     continue
             elif z_filter == 1:
                 continue
-            if entity.skeleton is not None and "invisibility" not in getattr(
-                entity, "active_effects", {}
-            ):
+            if entity.skeleton is not None:
                 entity.skeleton.update()
-                entity.skeleton.draw()
+                if "invisibility" not in getattr(entity, "active_effects", {}):
+                    entity.skeleton.draw()
+                draw_fire = getattr(entity.skeleton, "draw_fire_overlay", None)
+                if callable(draw_fire):
+                    draw_fire()
             if getattr(self, "show_entity_hitboxes", False):
                 self.draw_skeleton_hitbox(entity, entity.skeleton)
 

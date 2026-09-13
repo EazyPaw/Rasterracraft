@@ -1161,7 +1161,7 @@ class Player(Entity):
             and self.y > previous_y
         ):
             self.add_exhaustion(0.2 if self.sprinting else 0.05)
-        if self.in_water or self.flying:
+        if self.in_water or self.flying or self.is_on_climbable():
             self.fall_distance = 0.0
             return
         if self.in_lava:
@@ -1236,6 +1236,8 @@ class Player(Entity):
     def tick_server(self) -> None:
         self.tick_sleeping()
         self.tick_damage_state()
+        if self.in_lava:
+            self.lava_hurt()
         if self.tick_status_effects():
             self.sync_effects()
         if self.attack_cooldown_ticks > 0:
@@ -1458,6 +1460,7 @@ class Player(Entity):
             "absorption_amount": self.absorption_amount,
             "hurt_time": self.hurt_time,
             "last_hurt_damage": self.last_hurt_damage,
+            "fire_ticks": max(0, int(self.fire_ticks)),
             "cause": getattr(damage_type, "message_id", "generic"),
             "damage": actual_damage,
             "motion": {"x": self.motion.x, "y": self.motion.y},

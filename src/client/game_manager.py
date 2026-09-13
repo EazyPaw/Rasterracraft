@@ -217,7 +217,7 @@ class GameManager:
             pygame.mouse.get_pos(),
             (render.SCREEN_WIDTH, render.SCREEN_HEIGHT),
             render.block_size,
-            strength_multiplier=1.0 + 2.0 * bow_progress,
+            strength_multiplier=1.0 + 3.0 * bow_progress,
         )
         render.camera.move_to(
             target_x,

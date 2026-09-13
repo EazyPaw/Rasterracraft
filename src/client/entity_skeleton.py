@@ -2,6 +2,7 @@
 import math
 import time
 from abc import ABC
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -330,6 +331,9 @@ class EntitySkeleton(ABC):
 
     LEFT = 0
     RIGHT = 1
+    FIRE_TEXTURES = ("blocks.fire_layer_0", "blocks.fire_layer_1")
+    MAX_FIRE_OVERLAY_CACHE = 512
+    _fire_overlay_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
 
     _instances = []
 
@@ -482,6 +486,93 @@ class EntitySkeleton(ABC):
             entity_pos = (self._render_x, self._render_y)
             for part in self._parts_in_draw_order():
                 part.draw(render, entity_pos, scale, tint)
+
+    def _fire_overlay_screen_position(
+        self, local_x: float, local_y: float
+    ) -> tuple[float, float]:
+        render = self.client.render
+        if not self._pinned:
+            return render.trans_world_location(
+                (self._render_x + local_x, self._render_y + local_y)
+            )
+        screen_cx, screen_cy = render.camera.get_player_screen_center(
+            (render.SCREEN_WIDTH, render.SCREEN_HEIGHT), render.block_size
+        )
+        visual_center_x, visual_center_y = self._visual_center
+        return (
+            screen_cx + (local_x - visual_center_x) * render.block_size,
+            screen_cy - (local_y - visual_center_y) * render.block_size,
+        )
+
+    def draw_fire_overlay(self) -> None:
+        """Draw the vanilla-style alternating, tapering fire billboards."""
+        if int(getattr(self.entity, "fire_ticks", 0)) <= 0:
+            return
+        try:
+            entity_width = max(0.0, float(self.entity.width))
+            entity_height = max(0.0, float(self.entity.height))
+        except (AttributeError, TypeError, ValueError):
+            return
+        render = self.client.render
+        block_size = float(render.block_size)
+        flame_scale = entity_width * 1.4
+        if flame_scale <= 0.0 or entity_height <= 0.0 or block_size <= 0.0:
+            return
+
+        resources = self.client.resources_manager
+        frame_signature = tuple(
+            resources.get_texture_animation_key(key) for key in self.FIRE_TEXTURES
+        )
+        sources = {
+            key: resources.get_texture_img(key) for key in self.FIRE_TEXTURES
+        }
+        remaining_height = entity_height / flame_scale
+        layer_width = flame_scale
+        layer_height = flame_scale * 1.4
+        layer_bottom = 0.0
+        layer = 0
+        while remaining_height > 0.0:
+            texture_key = self.FIRE_TEXTURES[layer % len(self.FIRE_TEXTURES)]
+            frame_key = frame_signature[layer % len(self.FIRE_TEXTURES)]
+            source = sources[texture_key]
+            width_px = max(1, round(layer_width * block_size))
+            height_px = max(1, round(layer_height * block_size))
+            flip = (layer // 2) % 2 == 0
+            cache_key = (
+                texture_key,
+                frame_key,
+                id(source),
+                width_px,
+                height_px,
+                flip,
+            )
+            cache = EntitySkeleton._fire_overlay_cache
+            texture = cache.get(cache_key)
+            if texture is None:
+                texture = pygame.transform.scale(source, (width_px, height_px))
+                if flip:
+                    texture = pygame.transform.flip(texture, True, False)
+                cache[cache_key] = texture
+                if len(cache) > self.MAX_FIRE_OVERLAY_CACHE:
+                    cache.popitem(last=False)
+            else:
+                cache.move_to_end(cache_key)
+
+            center_x, center_y = self._fire_overlay_screen_position(
+                entity_width * 0.5,
+                layer_bottom + layer_height * 0.5,
+            )
+            render.blit(
+                texture,
+                (
+                    round(center_x - texture.get_width() * 0.5),
+                    round(center_y - texture.get_height() * 0.5),
+                ),
+            )
+            remaining_height -= 0.45
+            layer_bottom += flame_scale * 0.45
+            layer_width *= 0.9
+            layer += 1
 
     def get_hitbox_render_position(self) -> tuple[float, float]:
         """返回与当前 Skeleton 帧完全一致的判定框世界坐标。"""

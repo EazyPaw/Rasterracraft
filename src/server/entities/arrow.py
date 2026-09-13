@@ -54,6 +54,10 @@ class Arrow(Projectile):
         self.punch_level = max(0, int(punch_level))
         self.impact_knockback = self.punch_level * 0.6
         self.flame = bool(flame)
+        if self.flame:
+            # Flame bows ignite the arrow itself for five seconds in 1.8.9.
+            # Avoid syncing here: the world sends the complete spawn packet.
+            self.fire_ticks = 100
         self.pickup = (
             pickup if pickup in {"allowed", "creative_only", "disallowed"}
             else "disallowed"
@@ -127,7 +131,7 @@ class Arrow(Projectile):
         callback = getattr(target, "on_projectile_hit", None)
         if callable(callback):
             callback(self, result)
-        if self.flame:
+        if self.is_burning():
             ignite = getattr(target, "set_seconds_on_fire", None)
             if callable(ignite):
                 ignite(5.0)
@@ -216,6 +220,11 @@ class Arrow(Projectile):
         return False
 
     def update(self) -> None:
+        if self.fire_ticks > 0:
+            if self.in_water:
+                self.clear_fire()
+            else:
+                self.fire_ticks -= 1
         if self.shake_time > 0:
             self.shake_time -= 1
         if self.in_ground:
