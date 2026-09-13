@@ -1,4 +1,5 @@
 # Commented and arranged by ChatGPT
+import math
 import uuid
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
 
 class ClientPlayer(Entity):
     HURT_FLASH_TICKS = 10
+    _LOOK_HORIZONTAL_EPSILON = 1.0e-6
+    _MOVEMENT_DIRECTION_EPSILON = 1.0e-3
 
     def __init__(self, client: "Client", game_mode: str = "survival"):
         super().__init__(0, 15, client.client_world)
@@ -61,6 +64,77 @@ class ClientPlayer(Entity):
         )
         self.fore_place = False
 
+    @staticmethod
+    def _mouse_look_from_screen(
+        mouse_position: tuple[float, float],
+        eye_position: tuple[float, float],
+        previous_facing: int,
+    ) -> tuple[int, float]:
+        """Return the exact logical facing/look angle from eye to cursor."""
+        dx = float(mouse_position[0]) - float(eye_position[0])
+        # Pygame screen Y grows downward, while entity/world Y grows upward.
+        dy = float(eye_position[1]) - float(mouse_position[1])
+
+        if dx > ClientPlayer._LOOK_HORIZONTAL_EPSILON:
+            facing = 1
+        elif dx < -ClientPlayer._LOOK_HORIZONTAL_EPSILON:
+            facing = 0
+        else:
+            # A vertical look has no horizontal side; retaining the last side
+            # avoids texture flicker while still allowing an exact +/-90 angle.
+            facing = 1 if int(previous_facing) == 1 else 0
+
+        direction = 1.0 if facing == 1 else -1.0
+        look_angle = math.degrees(math.atan2(dy, max(abs(dx), 1.0e-12)))
+        return facing, look_angle * direction
+
+    def update_mouse_look(self) -> None:
+        """Make authoritative local look state point at the visible cursor."""
+        render = self.client.render
+        block_size = float(getattr(render, "block_size", 0.0))
+        if block_size <= 0.0:
+            return
+
+        player_screen_x, player_screen_y = render.camera.get_player_screen_center(
+            (render.SCREEN_WIDTH, render.SCREEN_HEIGHT), block_size
+        )
+        visual_center_y = float(self.skeleton._visual_center[1])
+        eye_height = float(getattr(self, "eye_height", self.height * 0.85))
+        eye_screen_y = player_screen_y - (eye_height - visual_center_y) * block_size
+        self.facing, self.look_angle = self._mouse_look_from_screen(
+            pygame.mouse.get_pos(),
+            (player_screen_x, eye_screen_y),
+            self.facing,
+        )
+        if self._movement_opposes_look(self.motion.x):
+            self.sprinting = False
+
+    def _movement_opposes_look(self, horizontal: float) -> bool:
+        if abs(horizontal) <= self._MOVEMENT_DIRECTION_EPSILON:
+            return False
+        return (horizontal > 0.0) != (self.facing == 1)
+
+    def _prepare_horizontal_movement(self, direction: int) -> None:
+        self.update_mouse_look()
+        if self._movement_opposes_look(float(direction)):
+            self.sprinting = False
+
+    def move_right(self):
+        self._prepare_horizontal_movement(1)
+        super().move_right()
+
+    def move_left(self):
+        self._prepare_horizontal_movement(-1)
+        super().move_left()
+
+    def switch_sprint(self, mode=None):
+        self.update_mouse_look()
+        requested = not self.sprinting if mode is None else bool(mode)
+        if requested and self._movement_opposes_look(self.motion.x):
+            self.sprinting = False
+            return
+        super().switch_sprint(mode)
+
     def set_creative_slot(
         self,
         slot: int | None,
@@ -96,6 +170,7 @@ class ClientPlayer(Entity):
         self.client.sent_packet({"__class__": "CreativeClearInventory"})
 
     def move_update(self):
+        self.update_mouse_look()
         if self.dead:
             return
         if self.sleeping:

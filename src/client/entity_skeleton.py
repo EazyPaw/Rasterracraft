@@ -1005,24 +1005,18 @@ class PlayerSkeleton(EntitySkeleton):
             self._held_item_texture_side = self.facing
 
     def _update_facing(self):
-        """先由基类根据水平速度决定朝向，站立不动时再根据鼠标指向调整。"""
+        """Render the logical look direction; only the visual pose is smoothed."""
         if not self._pinned:
             facing = int(getattr(self.entity, "facing", self.facing))
             if facing in (self.LEFT, self.RIGHT):
                 self.facing = facing
             return
-        super()._update_facing()
-
-        # 站立不动时，让玩家朝向当前鼠标选中的方块，挖掘/放置会更自然。
-        motion_x = getattr(self.entity.motion, "x", 0.0)
-        if abs(motion_x) <= 0.02:
-            choosing_position = getattr(self.client.render, "choosing_position", None)
-            if choosing_position is not None:
-                target_x = choosing_position[0] + 0.5
-                center_x = self.entity.x + getattr(self.entity, "width", 1.0) * 0.5
-                if abs(target_x - center_x) > 0.35:
-                    self.facing = self.RIGHT if target_x > center_x else self.LEFT
-        self.entity.facing = self.facing
+        update_mouse_look = getattr(self.entity, "update_mouse_look", None)
+        if callable(update_mouse_look):
+            update_mouse_look()
+        facing = int(getattr(self.entity, "facing", self.facing))
+        if facing in (self.LEFT, self.RIGHT):
+            self.facing = facing
 
     # ---------- 公开触发方法 ----------
 
@@ -1153,7 +1147,7 @@ class PlayerSkeleton(EntitySkeleton):
         # 1. 行走/站立基础姿态
         angles = self._calc_walk_angles(direction)
 
-        # 头部平滑差值：转向时瞬切，静止时渐进跟随
+        # 逻辑角度始终精确命中鼠标；这里只平滑玩家看见的骨骼角度。
         facing_changed = self._last_facing != self.facing
         self._last_facing = self.facing
         if facing_changed or instant:
@@ -1287,97 +1281,18 @@ class PlayerSkeleton(EntitySkeleton):
             * (counter_cycle * 55.0 * walk_power if moving else 0.0),
         }
 
-    def _calc_head_mouse_angle(self, direction: int) -> float:
-        """根据鼠标世界坐标计算头部朝向角度（不受运动方向影响）。
-        颈部限幅：抬头 ≤45°，低头 ≤80°。"""
-        render = self.client.render
-        mouse_x, mouse_y = pygame.mouse.get_pos()
-        mouse_wx = (
-            (mouse_x - render.SCREEN_WIDTH / 2) / render.block_size
-            + render.camera.x
-            + 0.5
-        )
-        mouse_wy = (
-            (render.SCREEN_HEIGHT / 2 - mouse_y) / render.block_size
-            + render.camera.y
-            - 0.5
-        )
-
-        head_wx = self.entity.x + getattr(self.entity, "width", 1.0) * 0.5
-        head_wy = self.entity.y + self.VISUAL_HEIGHT_BLOCKS
-
-        dx = mouse_wx - head_wx
-        dy = mouse_wy - head_wy
-
-        raw = math.degrees(math.atan2(dy, max(abs(dx), 1e-4)))
-        angle = raw * direction
-        return max(-45.0, min(80.0, angle))
-
-    def _calc_head_motion_angle(self, direction: int) -> float:
-        """根据实体运动速度计算头部垂直偏角。
-        使用 tanh 渐进曲线：下落越快越趋于向上看，最大 ±15°。"""
-        motion = getattr(self.entity, "motion", None)
-        vy = motion.y if motion else 0.0
-        MAX_VERTICAL = 15.0
-        SCALE = 5.0
-        vertical = -MAX_VERTICAL * math.tanh(-vy / SCALE)
-        return direction * vertical
-
     def _calc_head_angle(self, direction: int) -> float:
-        """计算头部朝向角度。
-
-        静止时：完全跟随鼠标。
-        移动时：鼠标在玩家前方时主要跟随鼠标，鼠标在后方时主要跟随运动方向。
-                两者通过 sigmoid 平滑混合，过渡自然无跳变。
-        """
-        if not self._pinned:
-            try:
-                synced = float(getattr(self.entity, "look_angle", 0.0))
-            except (TypeError, ValueError):
-                synced = 0.0
-            return max(-45.0, min(80.0, synced))
-
-        motion = getattr(self.entity, "motion", None)
-        motion_x = getattr(motion, "x", 0.0) if motion else 0.0
-        moving = self._is_moving_for_animation(motion_x)
-
-        mouse_angle = self._calc_head_mouse_angle(direction)
-
-        if not moving:
-            self.entity.look_angle = mouse_angle
-            return mouse_angle
-
-        # ── 移动时：鼠标与运动方向混合 ──
-        motion_angle = self._calc_head_motion_angle(direction)
-
-        # 鼠标相对于玩家朝向的水平偏移（正 = 前方，负 = 后方）
-        render = self.client.render
-        mouse_x, _ = pygame.mouse.get_pos()
-        mouse_wx = (
-            (mouse_x - render.SCREEN_WIDTH / 2) / render.block_size
-            + render.camera.x
-            + 0.5
-        )
-        head_wx = self.entity.x + getattr(self.entity, "width", 1.0) * 0.5
-        dx_ahead = (mouse_wx - head_wx) * direction
-
-        # sigmoid 混合因子：
-        #   dx_ahead ≫ 0（鼠标在前方）→ alignment → 1.0 → 鼠标主导
-        #   dx_ahead ≪ 0（鼠标在后方）→ alignment → 0.0 → 运动主导
-        #   1.5 控制过渡区宽度（格），值越小过渡越陡
-        alignment = 1.0 / (1.0 + math.exp(-dx_ahead / 1.5))
-
-        result = mouse_angle * alignment + motion_angle * (1.0 - alignment)
-        self.entity.look_angle = result
-        return result
+        """Read the exact synchronized logical angle for the visual pose target."""
+        try:
+            synced = float(getattr(self.entity, "look_angle", 0.0))
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        return synced if math.isfinite(synced) else 0.0
 
     def _calc_sneak_angles(self, direction: int, base: dict) -> dict:
         """潜行姿态覆盖：身体压低、前倾，手脚在潜行基础角度上叠加减弱版行走摆动。"""
         # 身体前倾
         base["body_lean"] = direction * -36.0
-        # 头部微微抬起看向前方
-        base["head_angle"] = direction * -10.0
-
         motion_x = getattr(self.entity.motion, "x", 0.0)
         moving = self._is_moving_for_animation(motion_x)
         cycle = math.sin(self.walk_time)

@@ -393,11 +393,6 @@ def _handle_player_move(packet: dict, player: Player) -> None:
     player.motion.x = dx
     player.motion.y = dy
     player.sneaking = packet.get("sneaking") is True
-    player.sprinting = (
-        not player.blocking
-        and packet.get("sprinting") is True
-        and (mode != "survival" or player.food_level > 6)
-    )
     try:
         facing = int(packet.get("facing", player.facing))
     except (TypeError, ValueError):
@@ -409,7 +404,16 @@ def _handle_player_move(packet: dict, player: Player) -> None:
     except (TypeError, ValueError, OverflowError):
         look_angle = player.look_angle
     if math.isfinite(look_angle):
-        player.look_angle = max(-45.0, min(80.0, look_angle))
+        player.look_angle = max(-90.0, min(90.0, look_angle))
+    movement_opposes_look = abs(dx) > 1.0e-3 and (dx > 0.0) != (
+        player.facing == 1
+    )
+    player.sprinting = (
+        not player.blocking
+        and not movement_opposes_look
+        and packet.get("sprinting") is True
+        and (mode != "survival" or player.food_level > 6)
+    )
     player.flying = mode == "creative" and packet.get("flying") is True
     player.in_fluid = bool(player._get_fluid_interaction()[0])
     player.on_ground = bool(player._check_support_at())

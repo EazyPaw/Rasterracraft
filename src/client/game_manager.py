@@ -106,8 +106,12 @@ class GameManager:
 
     def tick_ig(self):
         """执行一次游戏内逻辑更新"""
-        if self.client.client_player is None:
+        player = self.client.client_player
+        if player is None:
             return
+        # Event actions and sprint toggles in this tick must already see the
+        # cursor's current logical direction, not the preceding render frame.
+        player.update_mouse_look()
         self.handle_events()
         self.handle_key_pressed()
         player = self.client.client_player
