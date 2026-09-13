@@ -589,6 +589,28 @@ class ClientWorld:
         chunk[rela_x, y, z] = block
         self._mark_render_chunk_dirty(rx)
 
+    def set_blocks(self, changes) -> None:
+        """Apply a server batch while invalidating each render chunk once."""
+        dirty_chunks: set[int] = set()
+        for block, raw_x, raw_y, raw_z in changes:
+            x, y, z = int(raw_x), int(raw_y), int(raw_z)
+            if not 0 <= y < self.y_max or z not in (0, 1):
+                continue
+            block.location = Location(self, x, y, z)
+            rx = x // 16
+            with self._chunk_state_lock:
+                if rx in self._loading_chunks:
+                    self._pending_chunk_block_updates.setdefault(rx, {})[
+                        (x, y, z)
+                    ] = block
+            chunk = self._regions.get(rx)
+            if chunk is None:
+                continue
+            chunk[x % 16, y, z] = block
+            dirty_chunks.add(rx)
+        for rx in dirty_chunks:
+            self._mark_render_chunk_dirty(rx)
+
     def break_block(
         self, x_loc: int | Location, y: int | None = None, z: int | None = None
     ):

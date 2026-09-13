@@ -251,6 +251,79 @@ def _handle_block_break_correction(packet: dict, client: "Client") -> None:
 @CLIENT_PACKET_DISPATCHER.handler("BlockUpdate")
 def _handle_block_update(packet: dict, client: "Client") -> None:
     world = client.client_world
+    if isinstance(packet.get("blocks"), list):
+        changes = []
+        debris_blocks = []
+        explosion = packet.get("explosion", {})
+        if not isinstance(explosion, dict):
+            explosion = {}
+        debris_positions = {
+            tuple(position)
+            for position in explosion.get("debris", ())
+            if isinstance(position, (list, tuple)) and len(position) == 3
+        }
+        for position in packet["blocks"]:
+            if not isinstance(position, (list, tuple)) or len(position) != 3:
+                continue
+            try:
+                x, y, z = (int(value) for value in position)
+            except (TypeError, ValueError):
+                continue
+            if (x, y, z) in debris_positions:
+                block = world.get_block(x, y, z)
+                if getattr(block, "block_id", "air") != "air":
+                    debris_blocks.append((block, Location(world, x, y, z)))
+            changes.append((get_block_by_id("air"), x, y, z))
+            world.clear_break_progress_at(x, y, z)
+
+        for update in packet.get("updates", ()):
+            if not isinstance(update, (list, tuple)) or len(update) != 4:
+                continue
+            try:
+                x, y, z = (int(value) for value in update[:3])
+                block_data = update[3]
+                block = get_block_by_id(block_data["id"])
+                if isinstance(block_data.get("nbt"), dict):
+                    block.write_nbt(block_data["nbt"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            changes.append((block, x, y, z))
+            world.clear_break_progress_at(x, y, z)
+
+        try:
+            explosion_x = float(explosion["x"])
+            explosion_y = float(explosion["y"])
+            explosion_z = int(explosion["z"])
+            power = max(0.0, float(explosion["power"]))
+        except (KeyError, TypeError, ValueError):
+            explosion_x = explosion_y = power = 0.0
+            explosion_z = 0
+
+        for block, location in debris_blocks:
+            client.particle_manager.spawn_block_break(block, location, count=2)
+        set_blocks = getattr(world, "set_blocks", None)
+        if callable(set_blocks):
+            set_blocks(changes)
+        else:
+            for block, x, y, z in changes:
+                world.set_block(block, x, y, z)
+        client.particle_manager.handle_packet(
+            {
+                "__class__": "Particle",
+                "particle_id": explosion.get(
+                    "particle_id", "minecraft:explosion"
+                ),
+                "x": explosion_x,
+                "y": explosion_y,
+                "z": explosion_z,
+                "count": 1,
+                "motion": [0.0, 0.0],
+                "data": {"power": power},
+            }
+        )
+        world.play_sound("random.explode", explosion_x, explosion_y, explosion_z)
+        return
+
     x, y, z = packet["x"], packet["y"], packet["z"]
     if 0 <= y < world.y_max:
         previous = world.get_block(x, y, z)

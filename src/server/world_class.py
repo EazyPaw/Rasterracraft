@@ -6,6 +6,7 @@ import threading
 import time
 import traceback
 import zlib
+from functools import lru_cache
 from typing import Any
 from typing import cast
 from enum import Enum
@@ -241,6 +242,10 @@ class World:
         self._light_recalc_lock = threading.RLock()
         self._scheduled_fluid_ticks: set[tuple[int, int, int]] = set()
         self._fluid_lock = threading.RLock()
+        # Explosions can change thousands of cells in one server tick. While an
+        # explosion is active, set_block records those changes instead of
+        # publishing one packet and one neighbor-update cascade per cell.
+        self._explosion_block_changes: set[tuple[int, int, int]] | None = None
         self._ticking_blocks: set[Block] = set()
         self._ticking_blocks_lock = threading.RLock()
         self.random_tick_speed = 3
@@ -898,16 +903,25 @@ class World:
             on_unload()
         chunk.region_array[rela_x][y][z] = block
         chunk.invalidate_packet_cache()
-        self.mark_chunk_dirty(chunk.x)
-        if not self.structure_build_mode:
+        explosion_changes = self._explosion_block_changes
+        if explosion_changes is not None:
+            explosion_changes.add((x, y, z))
+        else:
+            self.mark_chunk_dirty(chunk.x)
+        if not self.structure_build_mode and explosion_changes is None:
             self.schedule_fluid_around(x, y, z)
         if old_block.get_light_state() != block.get_light_state():
-            self.schedule_light_recalculation(chunk.x)
-        if send_packet:
+            if explosion_changes is None:
+                self.schedule_light_recalculation(chunk.x)
+        if send_packet and explosion_changes is None:
             for player in self.server.players:
                 if player.is_loading_position(x, y, z):
                     self.server.send_client_socket(player, block, "BlockUpdate")
-        if block_update and not self.structure_build_mode:
+        if (
+            block_update
+            and explosion_changes is None
+            and not self.structure_build_mode
+        ):
             # 收集需要触发 on_update 的邻居坐标
             neighbors = [
                 (x, y + 1, z),
@@ -934,7 +948,7 @@ class World:
                             self.server.send_client_socket(
                                 player, neighbor_block, "BlockUpdate"
                             )
-        if not self.structure_build_mode and (
+        if explosion_changes is None and not self.structure_build_mode and (
             getattr(old_block, "is_fluid", False)
             or getattr(placed_block, "is_fluid", False)
         ):
@@ -1160,13 +1174,20 @@ class World:
         tool=None,
         *,
         explosion_power: float | None = None,
+        spawn_particles: bool = True,
+        notify_clients: bool = True,
+        block_update: bool = True,
+        drop_collector: list | None = None,
+        spawn_experience: bool = True,
     ):
         x, y, z = decide_x_or_loc(x_loc, y, z)
         block = self.get_block(x, y, z)
         if isinstance(block, AIR):
             return 0
         location = Location(self, x, y, z)
-        self.spawn_particle(BlockBreakParticleEffect(block, location, count=18))
+        batching_explosion = self._explosion_block_changes is not None
+        if spawn_particles and not batching_explosion:
+            self.spawn_particle(BlockBreakParticleEffect(block, location, count=18))
         block.on_break()
 
         drops = (
@@ -1182,16 +1203,28 @@ class World:
         for stack in drops:
             if random.random() > drop_chance:
                 continue
-            from src.server.entities.item import Item
+            if drop_collector is not None:
+                for collected, _position in drop_collector:
+                    if collected.is_stackable_with(stack):
+                        collected.amount += stack.amount
+                        stack.amount = 0
+                        break
+                if stack.amount > 0:
+                    drop_collector.append((stack, (x + 0.5, y + 0.45, z)))
+            else:
+                from src.server.entities.item import Item
 
-            self.spawn_entity(Item(x + 0.5, y + 0.45, self, stack, z))
+                self.spawn_entity(Item(x + 0.5, y + 0.45, self, stack, z))
         experience = block.get_experience(tool)
-        if experience > 0:
+        if experience > 0 and spawn_experience:
             self.spawn_experience(x + 0.5, y + 0.5, z, experience)
-        for player in self.server.players:
-            if player.is_loading_position(x, y, z):
-                self.server.send_client_socket(player, location, "BreakBlock")
-        self.set_block(AIR(), x, y, z, False)
+        if notify_clients and not batching_explosion:
+            for player in self.server.players:
+                if player.is_loading_position(x, y, z):
+                    self.server.send_client_socket(player, location, "BreakBlock")
+        self.set_block(
+            AIR(), x, y, z, send_packet=False, block_update=block_update
+        )
         return experience
 
     def is_chunk_loaded(self, x):
@@ -1204,48 +1237,99 @@ class World:
         return None
 
     @staticmethod
-    def _explosion_directions() -> tuple[tuple[float, float, float], ...]:
-        directions = []
-        shell_max = 15
-        for ix in range(16):
-            for iy in range(16):
-                for iz in range(16):
-                    if (
-                        ix not in (0, shell_max)
-                        and iy not in (0, shell_max)
-                        and iz not in (0, shell_max)
-                    ):
-                        continue
-                    dx = ix / shell_max * 2.0 - 1.0
-                    dy = iy / shell_max * 2.0 - 1.0
-                    dz = iz / shell_max * 2.0 - 1.0
-                    length = math.sqrt(dx * dx + dy * dy + dz * dz)
-                    directions.append((dx / length, dy / length, dz / length))
-        return tuple(directions)
+    @lru_cache(maxsize=32)
+    def _explosion_directions(ray_count: int) -> tuple[tuple[float, float], ...]:
+        """Return evenly spaced rays in the visible X/Y plane.
+
+        Vanilla samples the surface of a 16-cube because it has an unbounded
+        three-dimensional world. PyCraft2D only has two Z layers: most of those
+        rays immediately left the world, and the surviving cube-edge rays
+        capped large craters to a rectangle. A circle is the equivalent shell
+        for this world.
+        """
+        ray_count = max(1, int(ray_count))
+        angle_step = math.tau / ray_count
+        return tuple(
+            (
+                math.cos((index + 0.5) * angle_step),
+                math.sin((index + 0.5) * angle_step),
+            )
+            for index in range(ray_count)
+        )
 
     def _collect_explosion_blocks(
         self, x: float, y: float, z: int, power: float
     ) -> set[tuple[int, int, int]]:
         affected: set[tuple[int, int, int]] = set()
-        center_z = int(z) + 0.5
-        for dx, dy, dz in self._explosion_directions():
-            strength = float(power) * random.uniform(0.7, 1.3)
-            px, py, pz = x, y, center_z
-            while strength > 0.0:
-                bx, by, bz = math.floor(px), math.floor(py), math.floor(pz)
-                if 0 <= by < self.attribute.MAX_BUILD_HEIGHT and bz in (0, 1):
-                    block = self.get_block(bx, by, bz)
-                    if not isinstance(block, AIR):
-                        resistance = max(
-                            0.0, float(getattr(block, "blast_resistance", 0.0))
+        power = max(0.0, float(power))
+        if power <= 0.0:
+            return affected
+
+        # One ray per outer-edge cell prevents spoke-shaped gaps without doing
+        # work proportional to a fictitious third dimension.
+        maximum_radius = power * 1.3 / 0.75
+        ray_count = max(64, math.ceil(math.tau * maximum_radius))
+        directions = self._explosion_directions(ray_count)
+        resistance_cache: dict[tuple[int, int, int], float | None] = {}
+
+        for bz in (0, 1):
+            # Crossing into the other depth layer costs the same energy as one
+            # block of unobstructed travel, producing a slightly smaller but
+            # still circular cross-section there.
+            depth_cost = abs(bz - int(z)) * 0.75
+            for dx, dy in directions:
+                strength = power * random.uniform(0.7, 1.3) - depth_cost
+                px, py = x, y
+                while strength > 0.0:
+                    bx, by = math.floor(px), math.floor(py)
+                    if not 0 <= by < self.attribute.MAX_BUILD_HEIGHT:
+                        break
+                    if not self.is_chunk_loaded(bx // 16):
+                        break
+
+                    position = (bx, by, bz)
+                    resistance = resistance_cache.get(position, -1.0)
+                    if resistance == -1.0:
+                        block = self.get_block(bx, by, bz)
+                        resistance = (
+                            None
+                            if isinstance(block, AIR)
+                            else max(
+                                0.0,
+                                float(getattr(block, "blast_resistance", 0.0)),
+                            )
                         )
-                        strength -= (resistance + 0.3) * 0.3
-                    if strength > 0.0:
-                        affected.add((bx, by, bz))
-                px += dx * 0.3
-                py += dy * 0.3
-                pz += dz * 0.3
-                strength -= 0.225
+                        resistance_cache[position] = resistance
+
+                    resistance_step = (
+                        0.0 if resistance is None else (resistance + 0.3) * 0.3
+                    )
+                    if strength - resistance_step > 0.0:
+                        affected.add(position)
+
+                    # Jump directly to the next grid cell. Vanilla advances by
+                    # 0.3 each iteration, often visiting the same cell 3-5
+                    # times; integrating the equivalent energy loss over the
+                    # traversed distance removes that duplicate work.
+                    if dx > 0.0:
+                        distance_x = (bx + 1.0 - px) / dx
+                    elif dx < 0.0:
+                        distance_x = (bx - px) / dx
+                    else:
+                        distance_x = math.inf
+                    if dy > 0.0:
+                        distance_y = (by + 1.0 - py) / dy
+                    elif dy < 0.0:
+                        distance_y = (by - py) / dy
+                    else:
+                        distance_y = math.inf
+                    cell_distance = max(1.0e-7, min(distance_x, distance_y))
+                    strength -= cell_distance * 0.75
+                    if resistance is not None:
+                        strength -= (resistance + 0.3) * max(cell_distance, 0.3)
+                    travel = cell_distance + 1.0e-7
+                    px += dx * travel
+                    py += dy * travel
         return affected
 
     def _explosion_ray_clear(
@@ -1377,6 +1461,127 @@ class World:
             if support.has_collision_box():
                 self.set_block(FIRE(), x, y, z)
 
+    @staticmethod
+    def _neighbor_positions(
+        x: int, y: int, z: int
+    ) -> tuple[tuple[int, int, int], ...]:
+        return (
+            (x, y + 1, z),
+            (x, y - 1, z),
+            (x + 1, y, z),
+            (x - 1, y, z),
+            (x, y, 1 - z),
+        )
+
+    def _update_explosion_neighbors(
+        self, changed: set[tuple[int, int, int]]
+    ) -> None:
+        """Run each surviving boundary block update once after bulk removal."""
+        boundary: set[tuple[int, int, int]] = set()
+        for position in tuple(changed):
+            boundary.update(self._neighbor_positions(*position))
+        boundary.difference_update(changed)
+
+        for x, y, z in boundary:
+            if not self.is_position_loaded(x, y, z):
+                continue
+            block = self.get_block(x, y, z)
+            if isinstance(block, AIR):
+                continue
+            before = (block.block_id, block.parse_nbt())
+            block.on_update()
+            after = self.get_block(x, y, z)
+            if before != (after.block_id, after.parse_nbt()):
+                changed.add((x, y, z))
+
+    def _schedule_explosion_followups(
+        self, changed: set[tuple[int, int, int]]
+    ) -> None:
+        """Coalesce persistence, lighting and fluid work for a bulk change."""
+        if not changed:
+            return
+        changed_chunks = {x // 16 for x, _y, _z in changed}
+        for chunk_rx in changed_chunks:
+            self.mark_chunk_dirty(chunk_rx)
+        if not self.structure_build_mode:
+            with self._light_recalc_lock:
+                self._pending_light_recalc_chunks.update(changed_chunks)
+
+            fluid_boundary: set[tuple[int, int, int]] = set()
+            for position in changed:
+                fluid_boundary.update(self._neighbor_positions(*position))
+            fluid_boundary.difference_update(changed)
+            with self._fluid_lock:
+                self._scheduled_fluid_ticks.update(
+                    position
+                    for position in fluid_boundary
+                    if self.is_position_loaded(*position)
+                )
+
+    def _broadcast_explosion(
+        self,
+        center: tuple[float, float, float],
+        power: float,
+        changed: set[tuple[int, int, int]],
+        debris: list[tuple[int, int, int]],
+        break_block: bool,
+    ) -> None:
+        destroyed = []
+        updates = []
+        changed_chunks = set()
+        for x, y, z in sorted(changed):
+            changed_chunks.add(x // 16)
+            block = self.get_block(x, y, z)
+            if isinstance(block, AIR):
+                destroyed.append([x, y, z])
+            else:
+                updates.append([x, y, z, block.to_dict()])
+
+        packet = {
+            "__class__": "BlockUpdate",
+            # Required legacy fields keep the packet backward-compatible with
+            # the existing BlockUpdate wire contract. Batch-aware clients use
+            # the fields below and do not apply this placeholder cell.
+            "x": math.floor(center[0]),
+            "y": math.floor(center[1]),
+            "z": int(center[2]),
+            "block_data": {"id": "air"},
+            "blocks": destroyed,
+            "updates": updates,
+            "explosion": {
+                "x": float(center[0]),
+                "y": float(center[1]),
+                "z": int(center[2]),
+                "power": float(power),
+                "debris": [list(position) for position in debris],
+                "particle_id": (
+                    "minecraft:explosion_emitter"
+                    if power >= 2.0 and break_block
+                    else "minecraft:explosion"
+                ),
+            },
+        }
+        center_chunk = math.floor(center[0]) // 16
+        recipients = [
+            player
+            for player in tuple(self.server.players)
+            if getattr(player, "world", None) is self
+            and (
+                center_chunk in getattr(player, "loading_regions", ())
+                or bool(
+                    changed_chunks.intersection(
+                        getattr(player, "loading_regions", ())
+                    )
+                )
+            )
+        ]
+        send_many = getattr(self.server, "send_client_sockets", None)
+        if callable(send_many):
+            send_many(recipients, packet, "Forward")
+        else:
+            for player in recipients:
+                self.server.send_client_socket(player, packet, "Forward")
+
     def spawn_explosion(
         self, loc, power=4, break_block=True, catch_fire=False, source=None
     ):
@@ -1390,34 +1595,51 @@ class World:
         center = (float(x), float(y), z + 0.5)
         self._damage_entities_from_explosion(center, power, source=source)
 
-        if break_block:
-            positions = list(affected)
-            random.shuffle(positions)
-            for bx, by, bz in positions:
-                block = self.get_block(bx, by, bz)
-                if isinstance(block, AIR):
-                    continue
-                if block.on_exploded(power, source=source):
-                    self.break_block(
-                        bx,
-                        by,
-                        bz,
-                        explosion_power=power,
-                    )
+        changed: set[tuple[int, int, int]] = set()
+        debris_candidates: list[tuple[int, int, int]] = []
+        drops: list = []
+        experience = 0
+        previous_batch = self._explosion_block_changes
+        self._explosion_block_changes = changed
+        try:
+            if break_block:
+                positions = list(affected)
+                random.shuffle(positions)
+                for bx, by, bz in positions:
+                    block = self.get_block(bx, by, bz)
+                    if isinstance(block, AIR):
+                        continue
+                    if block.on_exploded(power, source=source):
+                        debris_candidates.append((bx, by, bz))
+                        experience += self.break_block(
+                            bx,
+                            by,
+                            bz,
+                            explosion_power=power,
+                            spawn_particles=False,
+                            notify_clients=False,
+                            block_update=False,
+                            drop_collector=drops,
+                            spawn_experience=False,
+                        )
 
-        if catch_fire:
-            self._ignite_explosion_fires(affected)
+            if catch_fire:
+                self._ignite_explosion_fires(affected)
+            self._update_explosion_neighbors(changed)
+            self._schedule_explosion_followups(changed)
+        finally:
+            self._explosion_block_changes = previous_batch
 
-        self.play_particle(
-            (
-                "minecraft:explosion_emitter"
-                if power >= 2.0 and break_block
-                else "minecraft:explosion"
-            ),
-            float(x),
-            float(y),
-            z,
-            data={"power": power},
+        from src.server.entities.item import Item
+
+        for stack, (drop_x, drop_y, drop_z) in drops:
+            self.spawn_entity(Item(drop_x, drop_y, self, stack, drop_z))
+        if experience > 0:
+            self.spawn_experience(float(x), float(y), z, experience)
+
+        debris_limit = min(
+            len(debris_candidates), max(12, min(64, round(power * 6)))
         )
-        self.server.broadcast_sound("random.explode", float(x), float(y), z)
+        debris = debris_candidates[:debris_limit]
+        self._broadcast_explosion(center, power, changed, debris, break_block)
         return affected

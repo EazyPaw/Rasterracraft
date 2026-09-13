@@ -265,7 +265,7 @@ packet_spec("Chunk", CLIENTBOUND, fields=("x", "format", "payload", "region_arra
 packet_spec("Teleport", CLIENTBOUND, fields=("x", "y", "uuid", "name", "health", "absorption_amount", "hurt_time", "last_hurt_damage", "fire_ticks", "food_level", "saturation", "experience", "experience_level", "experience_total", "score", "sleeping", "sleeping_bed", "selected_slot", "teleport_id", "inventory", "cursor", "equipment", "attributes", "active_effects"), required=("x", "y"))
 packet_spec("BlockBreakProgress", CLIENTBOUND, fields=("x", "y", "z", "miner_uuid", "progress", "active"), required=("x", "y", "z"))
 packet_spec("BlockBreakCorrection", CLIENTBOUND, fields=("x", "y", "z", "block_data"), required=("x", "y", "z", "block_data"))
-packet_spec("BlockUpdate", CLIENTBOUND, fields=("x", "y", "z", "block_data"), required=("x", "y", "z", "block_data"))
+packet_spec("BlockUpdate", CLIENTBOUND, fields=("x", "y", "z", "block_data", "blocks", "updates", "explosion"), required=("x", "y", "z", "block_data"))
 packet_spec("LightUpdate", CLIENTBOUND, fields=("rx", "format", "height", "sky_light", "block_light", "light_array", "sky_light_array", "block_light_array"), required=("rx",))
 packet_spec("BiomeUpdate", CLIENTBOUND, fields=("rx", "biome_array"), required=("rx", "biome_array"))
 packet_spec("UnloadChunk", CLIENTBOUND, fields=("rx",), required=("rx",))

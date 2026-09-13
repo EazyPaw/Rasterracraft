@@ -2735,7 +2735,9 @@ class TNT(Block):
     def accepts_item_use(self, material) -> bool:
         return bool(getattr(material, "ignites_blocks", False))
 
-    def prime(self, *, fuse: int = 80, igniter=None) -> bool:
+    def prime(
+        self, *, fuse: int = 80, igniter=None, play_sound: bool = True
+    ) -> bool:
         if self.location is None:
             return False
         world = self.location.world
@@ -2749,7 +2751,7 @@ class TNT(Block):
         primed = PrimedTNT(x + 0.01, y, z, world, fuse=fuse, owner=igniter)
         world.spawn_entity(primed)
         server = getattr(world, "server", None)
-        if server is not None:
+        if server is not None and play_sound:
             server.broadcast_sound("game.tnt.primed", x + 0.5, y + 0.5, z)
         return True
 
@@ -2760,7 +2762,9 @@ class TNT(Block):
 
     def on_exploded(self, power: float, source=None) -> bool:
 
-        self.prime(fuse=random.randint(10, 30), igniter=source)
+        self.prime(
+            fuse=random.randint(10, 30), igniter=source, play_sound=False
+        )
         return False
 
 
