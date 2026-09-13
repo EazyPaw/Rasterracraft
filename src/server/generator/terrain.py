@@ -387,7 +387,7 @@ class TerrainMixin(NoiseMixin):
         """
         depth = surface_y - y
 
-        if 2 <= y <= 7 and self._is_in_lava_vein(x, y, z):
+        if z == 0 and 2 <= y <= 7 and self._is_in_lava_vein(x, y, z):
             return LAVA()
         # 表层（地表方块）
         if depth == 0:
@@ -412,7 +412,7 @@ class TerrainMixin(NoiseMixin):
         if profile.filler in {"sandstone", "red_sandstone"} and depth <= 8:
             return self._block(profile.filler)
 
-        if 2 <= y <= 12 and self._is_in_lava_vein(x, y, z):
+        if z == 0 and 2 <= y <= 12 and self._is_in_lava_vein(x, y, z):
             return LAVA()
 
         # 矿石检查
@@ -436,6 +436,8 @@ class TerrainMixin(NoiseMixin):
         return False
 
     def _is_in_lava_vein(self, x: int, y: int, z: int = 0) -> bool:
+        if z != 0:
+            return False
         cell_size = 13
         cell_x, cell_y = x // cell_size, y // cell_size
         for cx in range(cell_x - 1, cell_x + 2):
@@ -588,19 +590,49 @@ class TerrainMixin(NoiseMixin):
     def is_cave_air(self, x: int, y: int, z: int, surface_y: int) -> bool:
         """判断指定位置是否为洞穴空气（应放置空气）。
 
-        使用三层噪声混合生成洞穴：
-        - large（大洞穴）: 低频 3-octave → 大型开放空间
-        - tunnels（隧道）: 中频 2-octave → 连接通道
-        - worms（虫洞）: 高频 1-octave → 细小的蜿蜒洞穴
+        使用域扭曲后的二维脊线生成自由转向的连续通道，并叠加不规则洞室。
+        通道可以横向、斜向和短暂纵向延伸，但较慢的 X 变化会抑制细长、
+        贯穿整个地下高度的竖井。
 
         深度因子：越接近地表越少洞穴。
         """
         if z != 0 or y <= 2 or y >= surface_y - 3:
             return False
-        large = self._noise2(x, y, 0.035, 3, 400)
-        tunnels = self._noise2(x, y, 0.09, 2, 410)
-        worms = abs(self._noise2(x, y, 0.022, 1, 420))
+
         depth_factor = min(1.0, max(0.0, (surface_y - y) / 32))
-        return (large + tunnels * 0.55 + depth_factor * 0.18 > 0.47) or (
-            worms < 0.045 and tunnels > -0.18
+
+        # Bend the sampling domain before tracing zero-value contours.  This
+        # breaks the grid-aligned look and produces the free curves of a cave
+        # carver without depending on chunk generation order.
+        warp_x = round(self._noise2_scaled(x, y, 0.006, 0.009, 2, 430) * 18.0)
+        warp_y = round(self._noise2_scaled(x, y, 0.008, 0.006, 2, 431) * 14.0)
+        warped_x = x + warp_x
+        warped_y = y + warp_y
+
+        ridge_value = self._noise2_scaled(
+            warped_x, warped_y, 0.012, 0.027, 2, 410
         )
+        width_noise = self._noise2_scaled(x, y, 0.011, 0.016, 1, 421)
+        tunnel_width = 0.015 + (width_noise + 1.0) * 0.004
+        tunnels = False
+        if abs(ridge_value) < tunnel_width:
+            derivative_x = self._noise2_scaled(
+                warped_x + 1, warped_y, 0.012, 0.027, 2, 410
+            ) - self._noise2_scaled(
+                warped_x - 1, warped_y, 0.012, 0.027, 2, 410
+            )
+            derivative_y = self._noise2_scaled(
+                warped_x, warped_y + 1, 0.012, 0.027, 2, 410
+            ) - self._noise2_scaled(
+                warped_x, warped_y - 1, 0.012, 0.027, 2, 410
+            )
+            # A contour is perpendicular to its gradient.  Discard only the
+            # near-vertical stretches; diagonal and short steep bends remain.
+            tunnels = abs(derivative_x) <= abs(derivative_y) * 3.0 + 0.0001
+
+        # Low-frequency cheese noise widens intersections into chambers.  The
+        # outline field keeps their edges asymmetric instead of oval.
+        chamber = self._noise2_scaled(warped_x, warped_y, 0.008, 0.019, 3, 400)
+        outline = self._noise2_scaled(x, y, 0.025, 0.052, 2, 401)
+        rooms = chamber + outline * 0.28 + depth_factor * 0.10 > 0.46
+        return tunnels or rooms

@@ -6,6 +6,9 @@
 供地形生成器和装饰物生成器使用。
 """
 
+from functools import lru_cache
+from fractions import Fraction
+
 import noise
 
 
@@ -16,9 +19,31 @@ class NoiseMixin:
     需要宿主类提供 ``self.seed`` 属性。
     """
 
+    # ``noise`` receives C floats.  Feeding it an unbounded world coordinate
+    # eventually erases the fractional part (and therefore drives pnoise1 to
+    # zero on integer lattice points).  Keep inputs in a small periodic domain
+    # and calculate the fold with Python integers so coordinate precision is
+    # independent of distance from the origin.
+    NOISE_REPEAT = 2048
+
     # ------------------------------------------------------------------
     # 噪声原语（底层 Perlin 噪声调用）
     # ------------------------------------------------------------------
+
+    @staticmethod
+    @lru_cache(maxsize=64)
+    def _scale_ratio(scale: float) -> tuple[int, int]:
+        """Return the short decimal ratio used by a worldgen scale literal."""
+        if scale <= 0:
+            raise ValueError("noise scale must be positive")
+        return Fraction(str(scale)).as_integer_ratio()
+
+    def _fold_noise_coordinate(self, coordinate: int, scale: float) -> float:
+        """Scale and wrap an integer coordinate without first converting it to float."""
+        numerator, denominator = self._scale_ratio(scale)
+        period_numerator = denominator * self.NOISE_REPEAT
+        folded_numerator = (int(coordinate) * numerator) % period_numerator
+        return folded_numerator / denominator
 
     def _noise1(self, x: int, scale: float, octaves: int, salt: int) -> float:
         """一维 Perlin 噪声封装。
@@ -41,12 +66,13 @@ class NoiseMixin:
             [-1, 1] 范围内的噪声值。
 
         """
+        sample_x = self._fold_noise_coordinate(x + self.seed * 17, scale)
         return noise.pnoise1(
-            (x + self.seed * 17) * scale,
+            sample_x,
             octaves=octaves,
             persistence=0.5,
             lacunarity=2.0,
-            repeat=1048576,
+            repeat=self.NOISE_REPEAT,
             base=self._good_base(salt),
         )
 
@@ -71,14 +97,28 @@ class NoiseMixin:
             [-1, 1] 范围内的噪声值。
 
         """
+        return self._noise2_scaled(x, y, scale, scale, octaves, salt)
+
+    def _noise2_scaled(
+        self,
+        x: int,
+        y: int,
+        scale_x: float,
+        scale_y: float,
+        octaves: int,
+        salt: int,
+    ) -> float:
+        """Two-dimensional Perlin noise with independent, precision-safe axes."""
+        sample_x = self._fold_noise_coordinate(x + self.seed * 17, scale_x)
+        sample_y = self._fold_noise_coordinate(y - self.seed * 11, scale_y)
         return noise.pnoise2(
-            (x + self.seed * 17) * scale,
-            (y - self.seed * 11) * scale,
+            sample_x,
+            sample_y,
             octaves=octaves,
             persistence=0.5,
             lacunarity=2.0,
-            repeatx=1048576,
-            repeaty=1048576,
+            repeatx=self.NOISE_REPEAT,
+            repeaty=self.NOISE_REPEAT,
             base=self._good_base(salt),
         )
 
