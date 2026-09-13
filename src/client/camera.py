@@ -53,6 +53,8 @@ class Camera:
         mouse_pos: tuple[int, int],
         viewport_size: tuple[int, int],
         block_size: float,
+        *,
+        strength_multiplier: float = 1.0,
     ) -> tuple[float, float]:
         """返回当前模式下的镜头世界坐标目标。"""
         if self.mode is CameraMode.CENTERED:
@@ -71,8 +73,11 @@ class Camera:
             -1.0, min(1.0, (height / 2 - mouse_y) / (height / 2))
         )
 
-        max_x = width / block_size * self.mouse_lead_strength
-        max_y = height / block_size * self.mouse_lead_strength
+        effective_strength = self.mouse_lead_strength * max(
+            0.0, float(strength_multiplier)
+        )
+        max_x = width / block_size * effective_strength
+        max_y = height / block_size * effective_strength
         return anchor_x + horizontal * max_x, anchor_y + vertical * max_y
 
     def get_lead_screen_offset(self, block_size: float) -> tuple[float, float]:

@@ -448,12 +448,16 @@ def _handle_player_action(packet: dict, player: Player) -> None:
         player.clear_breaking()
         return
     if action in {"continue_item_use", "continue_eating"}:
-        if player.blocking:
+        if player.using_bow:
+            player.request_bow_use()
+        elif player.blocking:
             player.request_blocking()
         elif player.eating:
             player.request_eating()
         return
     if action in {"stop_item_use", "stop_eating"}:
+        if player.using_bow:
+            player.release_bow()
         player.clear_eating(sync=True)
         player.clear_blocking(sync=True)
         return
@@ -503,6 +507,7 @@ def _handle_attack_entity(packet: dict, player: Player) -> None:
         player._last_attack_tick = current_tick
         player.clear_eating(sync=True)
         player.clear_blocking(sync=True)
+        player.clear_bow_use(sync=True)
         player.attack_animation_ticks = player.attack_animation_duration
         player.attack(target)
         forward_packet_to_others(player, player, mode="entity_update")
@@ -798,6 +803,7 @@ def _handle_select_hotbar_slot(packet: dict, player: Player) -> None:
         player.clear_breaking()
         player.clear_eating()
         player.clear_blocking()
+        player.clear_bow_use()
     player.sync_inventory()
 
 

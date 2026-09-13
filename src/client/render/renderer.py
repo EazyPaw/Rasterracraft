@@ -121,6 +121,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self._block_size_float: float = float(self._block_size)
         self._target_block_size: int = self._block_size
         self._zoom_last_update: float = time.perf_counter()
+        self._bow_view_zoom: float = 1.0
+        self._bow_view_zoom_last_update: float = time.perf_counter()
         self.trans_scale: float = self._block_size / 16
         self.gui_scale: float = 3.5
         self.running: bool = False
@@ -410,6 +412,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     DEBUG_ZOOM_STEP = 4
     ZOOM_LERP_SPEED = 14.0
     MAX_ZOOM_FRAME_TIME = 0.1
+    BOW_VIEW_MAX_SCALE = 1.18
+    BOW_VIEW_RESTORE_SPEED = 28.0
 
     @property
     def block_size(self) -> int:
@@ -484,6 +488,88 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         if current == target:
             render_size = int(target)
         return self._apply_block_size(render_size)
+
+    def _bow_zoom_pivot(self) -> tuple[float, float]:
+        """Return the on-screen eye position kept fixed by bow FOV zoom."""
+        player = getattr(self.client, "client_player", None)
+        if player is None:
+            return self.SCREEN_WIDTH * 0.5, self.SCREEN_HEIGHT * 0.5
+        center_x, center_y = self.camera.get_player_screen_center(
+            (self.SCREEN_WIDTH, self.SCREEN_HEIGHT), self.block_size
+        )
+        skeleton = getattr(player, "skeleton", None)
+        visual_center_y = float(
+            getattr(skeleton, "_visual_center", (0.0, player.height * 0.5))[1]
+        )
+        eye_height = float(getattr(player, "eye_height", player.height * 0.85))
+        return center_x, center_y - (eye_height - visual_center_y) * self.block_size
+
+    def _update_bow_view_zoom(self) -> float:
+        """Sample draw charge every render frame and update the visual FOV."""
+        now = time.perf_counter()
+        delta_time = max(
+            0.0,
+            min(now - self._bow_view_zoom_last_update, self.MAX_ZOOM_FRAME_TIME),
+        )
+        self._bow_view_zoom_last_update = now
+
+        player = getattr(self.client, "client_player", None)
+        game_mode = getattr(player, "game_mode", None)
+        progress_getter = getattr(game_mode, "get_bow_draw_progress", None)
+        drawing = bool(getattr(player, "using_bow", False))
+        progress = (
+            max(0.0, min(1.0, float(progress_getter())))
+            if drawing and callable(progress_getter)
+            else 0.0
+        )
+        target = 1.0 + (self.BOW_VIEW_MAX_SCALE - 1.0) * progress
+        if drawing:
+            # Charge itself is already continuous and Minecraft-shaped. Direct
+            # sampling makes full draw coincide exactly with maximum zoom.
+            self._bow_view_zoom = target
+        else:
+            alpha = 1.0 - _math.exp(-self.BOW_VIEW_RESTORE_SPEED * delta_time)
+            self._bow_view_zoom += (1.0 - self._bow_view_zoom) * alpha
+            if abs(self._bow_view_zoom - 1.0) <= 0.0005:
+                self._bow_view_zoom = 1.0
+        return self._bow_view_zoom
+
+    def _apply_bow_view_zoom(self) -> None:
+        """Scale the completed world around the player's eye, before GUI."""
+        scale = self._update_bow_view_zoom()
+        if scale <= 1.0005:
+            return
+        snapshot = self.screen.copy()
+        # Nearest-neighbour keeps Minecraft pixels crisp and is substantially
+        # cheaper than filtering a full-screen frame while the bow stays held.
+        scaled = pygame.transform.scale(
+            snapshot,
+            (
+                max(1, round(self.SCREEN_WIDTH * scale)),
+                max(1, round(self.SCREEN_HEIGHT * scale)),
+            ),
+        )
+        pivot_x, pivot_y = self._bow_zoom_pivot()
+        self.screen.blit(
+            scaled,
+            (
+                round(pivot_x - pivot_x * scale),
+                round(pivot_y - pivot_y * scale),
+            ),
+        )
+
+    def _unzoom_screen_position(
+        self, position: tuple[float, float]
+    ) -> tuple[float, float]:
+        """Map a displayed cursor point back into the pre-FOV world surface."""
+        scale = max(1.0, float(getattr(self, "_bow_view_zoom", 1.0)))
+        if scale <= 1.0005:
+            return float(position[0]), float(position[1])
+        pivot_x, pivot_y = self._bow_zoom_pivot()
+        return (
+            pivot_x + (float(position[0]) - pivot_x) / scale,
+            pivot_y + (float(position[1]) - pivot_y) / scale,
+        )
 
     def adjust_block_size(self, wheel_delta: int | float) -> bool:
         """按滚轮方向调整世界缩放；正值拉近，负值拉远。"""
@@ -830,6 +916,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.draw_destroy_progress()
                     self.client.client_player.skeleton.update()
                     self.draw_player()
+                    self._apply_bow_view_zoom()
                     offscreen_effect_frame = (
                         self._shader_is_offscreen
                         and self.shader_effects_enabled
@@ -1157,11 +1244,16 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def get_mouse_world_position(self) -> tuple[float, float]:
         """将当前鼠标位置转换为世界坐标。"""
         self.mouse_x, self.mouse_y = pygame.mouse.get_pos()
+        world_screen_x, world_screen_y = self._unzoom_screen_position(
+            (self.mouse_x, self.mouse_y)
+        )
+        self._world_mouse_x = world_screen_x
+        self._world_mouse_y = world_screen_y
         return (
-            (self.mouse_x - self.SCREEN_WIDTH // 2) / self.block_size
+            (world_screen_x - self.SCREEN_WIDTH // 2) / self.block_size
             + self.camera.x
             + 0.5,
-            -(self.mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size
+            -(world_screen_y - self.SCREEN_HEIGHT // 2) / self.block_size
             + self.camera.y
             - 0.5,
         )
@@ -1217,8 +1309,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         )
         distance = (
             _math.sqrt(
-                (self.mouse_x - player_screen_x) ** 2
-                + (self.mouse_y - player_screen_y) ** 2
+                (self._world_mouse_x - player_screen_x) ** 2
+                + (self._world_mouse_y - player_screen_y) ** 2
             )
             / self.block_size
         )
@@ -1518,12 +1610,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
 
     def draw_biome_hover_tooltip(self) -> None:
         mouse_x, mouse_y = pygame.mouse.get_pos()
-        world_x = (
-            (mouse_x - self.SCREEN_WIDTH // 2) / self.block_size + self.camera.x + 0.5
-        )
-        world_y = (
-            -(mouse_y - self.SCREEN_HEIGHT // 2) / self.block_size + self.camera.y - 0.5
-        )
+        world_x, world_y = self.get_mouse_world_position()
         block_x = _math.floor(world_x)
         block_y = _math.floor(world_y)
         biome_id = self.client_world.get_biome(block_x, block_y)

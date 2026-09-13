@@ -1,4 +1,5 @@
 # Commented and arranged by ChatGPT
+import time
 from typing import TYPE_CHECKING
 
 from src.client.GUI.chat import ChatGUI
@@ -25,6 +26,7 @@ class GameMode(ABC):
     def __init__(self, player: "ClientPlayer"):
         self.player = player
         self._item_use_request_active = False
+        self._bow_use_started_at: float | None = None
         self.player.interact_range = 5
         self.player.block_interaction_range = 5
         self.update_gui()
@@ -37,6 +39,7 @@ class GameMode(ABC):
 
     def right_click_on_block(self, block: Block):
         if self._item_use_request_active:
+            self._update_local_bow_use()
             self.player.client.sent_packet(
                 {"__class__": "PlayerAction", "action": "continue_item_use"}
             )
@@ -83,7 +86,71 @@ class GameMode(ABC):
                     "fore_place": bool(context.fore_place),
                 }
         self._item_use_request_active = True
+        self._begin_local_bow_use()
         self.player.client.sent_packet(packet)
+
+    def _can_locally_draw_bow(self) -> bool:
+        try:
+            stack = self.player.inventory[self.player.selected_slot]
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return False
+        if (
+            stack.is_empty()
+            or getattr(stack.material, "tool_type", None) != "bow"
+        ):
+            return False
+        if self.name_id == "creative":
+            return True
+        return any(
+            not candidate.is_empty()
+            and getattr(candidate.material, "name_id", "") == "arrow"
+            for candidate in (
+                self.player.equipment.get("offhand"),
+                *tuple(self.player.inventory),
+            )
+            if candidate is not None
+        )
+
+    def _begin_local_bow_use(self) -> None:
+        if not self._can_locally_draw_bow():
+            return
+        self.player.using_bow = True
+        self.player.bow_draw_ticks = 0
+        self._bow_use_started_at = time.perf_counter()
+
+    def _update_local_bow_use(self) -> None:
+        if not bool(getattr(self.player, "using_bow", False)):
+            return
+        self.player.bow_draw_ticks = self.get_bow_draw_ticks()
+
+    def apply_server_bow_state(self, using_bow: bool, draw_ticks: int = 0) -> None:
+        using_bow = bool(using_bow)
+        draw_ticks = max(0, int(draw_ticks))
+        self.player.using_bow = using_bow
+        self.player.bow_draw_ticks = draw_ticks
+        if using_bow:
+            self._bow_use_started_at = time.perf_counter() - draw_ticks / 20.0
+        else:
+            self._bow_use_started_at = None
+
+    def get_bow_draw_ticks(self) -> int:
+        if (
+            not bool(getattr(self.player, "using_bow", False))
+            or self._bow_use_started_at is None
+        ):
+            return 0
+        return max(0, int((time.perf_counter() - self._bow_use_started_at) * 20.0))
+
+    def get_bow_draw_progress(self) -> float:
+        if (
+            not bool(getattr(self.player, "using_bow", False))
+            or self._bow_use_started_at is None
+        ):
+            return 0.0
+        # Keep camera focus continuous between 20 Hz gameplay ticks. Texture
+        # stages and server authority still use integer draw ticks.
+        charge = max(0.0, time.perf_counter() - self._bow_use_started_at)
+        return min(1.0, (charge * charge + charge * 2.0) / 3.0)
 
     def stop_item_use(self, *, notify_server: bool = True) -> None:
         if notify_server and self._item_use_request_active:
@@ -91,6 +158,9 @@ class GameMode(ABC):
                 {"__class__": "PlayerAction", "action": "stop_item_use"}
             )
         self._item_use_request_active = False
+        self.player.using_bow = False
+        self.player.bow_draw_ticks = 0
+        self._bow_use_started_at = None
 
     def left_click_on_entity(self, entity: Entity):
         if entity is None or self.player.client.hold_mouse_buttons[0]:
@@ -106,11 +176,13 @@ class GameMode(ABC):
         if entity is None:
             return
         if self._item_use_request_active:
+            self._update_local_bow_use()
             self.player.client.sent_packet(
                 {"__class__": "PlayerAction", "action": "continue_item_use"}
             )
             return
         self._item_use_request_active = True
+        self._begin_local_bow_use()
         self.player.client.sent_packet(
             {
                 "__class__": "InteractEntity",
@@ -214,6 +286,7 @@ class CreativeMode(GameMode):
         hotbar_slots = min(9, len(self.player.inventory))
         if direction == 0 or hotbar_slots == 0:
             return
+        self.stop_item_use(notify_server=True)
 
         slot_delta = -1 if direction > 0 else 1
         self.player.selected_slot = (
@@ -398,8 +471,6 @@ class SurvivalMode(GameMode):
         CreativeMode.get_choosing_block(self)
 
     def mouse_wheel(self, direction):
-        if direction != 0:
-            self.stop_item_use(notify_server=True)
         CreativeMode.mouse_wheel(self, direction)
 
     def open_inventory(self):

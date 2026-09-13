@@ -14,6 +14,7 @@ from src.server.entities.pig import PigSkeleton
 from src.server.entities.sheep import SheepSkeleton
 from src.server.entities.snow_ball import SnowBallSkeleton
 from src.server.entities.egg import EggSkeleton
+from src.server.entities.arrow import ArrowSkeleton
 from src.server.blocks import get_block_by_id
 from src.server.item_class import ItemStack
 from src.server.location import Location, Vector
@@ -194,9 +195,15 @@ class ClientEntity:
         self.projectile_age = max(0, int(packet.get("projectile_age", 0)))
         self.owner_uuid = packet.get("owner_uuid")
         self.in_ground = bool(packet.get("in_ground", False))
+        self.fire_ticks = max(0, int(packet.get("fire_ticks", 0)))
+        self.critical = bool(packet.get("critical", False))
+        self.flame = bool(packet.get("flame", False))
+        self.shake_time = max(0, int(packet.get("shake_time", 0)))
         self.breaking = bool(packet.get("breaking", False))
         self.eating = bool(packet.get("eating", False))
         self.blocking = bool(packet.get("blocking", False))
+        self.using_bow = bool(packet.get("using_bow", False))
+        self.bow_draw_ticks = max(0, int(packet.get("bow_draw_ticks", 0)))
         self.sleeping = bool(packet.get("sleeping", False))
         self.sleeping_bed = packet.get("sleeping_bed")
         self.break_progress = float(packet.get("break_progress", 0.0))
@@ -281,9 +288,17 @@ class ClientEntity:
         )
         self.owner_uuid = packet.get("owner_uuid", self.owner_uuid)
         self.in_ground = bool(packet.get("in_ground", self.in_ground))
+        self.fire_ticks = max(0, int(packet.get("fire_ticks", self.fire_ticks)))
+        self.critical = bool(packet.get("critical", self.critical))
+        self.flame = bool(packet.get("flame", self.flame))
+        self.shake_time = max(0, int(packet.get("shake_time", self.shake_time)))
         self.breaking = bool(packet.get("breaking", self.breaking))
         self.eating = bool(packet.get("eating", self.eating))
         self.blocking = bool(packet.get("blocking", self.blocking))
+        self.using_bow = bool(packet.get("using_bow", self.using_bow))
+        self.bow_draw_ticks = max(
+            0, int(packet.get("bow_draw_ticks", self.bow_draw_ticks))
+        )
         self.sleeping = bool(packet.get("sleeping", self.sleeping))
         if "sleeping_bed" in packet:
             self.sleeping_bed = packet.get("sleeping_bed")
@@ -376,3 +391,5 @@ class ClientEntity:
             self.skeleton = SnowBallSkeleton(self)
         elif self.entity_id == "egg":
             self.skeleton = EggSkeleton(self)
+        elif self.entity_id == "arrow":
+            self.skeleton = ArrowSkeleton(self)

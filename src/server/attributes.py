@@ -379,3 +379,9 @@ BLOCKING_SPEED_MODIFIER = AttributeModifier(
     -0.8,
     AttributeOperation.ADD_MULTIPLIED_TOTAL,
 )
+
+BOW_DRAWING_SPEED_MODIFIER = AttributeModifier(
+    "minecraft:using_bow",
+    -0.8,
+    AttributeOperation.ADD_MULTIPLIED_TOTAL,
+)

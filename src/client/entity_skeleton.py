@@ -896,6 +896,14 @@ class PlayerSkeleton(EntitySkeleton):
             texture_state_key = stack.get_texture_state_key(
                 self.client, include_glint_frame=False
             )
+            held_variant_getter = getattr(
+                stack.material, "get_held_texture_variant_key", None
+            )
+            if callable(held_variant_getter):
+                texture_state_key = (
+                    texture_state_key,
+                    held_variant_getter(stack, self.entity),
+                )
         blocking = bool(
             getattr(self.entity, "blocking", False)
             and getattr(getattr(stack, "material", None), "tool_type", None) == "sword"
@@ -914,7 +922,16 @@ class PlayerSkeleton(EntitySkeleton):
             item_scale = 0.7
             item_rotation = 0.0
             if stack is not None and not stack.is_empty():
-                texture = stack.get_base_texture(1.0, client=self.client)
+                held_texture_getter = getattr(
+                    stack.material, "get_held_texture", None
+                )
+                texture = (
+                    held_texture_getter(
+                        stack, self.entity, 1.0, client=self.client
+                    )
+                    if callable(held_texture_getter)
+                    else stack.get_base_texture(1.0, client=self.client)
+                )
                 try:
                     raw_pose = stack.material.get_anchor()
                     if isinstance(raw_pose, dict):
@@ -1162,8 +1179,11 @@ class PlayerSkeleton(EntitySkeleton):
         if getattr(self.entity, "sneaking", False):
             angles = self._calc_sneak_angles(direction, angles)
 
-        # 3. 挥臂动画混合叠加
-        if self._swing_time >= 0:
+        # 3. 使用弓时采用原版 BOW_AND_ARROW 的双手瞄准姿势。横版视图
+        # 没有手臂的 Y 轴纵深，因此把原版两臂约 0.4rad 的夹角映射到平面。
+        if self._is_drawing_bow():
+            self._apply_bow_pose(direction, angles)
+        elif self._swing_time >= 0:
             self._blend_attack_pose(direction, angles)
 
         if getattr(self.entity, "blocking", False):
@@ -1328,6 +1348,22 @@ class PlayerSkeleton(EntitySkeleton):
         angles["front_arm_angle"] = direction * (
             angles["front_arm_angle"] * (1.0 - swing) + 70.0 * swing
         )
+
+    def _is_drawing_bow(self) -> bool:
+        return bool(
+            getattr(self.entity, "using_bow", False)
+            and self._held_item_key is not None
+            and self._held_item_key[0] == "bow"
+        )
+
+    def _apply_bow_pose(self, direction: int, angles: dict) -> None:
+        """Aim the bow arm at the logical cursor direction and pull with the other."""
+        look_angle = self._calc_head_angle(direction)
+        # Arms point down at zero degrees in this skeleton.  Rotating +/-90
+        # makes the held arm horizontal, then look_angle follows the cursor.
+        aim_angle = direction * 90.0 + look_angle
+        angles["front_arm_angle"] = aim_angle
+        angles["back_arm_angle"] = aim_angle - direction * math.degrees(0.4)
 
     def _write_pose(self, angles: dict, instant: bool, facing_changed: bool):
         """计算锚点坐标并写入全部身体部件。"""

@@ -173,6 +173,14 @@ def _is_armor(material) -> bool:
     return isinstance(material, Armor)
 
 
+def _is_bow(material) -> bool:
+    return getattr(material, "tool_type", None) == "bow"
+
+
+def _is_damageable(material) -> bool:
+    return int(getattr(material, "max_damage", 0)) > 0
+
+
 def _sharpness_attributes(level: int):
     # PyCraft2D currently follows the pre-1.9 combat value: +1.25 per level.
     return (
@@ -213,4 +221,59 @@ PROTECTION = register_enchantment(
         damage_protection_factory=_protection_damage_factor,
     ),
     aliases=("protect_all",),
+)
+
+
+UNBREAKING = register_enchantment(
+    Enchantment(
+        id="minecraft:unbreaking",
+        translation_key="enchantment.durability",
+        max_level=3,
+        can_apply_to=_is_damageable,
+    ),
+    aliases=("durability",),
+)
+
+
+POWER = register_enchantment(
+    Enchantment(
+        id="minecraft:power",
+        translation_key="enchantment.arrowDamage",
+        max_level=5,
+        can_apply_to=_is_bow,
+    ),
+    aliases=("arrow_damage",),
+)
+
+
+PUNCH = register_enchantment(
+    Enchantment(
+        id="minecraft:punch",
+        translation_key="enchantment.arrowKnockback",
+        max_level=2,
+        can_apply_to=_is_bow,
+    ),
+    aliases=("arrow_knockback",),
+)
+
+
+FLAME = register_enchantment(
+    Enchantment(
+        id="minecraft:flame",
+        translation_key="enchantment.arrowFire",
+        max_level=1,
+        can_apply_to=_is_bow,
+    ),
+    aliases=("arrow_fire",),
+)
+
+
+INFINITY = register_enchantment(
+    Enchantment(
+        id="minecraft:infinity",
+        translation_key="enchantment.arrowInfinite",
+        max_level=1,
+        can_apply_to=_is_bow,
+    ),
+    aliases=("arrow_infinite",),
 )

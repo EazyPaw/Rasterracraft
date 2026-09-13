@@ -148,6 +148,16 @@ def _handle_teleport(packet: dict, client: "Client") -> None:
     client.client_player.x = packet["x"]
     client.client_player.y = packet["y"]
     client.client_player.blocking = bool(packet.get("blocking", False))
+    apply_bow_state = getattr(
+        client.client_player.game_mode, "apply_server_bow_state", None
+    )
+    using_bow = bool(packet.get("using_bow", False))
+    bow_draw_ticks = max(0, int(packet.get("bow_draw_ticks", 0)))
+    if callable(apply_bow_state):
+        apply_bow_state(using_bow, bow_draw_ticks)
+    else:
+        client.client_player.using_bow = using_bow
+        client.client_player.bow_draw_ticks = bow_draw_ticks
     client.client_player.sleeping = bool(packet.get("sleeping", False))
     client.client_player.sleeping_bed = packet.get("sleeping_bed")
 
@@ -342,6 +352,14 @@ def _handle_inventory_update(packet: dict, client: "Client") -> None:
             if key in packet:
                 setattr(player, key, packet[key])
         player.blocking = bool(packet.get("blocking", False))
+        apply_bow_state = getattr(player.game_mode, "apply_server_bow_state", None)
+        using_bow = bool(packet.get("using_bow", False))
+        bow_draw_ticks = max(0, int(packet.get("bow_draw_ticks", 0)))
+        if callable(apply_bow_state):
+            apply_bow_state(using_bow, bow_draw_ticks)
+        else:
+            player.using_bow = using_bow
+            player.bow_draw_ticks = bow_draw_ticks
         try:
             player.selected_slot = max(
                 0, min(8, int(packet.get("selected_slot", 0)))

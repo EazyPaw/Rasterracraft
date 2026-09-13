@@ -6,7 +6,13 @@ import random
 import uuid
 from uuid import UUID
 
-from src.server.damange_type import DamageType, GENERIC, MOB_ATTACK, PLAYER_ATTACK
+from src.server.damange_type import (
+    DamageType,
+    GENERIC,
+    MOB_ATTACK,
+    ON_FIRE,
+    PLAYER_ATTACK,
+)
 from src.server.location import Vector
 from src.server.tags import DamageTag
 from src.server.utils import is_safe_value
@@ -531,6 +537,7 @@ class Entity:
             "look_angle": self.look_angle,
             "attack_animation_ticks": self.attack_animation_ticks,
             "attackable": bool(self.attackable),
+            "fire_ticks": max(0, int(self.fire_ticks)),
         }
         if hasattr(self, "z"):
             data["z"] = getattr(self, "z")
@@ -574,6 +581,10 @@ class Entity:
             data["break_progress"] = float(getattr(self, "break_progress", 0.0))
             data["eating"] = bool(getattr(self, "eating", False))
             data["blocking"] = bool(getattr(self, "blocking", False))
+            data["using_bow"] = bool(getattr(self, "using_bow", False))
+            data["bow_draw_ticks"] = max(
+                0, int(getattr(self, "bow_draw_ticks", 0))
+            )
             data["sleeping"] = bool(getattr(self, "sleeping", False))
             sleeping_bed = getattr(self, "sleeping_bed", None)
             data["sleeping_bed"] = (
@@ -1357,6 +1368,13 @@ class Entity:
             )
 
     def tick_damage_state(self) -> None:
+        if self.fire_ticks > 0:
+            if self.in_water:
+                self.fire_ticks = 0
+            else:
+                self.fire_ticks -= 1
+                if self.fire_ticks % 20 == 0:
+                    self.apply_damage(1.0, ON_FIRE, source=None)
         if self.hurt_time <= 0:
             self.hurt_time = 0
             self.last_hurt_damage = 0.0
@@ -1365,6 +1383,14 @@ class Entity:
         if self.hurt_time <= 0:
             self.hurt_time = 0
             self.last_hurt_damage = 0.0
+
+    def set_seconds_on_fire(self, seconds: float) -> None:
+        try:
+            ticks = max(0, int(round(float(seconds) * 20.0)))
+        except (TypeError, ValueError, OverflowError):
+            return
+        if not self.has_status_effect("fire_resistance"):
+            self.fire_ticks = max(self.fire_ticks, ticks)
 
     def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
         return not self.removed and self.health > 0

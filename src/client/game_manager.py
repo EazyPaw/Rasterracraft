@@ -203,6 +203,12 @@ class GameManager:
             player.y + player.skeleton.size * player.skeleton.AUTHORED_HEIGHT_BLOCKS / 2
         )
         render = self.client.render
+        get_bow_progress = getattr(player.game_mode, "get_bow_draw_progress", None)
+        bow_progress = (
+            max(0.0, min(1.0, float(get_bow_progress())))
+            if callable(get_bow_progress)
+            else 0.0
+        )
         anchor_x = player.x + player.width / 2 - 0.5
         anchor_y = visual_mid_y + 0.5
         target_x, target_y = render.camera.get_follow_target(
@@ -211,6 +217,7 @@ class GameManager:
             pygame.mouse.get_pos(),
             (render.SCREEN_WIDTH, render.SCREEN_HEIGHT),
             render.block_size,
+            strength_multiplier=1.0 + 2.0 * bow_progress,
         )
         render.camera.move_to(
             target_x,

@@ -107,6 +107,7 @@ def _load_builtin_entities() -> None:
         return
 
     from src.server.entities import (  # noqa: F401
+        arrow,
         chicken,
         cow,
         egg,

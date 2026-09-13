@@ -39,6 +39,8 @@ class ClientPlayer(Entity):
         self.food_level = 20
         self.saturation = 5.0
         self.blocking = False
+        self.using_bow = False
+        self.bow_draw_ticks = 0
         self.sleeping = False
         self.sleeping_bed = None
         self.hurt_time = 0

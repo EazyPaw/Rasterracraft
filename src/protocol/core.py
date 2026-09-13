@@ -275,7 +275,7 @@ packet_spec("WorldLoadComplete", CLIENTBOUND, fields=("regions",), required=("re
 packet_spec("WeatherUpdate", CLIENTBOUND, fields=("weather", "remaining_ticks"), required=("weather",))
 packet_spec("Particle", CLIENTBOUND, fields=("particle_id", "x", "y", "z", "count", "motion", "data"), required=("particle_id",))
 packet_spec("SoundEffect", CLIENTBOUND, fields=("sound_id", "x", "y", "z", "volume", "global"), required=("sound_id",))
-packet_spec("InventoryUpdate", CLIENTBOUND, fields=("inventory", "equipment", "crafting", "cursor", "selected_slot", "health", "absorption_amount", "food_level", "saturation", "blocking", "attributes", "active_effects"), required=("inventory",))
+packet_spec("InventoryUpdate", CLIENTBOUND, fields=("inventory", "equipment", "crafting", "cursor", "selected_slot", "health", "absorption_amount", "food_level", "saturation", "blocking", "using_bow", "bow_draw_ticks", "attributes", "active_effects"), required=("inventory",))
 packet_spec("FurnaceOpen", CLIENTBOUND, fields=("container", "slots", "burn_time", "burn_time_total", "cook_time", "cook_time_total"), required=("container",))
 packet_spec("FurnaceUpdate", CLIENTBOUND, fields=("container", "slots", "burn_time", "burn_time_total", "cook_time", "cook_time_total"), required=("container",))
 packet_spec("FurnaceClosed", CLIENTBOUND, fields=("container",), required=("container",))

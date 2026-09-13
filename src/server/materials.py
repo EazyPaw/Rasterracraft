@@ -1077,6 +1077,81 @@ class FEATHER(Material):
     _texture_path = "items.feather"
 
 
+@register_material
+class ARROW(Material):
+    name_id = "arrow"
+    name = "item.arrow.name"
+    _texture_path = "items.arrow"
+
+
+@register_material
+class BOW(DamageableItem):
+    name_id = "bow"
+    name = "item.bow.name"
+    _texture_path = "items.bow_standby"
+    tool_type = "bow"
+    max_damage = 384
+    _held_texture_cache = {}
+
+    def right_click(self, stack, holder, *, target=None, context=None) -> bool:
+        request_bow_use = getattr(holder, "request_bow_use", None)
+        return callable(request_bow_use) and bool(request_bow_use(stack))
+
+    @staticmethod
+    def get_draw_ticks(holder) -> int:
+        if not bool(getattr(holder, "using_bow", False)):
+            return 0
+        game_mode = getattr(holder, "game_mode", None)
+        getter = getattr(game_mode, "get_bow_draw_ticks", None)
+        if callable(getter):
+            return max(0, int(getter()))
+        return max(0, int(getattr(holder, "bow_draw_ticks", 0)))
+
+    @classmethod
+    def get_draw_stage(cls, holder) -> int:
+        if not bool(getattr(holder, "using_bow", False)):
+            return -1
+        ticks = cls.get_draw_ticks(holder)
+        if ticks < 13:
+            return 0
+        if ticks < 18:
+            return 1
+        return 2
+
+    def get_held_texture_variant_key(self, stack, holder):
+        return self.get_draw_stage(holder)
+
+    @client_method
+    def get_held_texture(self, stack, holder, size: float, client):
+        stage = self.get_draw_stage(holder)
+        path = (
+            self._texture_path if stage < 0 else f"items.bow_pulling_{stage}"
+        )
+        source = client.resources_manager.get_texture_img(path)
+        key = (path, round(float(size), 4), source)
+        cached = type(self)._held_texture_cache.get(key)
+        if cached is not None:
+            return cached
+        width = max(1, round(source.get_width() * float(size)))
+        height = max(1, round(source.get_height() * float(size)))
+        texture = pygame.transform.scale(source, (width, height))
+        type(self)._held_texture_cache[key] = texture
+        if len(type(self)._held_texture_cache) > 16:
+            type(self)._held_texture_cache.pop(
+                next(iter(type(self)._held_texture_cache))
+            )
+        return texture
+
+    @client_method
+    def get_anchor(self, client=None):
+        return {
+            "anchor": (0.55, 0.35),
+            "offset": (0.02, 0.02),
+            "scale": 0.85,
+            "rotation": -135,
+        }
+
+
 class ThrowableMaterial(Material):
     """通过服务端实体注册表发射，并消耗真实物品堆叠。"""
 

@@ -3,7 +3,11 @@ import math as _math
 import random as _random
 
 from src.client.game_mode import SurvivalMode
-from src.server.attributes import BLOCKING_SPEED_MODIFIER, EATING_SPEED_MODIFIER
+from src.server.attributes import (
+    BLOCKING_SPEED_MODIFIER,
+    BOW_DRAWING_SPEED_MODIFIER,
+    EATING_SPEED_MODIFIER,
+)
 from src.server.block_class import Block
 from src.server.damange_type import DamageType, FALL, GENERIC, STARVE
 from src.server.entity import Entity
@@ -104,6 +108,13 @@ class Player(Entity):
         self._blocking_slot: int | None = None
         self._blocking_material_id: str | None = None
         self._last_block_action_tick = -10_000
+        self.using_bow = False
+        self.bow_draw_ticks = 0
+        self._bow_slot: int | None = None
+        self._bow_stack: ItemStack | None = None
+        self._bow_draw_started_tick = 0
+        self._last_bow_action_tick = -10_000
+        self._bow_last_broadcast_stage = -1
         self.sleeping = False
         self.sleep_ticks = 0
         self.sleeping_bed: dict[str, int | str] | None = None
@@ -214,6 +225,8 @@ class Player(Entity):
             "food_level": int(self.food_level),
             "saturation": float(self.saturation),
             "blocking": bool(self.blocking),
+            "using_bow": bool(self.using_bow),
+            "bow_draw_ticks": max(0, int(self.bow_draw_ticks)),
             "attributes": self.attributes.sync_snapshot(),
             "active_effects": self.status_effects_payload(),
         }
@@ -542,6 +555,8 @@ class Player(Entity):
             self.clear_eating(sync=True)
         if self.blocking:
             self.clear_blocking(sync=True)
+        if self.using_bow:
+            self.clear_bow_use(sync=True)
         world = self.world
         if not (0 <= y < world.attribute.MAX_BUILD_HEIGHT and z in (0, 1)):
             self.clear_breaking()
@@ -796,6 +811,163 @@ class Player(Entity):
             self._broadcast_action_state()
         self._last_eat_action_tick = int(getattr(self.world.server, "server_ticks", 0))
         return True
+
+    @staticmethod
+    def get_bow_power_for_ticks(draw_ticks: int) -> float:
+        charge = max(0.0, float(draw_ticks)) / 20.0
+        charge = (charge * charge + charge * 2.0) / 3.0
+        return min(1.0, charge)
+
+    def _find_arrow_ammo(self):
+        offhand = self.equipment.get("offhand")
+        if (
+            offhand is not None
+            and not offhand.is_empty()
+            and getattr(offhand.material, "name_id", "") == "arrow"
+        ):
+            return "offhand", None, offhand
+        for slot, candidate in enumerate(self.inventory):
+            if (
+                not candidate.is_empty()
+                and getattr(candidate.material, "name_id", "") == "arrow"
+            ):
+                return "inventory", slot, candidate
+        return None
+
+    def _held_bow_matches_use_state(self) -> bool:
+        if self._bow_slot is None or self._bow_stack is None:
+            return False
+        if self.selected_slot != self._bow_slot:
+            return False
+        held = self.inventory[self.selected_slot]
+        return (
+            held is self._bow_stack
+            and not held.is_empty()
+            and getattr(held.material, "tool_type", None) == "bow"
+        )
+
+    def request_bow_use(self, stack: ItemStack | None = None) -> bool:
+        mode = getattr(self.gamemode, "name_id", "survival")
+        if self.health <= 0 or mode == "spectator":
+            self.clear_bow_use()
+            return False
+        held = self.inventory[self.selected_slot]
+        if (
+            (stack is not None and stack is not held)
+            or held.is_empty()
+            or getattr(held.material, "tool_type", None) != "bow"
+            or (mode != "creative" and self._find_arrow_ammo() is None)
+        ):
+            self.clear_bow_use()
+            return False
+        self.clear_breaking()
+        self.clear_eating()
+        self.clear_blocking()
+        current_tick = int(getattr(self.world.server, "server_ticks", 0))
+        if not self.using_bow or not self._held_bow_matches_use_state():
+            self.clear_bow_use()
+            self.using_bow = True
+            self.bow_draw_ticks = 0
+            self._bow_slot = self.selected_slot
+            self._bow_stack = held
+            self._bow_draw_started_tick = current_tick
+            self._bow_last_broadcast_stage = 0
+            self.replace_attribute_modifiers(
+                "state:using_bow",
+                (("movement_speed", BOW_DRAWING_SPEED_MODIFIER),),
+            )
+            self._broadcast_action_state()
+        self._last_bow_action_tick = current_tick
+        return True
+
+    def clear_bow_use(self, *, sync: bool = False) -> None:
+        was_using = self.using_bow
+        self.using_bow = False
+        self.bow_draw_ticks = 0
+        self._bow_slot = None
+        self._bow_stack = None
+        self._bow_draw_started_tick = 0
+        self._bow_last_broadcast_stage = -1
+        self.replace_attribute_modifiers("state:using_bow", ())
+        if was_using:
+            self._broadcast_action_state()
+            if sync:
+                self.sync_inventory()
+
+    def release_bow(self) -> bool:
+        if not self.using_bow or not self._held_bow_matches_use_state():
+            self.clear_bow_use(sync=True)
+            return False
+        bow_stack = self._bow_stack
+        current_tick = int(getattr(self.world.server, "server_ticks", 0))
+        draw_ticks = max(
+            self.bow_draw_ticks, current_tick - self._bow_draw_started_tick
+        )
+        mode = getattr(self.gamemode, "name_id", "survival")
+        ammo = self._find_arrow_ammo()
+        self.clear_bow_use()
+        if bow_stack is None or (mode != "creative" and ammo is None):
+            self.sync_inventory()
+            return False
+        power = self.get_bow_power_for_ticks(draw_ticks)
+        if power < 0.1:
+            self.sync_inventory()
+            return False
+
+        from src.server.entities.arrow import Arrow
+
+        power_level = bow_stack.get_enchantment_level("power")
+        punch_level = bow_stack.get_enchantment_level("punch")
+        has_flame = bow_stack.get_enchantment_level("flame") > 0
+        has_infinity = bow_stack.get_enchantment_level("infinity") > 0
+        infinite_ammo = mode == "creative" or has_infinity
+        base_damage = 2.0
+        if power_level > 0:
+            base_damage += 0.5 * power_level + 0.5
+        projectile = Arrow.from_shooter(
+            self,
+            speed=power * 3.0,
+            inaccuracy=Arrow.default_inaccuracy,
+            base_damage=base_damage,
+            critical=power >= 1.0,
+            punch_level=punch_level,
+            flame=has_flame,
+            pickup="creative_only" if infinite_ammo else "allowed",
+        )
+        self.world.spawn_entity(projectile)
+        if mode != "creative" and not has_infinity and ammo is not None:
+            ammo[2].reduce_amount(1)
+        bow_stack.hurt_and_break(1, self)
+        self.world.server.broadcast_sound(
+            "random.bow",
+            self.x + self.width * 0.5,
+            self.y + getattr(self, "eye_height", self.height * 0.85),
+            getattr(self, "z", 0),
+        )
+        self._equipment_attribute_signature = None
+        self.sync_inventory()
+        return True
+
+    def tick_bow_use(self) -> None:
+        if not self.using_bow:
+            return
+        current_tick = int(getattr(self.world.server, "server_ticks", 0))
+        if (
+            current_tick - self._last_bow_action_tick > 2
+            or not self._held_bow_matches_use_state()
+        ):
+            self.clear_bow_use(sync=True)
+            return
+        self.bow_draw_ticks = max(0, current_tick - self._bow_draw_started_tick)
+        if self.bow_draw_ticks < 13:
+            stage = 0
+        elif self.bow_draw_ticks < 18:
+            stage = 1
+        else:
+            stage = 2
+        if stage != self._bow_last_broadcast_stage:
+            self._bow_last_broadcast_stage = stage
+            self._broadcast_action_state()
 
     def can_consume_food(self, food: Food) -> bool:
         if self.health <= 0:
@@ -1077,6 +1249,7 @@ class Player(Entity):
         self.tick_breaking()
         self.tick_eating()
         self.tick_blocking()
+        self.tick_bow_use()
         for container_id, container in tuple(self.open_inventory_containers.items()):
             owner = getattr(
                 container,
@@ -1268,8 +1441,10 @@ class Player(Entity):
         if self.sleeping:
             self.stop_sleeping(reposition=True)
         super().on_damage_applied(actual_damage, raw_damage, damage_type, source)
-        if self.health <= 0 and self.blocking:
-            self.clear_blocking(sync=True)
+        if self.health <= 0:
+            if self.blocking:
+                self.clear_blocking(sync=True)
+            self.clear_bow_use(sync=True)
         if actual_damage > 0.0:
             self.add_exhaustion(getattr(damage_type, "exhaustion", 0.0))
         server = getattr(self.world, "server", None)
@@ -2040,6 +2215,7 @@ class Player(Entity):
         self.clear_breaking()
         self.clear_eating()
         self.clear_blocking()
+        self.clear_bow_use()
         self._teleport_id += 1
         self._pending_teleport_id = self._teleport_id
         self.world.server.send_client_socket(self, self, "Teleport")
