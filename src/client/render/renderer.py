@@ -1041,6 +1041,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def draw_player(self) -> None:
         """绘制玩家实体。"""
         player = self.client.client_player
+        if getattr(getattr(player, "game_mode", None), "name_id", "") == "spectator":
+            return
         if "invisibility" not in getattr(player, "active_effects", {}):
             player.skeleton.draw()
         player.skeleton.draw_fire_overlay()
@@ -1049,6 +1051,16 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
 
     def _entity_is_visible(self, entity) -> bool:
         """Cheap world-space culling with room for limbs, armor, and interpolation."""
+        local_mode = getattr(
+            getattr(self.client.client_player, "game_mode", None),
+            "name_id",
+            "survival",
+        )
+        if (
+            getattr(entity, "gamemode", "survival") == "spectator"
+            and local_mode != "spectator"
+        ):
+            return False
         block_size = self.block_size
         if block_size <= 0:
             return True

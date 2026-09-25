@@ -6,7 +6,12 @@ from typing import TYPE_CHECKING
 import pygame
 
 from src.client.entity_skeleton import PlayerSkeleton
-from src.client.game_mode import CreativeMode, SurvivalMode
+from src.client.game_mode import (
+    CreativeMode,
+    SpectatorMode,
+    SurvivalMode,
+    get_gamemode_by_id,
+)
 from src.server.damange_type import GENERIC, DamageType
 from src.server.entity import Entity
 from src.server.experience import experience_to_next_level
@@ -61,9 +66,11 @@ class ClientPlayer(Entity):
         self.skeleton.x = self.client.render.SCREEN_WIDTH / 2
         self.skeleton.y = self.client.render.SCREEN_HEIGHT / 2
         self.selected_slot = 0
-        self.game_mode = (
-            CreativeMode(self) if game_mode == "creative" else SurvivalMode(self)
-        )
+        try:
+            game_mode_type = get_gamemode_by_id(str(game_mode).lower())
+        except ValueError:
+            game_mode_type = SurvivalMode
+        self.game_mode = game_mode_type(self)
         self.fore_place = False
 
     @staticmethod
@@ -225,7 +232,7 @@ class ClientPlayer(Entity):
     def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
         return (
             not self.dead
-            and not isinstance(self.game_mode, CreativeMode)
+            and not isinstance(self.game_mode, (CreativeMode, SpectatorMode))
             and super().can_take_damage(damage_type)
         )
 

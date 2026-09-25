@@ -75,6 +75,7 @@ class Entity:
         self.horizontal_collision = False
         self.vertical_collision = False
         self.flying = False
+        self.no_physics = False
         self.sneaking = False
         self.interact_range = 3.5
         self.facing = 0  # 0: 左边 1: 右边
@@ -559,6 +560,9 @@ class Entity:
             }
 
         if self.entity_id == "player" and hasattr(self, "inventory"):
+            data["gamemode"] = getattr(
+                getattr(self, "gamemode", None), "name_id", "survival"
+            )
             try:
                 selected = int(getattr(self, "selected_slot", 0))
                 selected = max(0, min(len(self.inventory) - 1, selected))
@@ -1323,6 +1327,28 @@ class Entity:
             self.damping = self.air_friction * self.get_ground_friction()
 
     def move_update(self):
+        if self.no_physics:
+            self.in_fluid = False
+            self.in_water = False
+            self.in_lava = False
+            self.fluid_type = None
+            self._active_fluid_block = None
+            self.x += self.motion.x
+            self.y += self.motion.y
+            self.horizontal_collision = False
+            self.vertical_collision = False
+            self.on_ground = False
+            self.motion.y *= 0.5
+            if abs(self.motion.y) < 0.001:
+                self.motion.y = 0.0
+            self.update_damping()
+            self.motion.x *= self.damping
+            if abs(self.motion.x) < 0.001:
+                self.motion.x = 0.0
+            self.swimming_up = False
+            self._jumped_this_tick = False
+            return
+
         self.in_fluid, flow_x, flow_y = self._get_fluid_interaction()
         if self.flying:
             self.motion.y *= 0.5

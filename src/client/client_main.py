@@ -321,7 +321,7 @@ class Client:
         requested_mode = str(level.get("game_mode", "survival")).lower()
         self.current_game_mode = (
             requested_mode
-            if requested_mode in ("creative", "survival")
+            if requested_mode in ("creative", "survival", "spectator")
             else "survival"
         )
         self._prepare_game_session()

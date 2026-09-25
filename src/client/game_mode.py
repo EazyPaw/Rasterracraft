@@ -211,6 +211,7 @@ class CreativeMode(GameMode):
         self.player.interact_range = 5
         self.player.block_interaction_range = 5
         self.player.flyable = True
+        self.player.no_physics = False
         self.update_gui()
         self.inv = CreativeInventory(self.player.client.render)
         self.crafting_table = CraftingTable(self.player.client.render)
@@ -324,6 +325,8 @@ class SurvivalMode(GameMode):
         self.pending_break_target = None
         super().__init__(player)
         self.player.flyable = False
+        self.player.flying = False
+        self.player.no_physics = False
         self.inv = Backpack(self.player.client.render)
         self.crafting_table = CraftingTable(self.player.client.render)
 
@@ -478,6 +481,52 @@ class SurvivalMode(GameMode):
             self.player.client.render.close_gui(self.inv)
         else:
             self.player.client.render.show_gui(self.inv)
+
+
+class SpectatorMode(GameMode):
+    """Non-interacting, invulnerable flight mode controlled by the server."""
+
+    name_id = "spectator"
+    name = "gameMode.spectator"
+    durability_consumption = False
+
+    def __init__(self, player: "ClientPlayer"):
+        super().__init__(player)
+        self.player.flyable = True
+        self.player.flying = True
+        self.player.no_physics = True
+        self.player.sneaking = False
+        self.player.sprinting = False
+        self.update_gui()
+
+    def update_gui(self):
+        if self.player.client.chat_gui is None:
+            self.player.client.chat_gui = ChatGUI(self.player.client.render)
+        # Entity teleport selection has not been implemented yet. Keep chat
+        # available without exposing an inventory that spectators could edit.
+        self.player.client.render.drawing_GUIs = [self.player.client.chat_gui]
+
+    def left_click_on_block(self, block: Block):
+        return None
+
+    def right_click_on_block(self, block: Block):
+        return None
+
+    def left_click_on_entity(self, entity: Entity):
+        return None
+
+    def right_click_on_entity(self, entity: Entity):
+        return None
+
+    def get_choosing_block(self):
+        self.player.choosing_block = None
+        self.player.choosing_entity = None
+
+    def mouse_wheel(self, direction):
+        return None
+
+    def open_inventory(self):
+        return None
 
 
 _GAMEMODE_REGISTRY: dict[str, type] = None  # None = 尚未构建

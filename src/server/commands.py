@@ -148,12 +148,11 @@ class CommandExecutor:
     @register_command("gamemode")
     def switch_gamemode(self, args, executor: Player | str):
         if not isinstance(executor, Player) or len(args) != 1:
-            raise ValueError("Usage: /gamemode <creative|survival>")
+            raise ValueError("Usage: /gamemode <creative|survival|spectator>")
 
         gamemode = get_gamemode_by_id(args[0].lower())
 
-        executor.gamemode = gamemode
-        self.server.send_client_socket(executor, executor, "GamemodeUpdate")
+        executor.set_gamemode(gamemode)
         return f"Gamemode is set to {gamemode.name_id}"
 
     @register_command("give")

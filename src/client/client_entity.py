@@ -182,6 +182,7 @@ class ClientEntity:
         self.look_angle = float(packet.get("look_angle", 0.0))
         self.attack_animation_ticks = int(packet.get("attack_animation_ticks", 0))
         self.attackable = bool(packet.get("attackable", True))
+        self.gamemode = str(packet.get("gamemode", "survival"))
         self.experience_value = max(1, int(packet.get("experience_value", 1)))
         self.orb_age = max(0, int(packet.get("orb_age", 0)))
         self.orb_count = max(1, int(packet.get("orb_count", 1)))
@@ -269,6 +270,7 @@ class ClientEntity:
             packet.get("attack_animation_ticks", self.attack_animation_ticks)
         )
         self.attackable = bool(packet.get("attackable", self.attackable))
+        self.gamemode = str(packet.get("gamemode", self.gamemode))
         self.experience_value = max(
             1, int(packet.get("experience_value", self.experience_value))
         )

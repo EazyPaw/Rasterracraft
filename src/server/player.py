@@ -131,6 +131,42 @@ class Player(Entity):
         self._sprint_particle_timer: int = 0
         self._last_sprint_particle_x: float | None = None
         self.spawn_point = 0
+        self._apply_gamemode_state()
+
+    def _apply_gamemode_state(self) -> None:
+        mode = getattr(self.gamemode, "name_id", "survival")
+        spectator = mode == "spectator"
+        self.no_physics = spectator
+        self.attackable = not spectator
+        self.blocks_block_placement = not spectator
+        if spectator:
+            self.flying = True
+            self.on_ground = False
+            self.in_fluid = False
+            self.in_water = False
+            self.in_lava = False
+            self.fall_distance = 0.0
+            self.sneaking = False
+            self.sprinting = False
+        elif mode != "creative":
+            self.flying = False
+
+    def set_gamemode(self, gamemode, *, sync: bool = True) -> None:
+        """Apply a server-authoritative mode transition and cancel old actions."""
+        self.gamemode = gamemode
+        self.clear_breaking()
+        self.clear_eating()
+        self.clear_blocking()
+        self.clear_bow_use()
+        if self.sleeping:
+            self.stop_sleeping(reposition=True, sync=False)
+        self._apply_gamemode_state()
+
+        server = getattr(self.world, "server", None)
+        if not sync or server is None or self not in getattr(server, "players", ()):
+            return
+        server.send_client_socket(self, self, "GamemodeUpdate")
+        self._broadcast_action_state()
 
     def _initialize_inventory(self) -> None:
         from src.server.materials import (
@@ -275,6 +311,8 @@ class Player(Entity):
 
     def use_held_item(self, *, target=None, context=None) -> bool:
         """Run the selected stack's server-side right-click behavior."""
+        if getattr(self.gamemode, "name_id", "survival") == "spectator":
+            return False
         selected = max(0, min(len(self.inventory) - 1, int(self.selected_slot)))
         stack = self.inventory[selected]
         if stack.is_empty():

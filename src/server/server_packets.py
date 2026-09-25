@@ -313,12 +313,51 @@ def _allow_action_this_tick(player: Player, action: str) -> bool:
 
 SERVER_PACKET_DISPATCHER = PacketDispatcher[Player](SERVERBOUND)
 
+_SPECTATOR_BLOCKED_PACKETS = frozenset(
+    {
+        "PlayerAction",
+        "BreakBlock",
+        "RightClick",
+        "PickupItem",
+        "AttackEntity",
+        "InteractEntity",
+        "InventoryClick",
+        "ContainerClick",
+        "ContainerQuickMove",
+        "ContainerSwap",
+        "ContainerDrop",
+        "CreativeSetSlot",
+        "CreativeClearInventory",
+        "InventoryDrag",
+        "ContainerDrag",
+        "CraftingDrag",
+        "InventoryDrop",
+        "CraftingClick",
+        "CraftingTake",
+        "CraftingQuickTake",
+        "CraftingClose",
+        "SaveHotbar",
+        "LoadHotbar",
+    }
+)
+
 
 def decode_packet(packet: dict, player: Player) -> None:
     """Validate and dispatch one client-to-server packet."""
     try:
         decoded = decode_payload(packet, SERVERBOUND)
         if getattr(player, "_disconnecting", False) and decoded.name != "DisconnectAck":
+            return
+        if (
+            getattr(getattr(player, "gamemode", None), "name_id", "survival")
+            == "spectator"
+            and decoded.name in _SPECTATOR_BLOCKED_PACKETS
+        ):
+            if any(
+                word in decoded.name
+                for word in ("Inventory", "Container", "Crafting")
+            ):
+                player.sync_inventory()
             return
         SERVER_PACKET_DISPATCHER.dispatch_packet(decoded, player)
     except PacketDecodeError as exc:
@@ -364,7 +403,7 @@ def _handle_player_move(packet: dict, player: Player) -> None:
         return
     elapsed_ticks = 1 if last_tick < 0 else max(1, current_tick - last_tick)
     mode = getattr(getattr(player, "gamemode", None), "name_id", "survival")
-    if mode == "creative" and player.flying:
+    if mode in {"creative", "spectator"} and player.flying:
         movement_scale = max(1.0, player.get_attribute_value("flying_speed") / 0.4)
     else:
         movement_scale = max(
@@ -372,18 +411,22 @@ def _handle_player_move(packet: dict, player: Player) -> None:
         )
 
     max_horizontal = (
-        (4.0 if mode == "creative" else 2.0) * movement_scale * elapsed_ticks
+        (4.0 if mode in {"creative", "spectator"} else 2.0)
+        * movement_scale
+        * elapsed_ticks
     )
-    max_vertical = (6.0 if mode == "creative" else 3.0) * elapsed_ticks
+    max_vertical = (
+        6.0 if mode in {"creative", "spectator"} else 3.0
+    ) * elapsed_ticks
     dx = new_x - player.x
     dy = new_y - player.y
     if abs(dx) > max_horizontal or abs(dy) > max_vertical:
         _reject_player_move(player)
         return
 
-    if player._check_collision_at(new_x, new_y) and not player._check_collision_at(
-        player.x, player.y
-    ):
+    if mode != "spectator" and player._check_collision_at(
+        new_x, new_y
+    ) and not player._check_collision_at(player.x, player.y):
         _reject_player_move(player)
         return
 
@@ -415,11 +458,21 @@ def _handle_player_move(packet: dict, player: Player) -> None:
         and packet.get("sprinting") is True
         and (mode != "survival" or player.food_level > 6)
     )
-    player.flying = mode == "creative" and packet.get("flying") is True
-    player.in_fluid = bool(player._get_fluid_interaction()[0])
-    player.on_ground = bool(player._check_support_at())
+    player.flying = mode == "spectator" or (
+        mode == "creative" and packet.get("flying") is True
+    )
+    if mode == "spectator":
+        player.in_fluid = False
+        player.in_water = False
+        player.in_lava = False
+        player.on_ground = False
+        player.fall_distance = 0.0
+    else:
+        player.in_fluid = bool(player._get_fluid_interaction()[0])
+        player.on_ground = bool(player._check_support_at())
     player._last_move_tick = current_tick
-    player.call_inside_block_hooks()
+    if mode != "spectator":
+        player.call_inside_block_hooks()
     player.record_server_movement(previous_y, was_on_ground, abs(dx))
     player.on_moving()
     forward_packet_to_others(player, player, mode="entity_update")

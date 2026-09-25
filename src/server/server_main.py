@@ -754,7 +754,7 @@ class Server:
         if "spawn_point" in data:
             player.spawn_point = data["spawn_point"]
         # 恢复玩家的游戏模式（优先读取玩家存档，回退到世界默认模式）
-        player.gamemode = self.get_player_gamemode(data)
+        player.set_gamemode(self.get_player_gamemode(data), sync=False)
         saved_inventory = data.get("inventory")
         if isinstance(saved_inventory, list):
             restore_inventory(player.inventory, saved_inventory)
