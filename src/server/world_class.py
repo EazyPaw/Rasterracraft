@@ -1231,9 +1231,17 @@ class World:
         return x in self.regions
 
     def find_top_block(self, x, z) -> Block | None:
-        for y in range(self.attribute.MAX_BUILD_HEIGHT - 1, 0, -1):
-            if (block := self.get_block(x, y, z)).block_id != "air":
-                return block
+        if self.is_position_loaded(x, 0, z):
+            for y in range(self.attribute.MAX_BUILD_HEIGHT - 1, 0, -1):
+                if (block := self.get_block(x, y, z)).block_id != "air":
+                    return block
+        else:
+            save_id = getattr(self.server, "save_id", None)
+            saved_chunk = save_manager.load_chunk(save_id, self.id_name, x // 16, self)
+            crx = x % 16
+            for y in range(self.attribute.MAX_BUILD_HEIGHT - 1, 0, -1):
+                if (block := saved_chunk.region_array[crx, y, z]).block_id != "air":
+                    return block
         return None
 
     @staticmethod
