@@ -1010,7 +1010,10 @@ class Player(Entity):
     def can_consume_food(self, food: Food) -> bool:
         if self.health <= 0:
             return False
-        if getattr(self.gamemode, "name_id", "survival") != "survival":
+        mode = getattr(self.gamemode, "name_id", "survival")
+        if mode == "creative":
+            return True
+        if mode != "survival":
             return False
         return bool(food.always_edible or self.food_level < self.MAX_FOOD_LEVEL)
 

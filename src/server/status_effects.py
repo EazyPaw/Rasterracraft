@@ -19,7 +19,9 @@ class StatusEffect:
 
     @property
     def translation_key(self) -> str:
-        return f"effect.minecraft.{self.id}"
+        if self.id == "fire_resistance":
+            return 'potion.fireResistance'
+        return f"potion.{self.id}"
 
     def attribute_modifiers(
         self, amplifier: int

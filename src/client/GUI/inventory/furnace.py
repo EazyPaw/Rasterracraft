@@ -59,6 +59,14 @@ class Furnace(Backpack):
             for offset_x, offset_y in self.furnace_offsets
         ]
 
+    def _equipment_slot_at_pos(self, pos):
+        """The furnace screen has no player equipment slots."""
+        return None
+
+    def _draw_equipment(self):
+        """Do not draw the player equipment overlay on the furnace screen."""
+        return None
+
     def _craft_slot_at_pos(self, pos):
         size = self.slot_size * self.render.gui_scale
         for index, (x, y) in enumerate(self._furnace_positions()):

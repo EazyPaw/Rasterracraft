@@ -23,6 +23,7 @@ class HotBar(GUI):
         self._item_name_fade_starts_at = 0.0
         self._item_name_expires_at = 0.0
         self._effect_icon_cache = {}
+        self._status_effect_hitboxes = []
 
     def show_item_name(
         self, name: str, duration: float = 1.6, fade_duration: float = 0.4
@@ -41,6 +42,7 @@ class HotBar(GUI):
     def draw(self):
         self._draw_hotbar()
         self.draw_item_name()
+        self._draw_status_effect_tooltip()
 
     def _draw_hotbar(self):
         # 竞态条件保护：start_game() 在另一个线程中将 HotBar 添加到
@@ -126,6 +128,7 @@ class HotBar(GUI):
         return cached
 
     def _draw_status_effects(self) -> None:
+        self._status_effect_hitboxes = []
         player = self.render.client.client_player
         effects = getattr(player, "active_effects", {}) if player is not None else {}
         visible = [instance for instance in effects.values() if instance.show_icon]
@@ -196,6 +199,73 @@ class HotBar(GUI):
                     self.render.blit(background, (x, y))
                 inset = (cell_size - icon_size) // 2
                 self.render.blit(icon, (x + inset, y + inset))
+                self._status_effect_hitboxes.append(
+                    (pygame.Rect(x, y, cell_size, cell_size), instance)
+                )
+
+    def _draw_status_effect_tooltip(self) -> None:
+        mouse_pos = pygame.mouse.get_pos()
+        hovered = next(
+            (
+                instance
+                for rect, instance in self._status_effect_hitboxes
+                if rect.collidepoint(mouse_pos)
+            ),
+            None,
+        )
+        if hovered is None:
+            return
+
+        from src.client.GUI.inventory.item_tooltip import ItemTooltip
+        from src.client.resources_manager import transkey
+        from src.server.status_effects import get_status_effect
+
+        definition = get_status_effect(hovered.effect_id)
+        name_key = definition.translation_key if definition is not None else ""
+        name = (
+            transkey(name_key, client=self.render.client)
+            if name_key
+            else hovered.effect_id
+        )
+        duration = int(hovered.duration)
+        if duration < 0:
+            time_text = "∞"
+        else:
+            seconds = duration // 20
+            time_text = f"{seconds // 60}:{seconds % 60:02d}"
+
+        font_size = max(14, round(8 * self.render.gui_scale))
+        font = self.render.get_font(font_size)
+        lines = (name, time_text)
+        line_height = font.get_linesize()
+        line_gap = max(1, round(self.render.gui_scale * 2))
+        content_size = (
+            max(font.size(line)[0] for line in lines),
+            len(lines) * line_height + line_gap,
+        )
+        pixel = max(1, round(self.render.gui_scale))
+        panel, offset = ItemTooltip.create_panel(content_size, pixel)
+
+        mouse_x, mouse_y = mouse_pos
+        cursor_gap = pixel * 3
+        x = round(mouse_x + cursor_gap)
+        y = round(mouse_y - cursor_gap)
+        if x + panel.get_width() > self.render.SCREEN_WIDTH - pixel:
+            x = round(mouse_x - cursor_gap - panel.get_width())
+        if y + panel.get_height() > self.render.SCREEN_HEIGHT - pixel:
+            y = self.render.SCREEN_HEIGHT - pixel - panel.get_height()
+        x = max(pixel, x)
+        y = max(pixel, y)
+        self.render.blit(panel, (x, y))
+        for index, line in enumerate(lines):
+            self.render.render_text(
+                line,
+                (x + offset[0], y + offset[1] + index * (line_height + line_gap)),
+                (255, 255, 255),
+                font_size,
+                shadow=True,
+                shadow_strength=0.25,
+            )
 
     def draw_item_name(self, bottom_y: float | None = None):
         """在屏幕中下方绘制物品名称，并在结束前渐隐。"""

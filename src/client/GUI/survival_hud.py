@@ -207,6 +207,7 @@ class SurvivalHUD(HotBar):
         self._draw_experience(player, bar_x, bar_y)
         top_meter_y = armor_y if armor_visible else health_top_y
         self.draw_item_name(top_meter_y - round(self.render.gui_scale * 3))
+        self._draw_status_effect_tooltip()
 
     # ------------------------------------------------------------------
     #  经验条
