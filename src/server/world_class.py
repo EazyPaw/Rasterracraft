@@ -21,6 +21,7 @@ from src.server.blocks import AIR, FIRE, SNOW
 from src.server.damange_type import EXPLOSION, PLAYER_EXPLOSION
 from src.server.entity import Entity
 from src.server.generator import Generator
+from src.server.generator.village import VillageGenerator
 from src.server.location import Location, Vector, decide_x_or_loc
 from src.server.particles import (
     BlockBreakParticleEffect,
@@ -213,7 +214,7 @@ class Weather(Enum):
 
 
 class World:
-    def __init__(self, server, id_name, generator, attribute: WorldAttribute, seed):
+    def __init__(self, server, id_name, generator, attribute: WorldAttribute, seed, *, generate_structures=True):
         self.server = server
         self.id_name = id_name
         self.generator: Generator = generator(seed)
@@ -230,6 +231,11 @@ class World:
         self._unresolved_entities_by_chunk: dict[int, list[dict]] = {}
         self.last_entity_timings_ms: list[tuple[str, float, float, float]] = []
         self.structure_build_mode = type(self.generator).__name__ == "StructureBuild"
+        self.generate_structures = bool(generate_structures) and not self.structure_build_mode
+        self.structure_generator = VillageGenerator(
+            self.generator, attribute.MAX_BUILD_HEIGHT,
+            enabled=self.generate_structures and id_name == "overworld",
+        )
         self.disable_mob_generation = self.structure_build_mode
         self.structure_bounds: tuple[int, int, int, int] | None = None
         self.structure_void_positions: set[tuple[int, int, int]] = set()
@@ -1136,6 +1142,7 @@ class World:
                     block = self.generator.get_original_block(sx, y, z)
                     chunk[x][y][z] = block
                     block.location = Location(self, d_x, y, z)
+        self.structure_generator.apply_chunk(self, rx, chunk)
         new_chunk = Chunk(rx, chunk, biome_array)
         # 第二阶段（临界区）：写入 regions 字典并做跨区块光照计算
         # 光照计算需要读取相邻区块，因此需要串行化以保证一致性

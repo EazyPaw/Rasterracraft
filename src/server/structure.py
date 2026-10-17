@@ -12,6 +12,7 @@ import json
 import os
 import re
 import zlib
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -239,9 +240,61 @@ def load_structure_data(name: str) -> tuple[Path, dict[str, Any]]:
         if isinstance(nbt, dict):
             for field in _LEGACY_RUNTIME_NBT_FIELDS:
                 nbt.pop(field, None)
+            # Old templates included a redundant 3-D straight-stair shape;
+            # current 2-D stairs only have half/facing.
+            if entry["id"].endswith("_stairs") and nbt.get("shape") == "straight":
+                nbt.pop("shape")
             if not nbt:
                 entry.pop("nbt", None)
     return path, data
+
+
+def iter_structure_blocks(
+    data: dict[str, Any],
+    origin: tuple[int, int, int],
+    *,
+    x_bounds: tuple[int, int] | None = None,
+    mirror_x: bool = False,
+):
+    """Yield template cells without touching a world; origin is the lower left.
+
+    Bounds are inclusive world X coordinates. Air is an explicit write, while
+    structure_void never produces a write. This also works on negative chunks.
+    """
+    ox, oy, oz = origin
+    width, height, depth = data["size"]
+    first, last = 0, width - 1
+    if x_bounds is not None:
+        first = max(first, x_bounds[0] - ox)
+        last = min(last, x_bounds[1] - ox)
+    palette = data["palette"]
+    if mirror_x:
+        palette = deepcopy(palette)
+        for entry in palette:
+            nbt = entry.get("nbt", {})
+            facing = nbt.get("facing")
+            if type(facing) is int and facing in (-1, 1):
+                nbt["facing"] = -facing
+            elif isinstance(facing, str):
+                nbt["facing"] = {
+                    "left": "right", "right": "left",
+                    "east": "west", "west": "east",
+                }.get(facing, facing)
+            if nbt.get("hinge") in ("left", "right"):
+                nbt["hinge"] = "right" if nbt["hinge"] == "left" else "left"
+            if type(nbt.get("left")) is bool and type(nbt.get("right")) is bool:
+                nbt["left"], nbt["right"] = nbt["right"], nbt["left"]
+    for dx in range(first, last + 1):
+        source_x = width - 1 - dx if mirror_x else dx
+        for dy in range(height):
+            for dz in range(depth):
+                index = (source_x * height + dy) * depth + dz
+                palette_index = data["blocks"][index]
+                if type(palette_index) is not int or not 0 <= palette_index < len(palette):
+                    raise ValueError("Structure contains an invalid palette index")
+                entry = palette[palette_index]
+                if entry["id"] != "structure_void":
+                    yield ox + dx, oy + dy, oz + dz, entry
 
 
 def _sync_changed_chunks(world, affected_chunks: set[int]) -> None:

@@ -369,11 +369,8 @@ class CommandExecutor:
 
     @register_command("locate")
     def locate_command(self, args, executor: Player | str):
-        if len(args) < 2 or args[0].lower() != "biome":
-            raise ValueError("Usage: /locate biome <biome>")
-        biome_id = args[1].lower().removeprefix("minecraft:")
-        if biome_id not in BIOME_PROFILES:
-            raise ValueError(f"Unknown biome: {args[1]}")
+        if len(args) != 2 or args[0].lower() not in ("biome", "structure"):
+            raise ValueError("Usage: /locate biome <biome> | /locate structure <structure>")
         if isinstance(executor, Player):
             world = executor.world
             origin_x = int(round(executor.x))
@@ -383,6 +380,25 @@ class CommandExecutor:
         generator = world.generator
 
         max_radius = 524288
+
+        if args[0].lower() == "structure":
+            structure_id = args[1].lower().removeprefix("minecraft:")
+            if structure_id != "village":
+                raise ValueError(f"Unknown structure: {args[1]}")
+            if not world.generate_structures:
+                raise ValueError("Structure generation is disabled in this world")
+            planner = world.structure_generator
+            if not planner.enabled:
+                raise ValueError("Villages are not enabled for this dimension or generator")
+            location = planner.locate(origin_x, max_radius)
+            if location is None:
+                raise ValueError(f"Could not locate structure village within {max_radius} blocks")
+            x, y = location
+            return f"The nearest village is at ({x}, {y}), {abs(x - origin_x)} blocks away"
+
+        biome_id = args[1].lower().removeprefix("minecraft:")
+        if biome_id not in BIOME_PROFILES:
+            raise ValueError(f"Unknown biome: {args[1]}")
 
         for radius in range(max_radius + 1):
             candidates = (

@@ -478,6 +478,9 @@ class Server:
             generator_factory,
             WorldAttribute(max_build_height=max_build_height),
             seed,
+            generate_structures=bool(world_meta.get(
+                "generate_structures", (self.level_data or {}).get("generate_structures", True)
+            )),
         )
         self.worlds["overworld"].world_time = world_time
         if self.save_id:
@@ -853,6 +856,7 @@ class Server:
                 "weather": world.weather.value,
                 "weather_tick": int(world.weather_tick),
                 "disable_mob_generation": bool(world.disable_mob_generation),
+                "generate_structures": bool(world.generate_structures),
             })
             if world.structure_build_mode:
                 world_meta["structure_build_state"] = world.structure_build_state_data()

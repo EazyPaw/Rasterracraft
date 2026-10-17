@@ -220,3 +220,8 @@ __marimo__/
 /command_history.txt
 /structures/
 /validation/
+
+# Keep the village generation regression suite; other local tests stay ignored.
+!/tests/
+/tests/*
+!/tests/test_village_generation.py
