@@ -72,6 +72,10 @@ class ClientPlayer(Entity):
             game_mode_type = SurvivalMode
         self.game_mode = game_mode_type(self)
         self.fore_place = False
+        self.portal_effect_ticks = 0
+        self.portal_effect_duration = 80
+        self.portal_strength = 0.0
+        self.portal_effect_active = False
 
     @staticmethod
     def _mouse_look_from_screen(
@@ -213,6 +217,11 @@ class ClientPlayer(Entity):
         self.client.sent_packet(self, "PlayerMove")
 
     def _update_survival_state(self):
+
+        if self.portal_effect_active:
+            self.portal_strength = min(1.0, self.portal_strength + 0.0125)
+        else:
+            self.portal_strength = max(0.0, self.portal_strength - 0.05)
 
         # The client predicts the visible countdown only. Health changes are
         # authoritative on the server and arrive in PlayerHurt packets.

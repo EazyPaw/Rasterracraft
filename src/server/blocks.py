@@ -144,6 +144,109 @@ class OBSIDIAN(Block):
     requires_correct_tool = True
     required_tool_tier = "diamond"
 
+    def get_collision_box(self):
+        # Foreground portal frames are visual boundaries only: the player must
+        # be able to walk through the opening in the 2.5D front layer.
+        location = self.location
+        if location is not None and int(getattr(location, "z", 0)) == 0:
+            world = location.world
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                if getattr(world.get_block(location.x + dx, location.y + dy, 0), "block_id", None) == "nether_portal":
+                    return EMPTY
+        return super().get_collision_box()
+
+    def accepts_item_use(self, material) -> bool:
+        return bool(getattr(material, "ignites_blocks", False))
+
+    def on_use(self, player, material) -> bool:
+        if not self.location or not self.accepts_item_use(material):
+            return False
+        return activate_nether_portal(self.location.world, self.location.x, self.location.y, self.location.z)
+
+
+@register_block
+class NETHER_PORTAL(Block):
+    block_id = "nether_portal"
+    name = "block.minecraft.nether_portal"
+    _texture_path = "blocks.portal"
+    solid = False
+    collision_box = EMPTY
+    suffocating = False
+    light_attenuation = 1
+    has_transparent_pixels = True
+    redstone_conducting = False
+    light_source = 11
+
+    def on_entity_inside(self, entity) -> None:
+        begin = getattr(entity, "begin_nether_portal", None)
+        if callable(begin):
+            begin(self.location)
+
+    def on_update(self):
+        if self.location is None:
+            return
+        world = self.location.world
+        if getattr(world, "server", None) is None:
+            return
+        start = (int(self.location.x), int(self.location.y), int(self.location.z))
+        pending = [start]
+        visited = {start}
+        cells = []
+        valid = True
+        while pending:
+            x, y, z = pending.pop()
+            cells.append((x, y, z))
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                neighbor = world.get_block(x + dx, y + dy, z)
+                block_id = getattr(neighbor, "block_id", None)
+                if block_id == self.block_id:
+                    position = (x + dx, y + dy, z)
+                    if position not in visited:
+                        visited.add(position)
+                        pending.append(position)
+                elif block_id != "obsidian":
+                    valid = False
+        # All four in-plane neighbors must be portal or obsidian. A broken
+        # side/top/bottom exposes at least one cell, invalidating this component.
+        if valid:
+            return
+
+        for x, y, z in cells:
+            if getattr(world.get_block(x, y, z), "block_id", None) == self.block_id:
+                world.set_block(AIR(), x, y, z, send_packet=True, block_update=False)
+
+
+def _portal_frame(world, x, y, z, width, height):
+    for px in range(x - 1, x + width + 1):
+        for py in range(y - 1, y + height + 1):
+            edge = px in (x - 1, x + width) or py in (y - 1, y + height)
+            block = world.get_block(px, py, z)
+            if px in (x - 1, x + width) and py in (y - 1, y + height):
+                continue  # Vanilla does not require the four corner blocks.
+            if edge and getattr(block, "block_id", None) != "obsidian":
+                return None
+            if not edge and getattr(block, "block_id", None) not in {"air", "fire", "nether_portal"}:
+                return None
+    return [(px, py) for px in range(x, x + width) for py in range(y, y + height)]
+
+
+def activate_nether_portal(world, x, y, z) -> bool:
+    """Light a valid 1.8.9-style upright portal; dimension travel is deferred."""
+    for width in range(2, 22):
+        for height in range(3, 22):
+            for ox in range(int(x) - width, int(x) + 2):
+                for oy in range(int(y) - height, int(y) + 2):
+                    cells = _portal_frame(world, ox, oy, z, width, height)
+                    if cells is None:
+                        continue
+                    changed = False
+                    for px, py in cells:
+                        if getattr(world.get_block(px, py, z), "block_id", None) != "nether_portal":
+                            world.set_block(NETHER_PORTAL(), px, py, z, send_packet=True, block_update=False)
+                            changed = True
+                    return changed
+    return False
+
 
 @register_block
 class GRANITE(Block):

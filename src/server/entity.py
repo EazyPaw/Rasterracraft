@@ -839,7 +839,18 @@ class Entity:
                     yield block
 
     def call_inside_block_hooks(self) -> None:
-        for block in self._iter_inside_blocks():
+        blocks = list(self._iter_inside_blocks())
+        # A background portal is visually behind the player but remains
+        # reachable in the 2.5D world.  Include the corresponding cell in the
+        # rear layer when the entity occupies the foreground layer.
+        if int(getattr(self, "z", 0)) == 0:
+            seen = {id(block) for block in blocks}
+            for x in range(math.floor(self.x + 0.01), math.ceil(self.x + self.width - 0.01)):
+                for y in range(math.floor(self.y + 0.01), math.ceil(self.y + self.height - 0.01)):
+                    block = self._get_block_at(x, y, 1)
+                    if block is not None and id(block) not in seen and getattr(block, "block_id", None) == "nether_portal":
+                        blocks.append(block)
+        for block in blocks:
             callback = getattr(block, "on_entity_inside", None)
             if callable(callback):
                 callback(self)

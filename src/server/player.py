@@ -131,6 +131,8 @@ class Player(Entity):
         self._sprint_particle_timer: int = 0
         self._last_sprint_particle_x: float | None = None
         self.spawn_point = 0
+        self.portal_cooldown = 0
+        self.portal_effect_ticks = 0
         self._apply_gamemode_state()
 
     def _apply_gamemode_state(self) -> None:
@@ -1275,6 +1277,11 @@ class Player(Entity):
             self.exhaustion = min(40.0, self.exhaustion + amount)
 
     def tick_server(self) -> None:
+        self.tick_nether_portal()
+        if self.portal_cooldown > 0:
+            self.portal_cooldown -= 1
+        if self.portal_effect_ticks > 0:
+            self.portal_effect_ticks -= 1
         self.tick_sleeping()
         self.tick_damage_state()
         if self.in_lava:
@@ -1317,6 +1324,41 @@ class Player(Entity):
                         "Forward",
                     )
         self._sync_modified_attributes()
+
+    def begin_nether_portal(self, location=None) -> None:
+        if getattr(self, "_portal_effect_active", False):
+            return
+        self._portal_effect_active = True
+        self.portal_effect_ticks = 80
+        server = getattr(self.world, "server", None)
+        if server is not None:
+            server.send_client_socket(self, {"__class__": "PortalEffect", "active": True, "duration": 80, "fade_in": 40, "fade_out": 20}, "Forward")
+
+    def tick_nether_portal(self) -> None:
+        # Recheck even when stationary: frame destruction and teleports may
+        # change contact without a movement packet.
+        if self.health > 0 and getattr(self.gamemode, "name_id", "survival") != "spectator":
+            layers = (0, 1) if int(getattr(self, "z", 0)) == 0 else (1,)
+            for x in range(_math.floor(self.x + 0.001), _math.ceil(self.x + self.width - 0.001)):
+                for y in range(_math.floor(self.y + 0.001), _math.ceil(self.y + self.height - 0.001)):
+                    for z in layers:
+                        block = self.world.get_block(x, y, z)
+                        if getattr(block, "block_id", None) == "nether_portal":
+                            self.begin_nether_portal(block.location)
+                            return
+        self.end_nether_portal()
+
+    def end_nether_portal(self) -> None:
+        if not getattr(self, "_portal_effect_active", False):
+            return
+        self._portal_effect_active = False
+        server = getattr(self.world, "server", None)
+        if server is not None:
+            server.send_client_socket(self, {"__class__": "PortalEffect", "active": False}, "Forward")
+
+    def travel_through_nether_portal(self, location=None):
+        """Reserved server-authoritative destination hook for future dimensions."""
+        return None
 
     def _sync_modified_attributes(self) -> None:
         self.refresh_attribute_modifiers()

@@ -85,6 +85,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self._world_surface: pygame.Surface | None = None
         self._gui_surface: pygame.Surface | None = None
         self._status_effect_shader: StatusEffectShader | None = None
+        self._portal_effect_shader: StatusEffectShader | None = None
         self._shader_is_offscreen = False
         self._frame_uses_gui_layer = False
         shader_mode = os.environ.get("PYCRAFT_SHADER_MODE", "auto").strip().lower()
@@ -237,7 +238,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         use_shader = use_shader and not self._shader_failed
 
         old_shader = self._status_effect_shader
+        old_portal_shader = self._portal_effect_shader
+        if old_portal_shader is not None:
+            old_portal_shader.release()
         self._status_effect_shader = None
+        self._portal_effect_shader = None
         self._shader_is_offscreen = False
         if old_shader is not None:
             old_shader.release()
@@ -260,6 +265,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 self._status_effect_shader = StatusEffectShader(
                     self._world_surface, self._gui_surface
                 )
+                self._configure_portal_shader()
                 logging.info("GLSL status-effect renderer enabled")
                 return
             except Exception as exc:
@@ -291,6 +297,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self._gui_surface,
                     offscreen=True,
                 )
+                self._configure_portal_shader()
                 self._shader_is_offscreen = True
                 logging.info("Offscreen GLSL status-effect compositor ready")
             except Exception as exc:
@@ -300,6 +307,19 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 self._shader_failed = True
                 self._world_surface = self._window_surface
                 self._gui_surface = None
+
+    def _configure_portal_shader(self) -> None:
+        # Share the live GL context; a portal compile failure must not disable
+        # the independent potion compositor.
+        try:
+            self._portal_effect_shader = StatusEffectShader(
+                self._world_surface, self._gui_surface, offscreen=True,
+                fragment_shader="portal_effects.frag",
+                context=self._status_effect_shader.ctx,
+            )
+        except Exception as exc:
+            logging.warning("Portal GLSL unavailable; using software distortion: %s", exc)
+            self._portal_effect_shader = None
 
     @property
     def shader_effects_enabled(self) -> bool:
@@ -367,6 +387,42 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             night_vision_strength = 0.0
         return nausea_strength, blindness_strength, night_vision_strength
 
+    def _portal_effect_strength(self) -> tuple[float, float]:
+        player = self.client.client_player
+        strength = float(getattr(player, "portal_strength", 0.0)) if player else 0.0
+        return max(0.0, min(1.0, strength)), 0.0
+
+    def draw_portal_effect(self) -> None:
+        strength, _ = self._portal_effect_strength()
+        if strength <= 0.0:
+            return
+        frame = self.client.resources_manager.get_texture_img("blocks.portal")
+        if frame is not None:
+            size = self.screen.get_size()
+            cache = getattr(self, "_portal_overlay_cache", None)
+            if cache is None or cache[0] is not frame or cache[1] != size:
+                overlay = pygame.transform.scale(frame, size)
+                self._portal_overlay_cache = (frame, size, overlay)
+            else:
+                overlay = cache[2]
+            # GuiIngame.renderPortal uses p^4 * 0.8 + 0.2 as opacity.
+            overlay.set_alpha(round(255 * (strength ** 4 * 0.8 + 0.2)))
+            self.blit(overlay, (0, 0))
+        shader = self._portal_effect_shader
+        if shader is not None:
+            shader.set_uniforms(pygame.time.get_ticks() / 1000.0, 0.0, 0.0, 0.0, strength)
+            processed = shader.present(include_gui=False)
+            if processed is not None:
+                self.blit(processed, (0, 0))
+        else:
+            # CPU equivalent of the rotating anisotropic stretch.
+            angle = pygame.time.get_ticks() * 0.4 * strength
+            scale = (5.0 / (strength * strength + 5.0) - strength * 0.04) ** 2
+            source = pygame.transform.rotate(self.screen, angle)
+            source = pygame.transform.smoothscale(source, (max(1, round(source.get_width() / scale)), source.get_height()))
+            source = pygame.transform.rotate(source, -angle)
+            self.blit(source, source.get_rect(center=self.screen.get_rect().center))
+
     def _present_shader_frame(
         self, strengths: tuple[float, float, float] | None = None
     ) -> None:
@@ -392,7 +448,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         if shader is None:
             return self.screen.copy()
         nausea, blindness, night_vision = self._status_effect_strengths()
-        if self._shader_is_offscreen and not any(
+        if self._shader_is_offscreen and self._portal_effect_strength()[0] <= 0.001 and not any(
             value > 0.001 for value in (nausea, blindness, night_vision)
         ):
             surface = self._window_surface or self.screen
@@ -892,7 +948,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 )
                 effects_required = any(
                     value > 0.001 for value in self._frame_effect_strengths
-                )
+                ) or self._portal_effect_strength()[0] > 0.001
                 self._begin_world_layer(effects_required)
                 if self.client.in_game and self.client.client_player is not None:
                     # ---- 游戏内渲染流程 ----
@@ -917,6 +973,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.client.client_player.skeleton.update()
                     self.draw_player()
                     self._apply_bow_view_zoom()
+                    self.draw_portal_effect()
                     offscreen_effect_frame = (
                         self._shader_is_offscreen
                         and self.shader_effects_enabled

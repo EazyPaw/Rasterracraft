@@ -646,6 +646,15 @@ def _handle_entity_remove(packet: dict, client: "Client") -> None:
     client.client_world.remove_entity(packet.get("uuid", ""))
 
 
+@CLIENT_PACKET_DISPATCHER.handler("PortalEffect")
+def _handle_portal_effect(packet: dict, client: "Client") -> None:
+    player = client.client_player
+    if player is None:
+        return
+    player.portal_effect_duration = max(1, int(packet.get("duration", 80)))
+    player.portal_effect_active = packet.get("active", True) is True
+
+
 @CLIENT_PACKET_DISPATCHER.handler("ChatMessage")
 def _handle_chat_message(packet: dict, client: "Client") -> None:
     text_payload = packet.get("text", "")

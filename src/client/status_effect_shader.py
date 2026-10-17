@@ -21,19 +21,22 @@ class StatusEffectShader:
         gui_surface: pygame.Surface,
         *,
         offscreen: bool = False,
+        fragment_shader: str = "status_effects.frag",
+        context=None,
     ):
         import moderngl
         import pygame_shaders
         from pygame_shaders.screen_rect import ScreenRect
         from pygame_shaders.texture import Texture
 
-        fragment_path = Path(__file__).with_name("shaders") / "status_effects.frag"
+        fragment_path = Path(__file__).with_name("shaders") / fragment_shader
         self.world_surface = world_surface
         self.gui_surface = gui_surface
         self.offscreen = bool(offscreen)
         self._pygame_shader = None
+        self._owns_context = context is None
         if self.offscreen:
-            self.ctx = moderngl.create_standalone_context(require=330)
+            self.ctx = context or moderngl.create_standalone_context(require=330)
             self.program = pygame_shaders.Shader.create_vertfrag_shader(
                 self.ctx,
                 pygame_shaders.DEFAULT_VERTEX_SHADER,
@@ -90,7 +93,8 @@ class StatusEffectShader:
         return self.world_surface.get_size()
 
     def _send(self, name: str, value) -> None:
-        self.program[name].value = value
+        if name in self.program:
+            self.program[name].value = value
 
     def set_uniforms(
         self,
@@ -98,6 +102,7 @@ class StatusEffectShader:
         nausea: float,
         blindness: float,
         night_vision: float,
+        portal: float = 0.0,
     ) -> None:
         width, height = self.size
         self._send("resolution", (float(width), float(height)))
@@ -107,6 +112,7 @@ class StatusEffectShader:
         self._send(
             "nightVisionStrength", max(0.0, min(1.0, float(night_vision)))
         )
+        self._send("portalStrength", max(0.0, min(1.0, float(portal))))
 
     def _upload(self, *, include_gui: bool) -> None:
         self.screen_texture.texture.write(self.world_surface.get_view("1"))
@@ -162,7 +168,7 @@ class StatusEffectShader:
                 except Exception:
                     pass
         release_context = getattr(self.ctx, "release", None)
-        if callable(release_context):
+        if self._owns_context and callable(release_context):
             try:
                 release_context()
             except Exception:
