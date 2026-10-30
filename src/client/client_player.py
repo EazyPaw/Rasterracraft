@@ -37,6 +37,11 @@ class ClientPlayer(Entity):
         self.width = 0.6
         self.height = 1.8
         self.jump_height = 0.42
+        self._movement_sequence = 0
+        self._pending_movement = []
+        self._input_axis = 0
+        self._input_descending = False
+        self._mouse_turn_requested = False
         self.set_attribute_base_value("waypoint_receive_range", 60_000_000.0)
         self.set_attribute_base_value("waypoint_transmit_range", 60_000_000.0)
         self.max_health = 20
@@ -119,6 +124,9 @@ class ClientPlayer(Entity):
             (player_screen_x, eye_screen_y),
             self.facing,
         )
+        buttons = pygame.mouse.get_pressed()
+        if (buttons[0] or buttons[2] or self._mouse_turn_requested) and not self.client.game_manager.gameplay_input_blocked():
+            self.face_cursor()
         if self._movement_opposes_look(self.motion.x):
             self.sprinting = False
 
@@ -134,11 +142,14 @@ class ClientPlayer(Entity):
 
     def move_right(self):
         self._prepare_horizontal_movement(1)
-        super().move_right()
+        self._input_axis = min(1, self._input_axis + 1)
 
     def move_left(self):
         self._prepare_horizontal_movement(-1)
-        super().move_left()
+        self._input_axis = max(-1, self._input_axis - 1)
+
+    def handle_shift(self):
+        self._input_descending = True
 
     def switch_sprint(self, mode=None):
         self.update_mouse_look()
@@ -184,6 +195,10 @@ class ClientPlayer(Entity):
 
     def move_update(self):
         self.update_mouse_look()
+        if self.dead or self.sleeping or not self.client.can_simulate_player(self):
+            self._input_axis = 0
+            self._input_descending = False
+            self.jumping = False
         if self.dead:
             return
         if self.sleeping:
@@ -196,25 +211,46 @@ class ClientPlayer(Entity):
             self.motion.x = 0
             self.motion.y = 0
             return
-        if self.client.game_manager.gameplay_input_blocked():
-            # 这些状态原先绕过事件队列直接轮询键盘，导致 GUI 已经吃掉
-            # KEYDOWN 后玩家仍会下蹲/上浮。统一服从游戏输入门闩。
-            self.sneaking = False
-            self.swimming_up = False
-        else:
-            keys = pygame.key.get_pressed()
-            self.sneaking = (
-                keys[pygame.K_LSHIFT] or keys[pygame.K_s]
-            ) and not self.flying
-            self.swimming_up = keys[pygame.K_SPACE] and not self.flying
-
-        if self.blocking:
-            self.sprinting = False
-
+        blocked = self.client.game_manager.gameplay_input_blocked()
+        keys = pygame.key.get_pressed()
+        buttons = pygame.mouse.get_pressed()
+        controls = {
+            "move_axis": 0 if blocked else self._input_axis,
+            "jumping": not blocked and bool(keys[pygame.K_SPACE] or keys[pygame.K_w]),
+            "descending": not blocked and self._input_descending,
+            "sneaking": not blocked and bool(keys[pygame.K_LSHIFT] or keys[pygame.K_s]),
+            "sprinting": self.sprinting, "facing": self.facing,
+            "look_angle": self.look_angle, "flying": self.flying,
+            "mouse_active": not blocked and bool(buttons[0] or buttons[2] or self._mouse_turn_requested),
+        }
+        self._mouse_turn_requested = False
+        self._input_axis = 0
+        self._input_descending = False
+        self._movement_sequence += 1
+        self._movement_controls = controls
+        self.apply_movement_input(controls)
         super().move_update()
         self._update_survival_state()
-
+        self._pending_movement.append((self._movement_sequence, controls.copy()))
+        self._pending_movement = self._pending_movement[-100:]
         self.client.sent_packet(self, "PlayerMove")
+
+    def reconcile_movement(self, packet):
+        """Restore the server result, then predict only inputs it has not acknowledged."""
+        self.x, self.y = float(packet["x"]), float(packet["y"])
+        self.motion.x, self.motion.y = float(packet["motion"]["x"]), float(packet["motion"]["y"])
+        self.on_ground = bool(packet["on_ground"])
+        self.flying = bool(packet["flying"])
+        self.jump_ticks = int(packet["jump_ticks"])
+        for name in ("body_facing", "front_view", "turn_target", "turn_ticks"):
+            if name in packet:
+                setattr(self, name, packet[name])
+        self._pending_movement = [(seq, controls) for seq, controls in self._pending_movement
+                                  if seq > int(packet["sequence"])]
+        for _seq, controls in self._pending_movement:
+            self.flying = bool(controls["flying"])
+            self.apply_movement_input(controls)
+            Entity.move_update(self)
 
     def _update_survival_state(self):
 

@@ -247,6 +247,8 @@ class ClientEntity:
         self.motion.x = float(motion.get("x", self.motion.x))
         self.motion.y = float(motion.get("y", self.motion.y))
         self.facing = int(packet.get("facing", self.facing))
+        self.body_facing = int(packet.get("body_facing", self.facing))
+        self.front_view = packet.get("front_view") is True
         self.sneaking = bool(packet.get("sneaking", self.sneaking))
         self.sprinting = bool(packet.get("sprinting", self.sprinting))
         self.on_ground = bool(packet.get("on_ground", self.on_ground))

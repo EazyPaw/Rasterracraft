@@ -224,7 +224,7 @@ class PacketDispatcher(Generic[ContextT]):
 # optional extra fields remain accepted during the migration for compatibility.
 packet_spec("ClientHello", SERVERBOUND, fields=("name",), required=("name",))
 packet_spec("DisconnectAck", SERVERBOUND)
-packet_spec("PlayerMove", SERVERBOUND, fields=("x", "y", "sneaking", "sprinting", "facing", "on_ground", "flying", "look_angle"), required=("x", "y"))
+packet_spec("PlayerMove", SERVERBOUND, fields=("sneaking", "sprinting", "facing", "flying", "look_angle", "move_axis", "jumping", "descending", "sequence", "mouse_active"), required=("sequence", "move_axis", "jumping"))
 packet_spec("TeleportConfirm", SERVERBOUND, fields=("teleport_id",))
 packet_spec("ChunkReady", SERVERBOUND, fields=("rx", "world_id"), required=("rx",))
 packet_spec("PlayerAction", SERVERBOUND, fields=("action", "x", "y", "z"), required=("action",))
@@ -295,3 +295,5 @@ packet_spec("SaveComplete", CLIENTBOUND)
 packet_spec("GamemodeUpdate", CLIENTBOUND, fields=("new_mode",), required=("new_mode",))
 packet_spec("PortalEffect", CLIENTBOUND, fields=("active", "duration", "fade_in", "fade_out"))
 packet_spec("StructureBuildState", CLIENTBOUND, fields=("mode", "bounds", "full", "void_cells", "void_add", "void_remove"), required=("mode",))
+
+packet_spec("PlayerMovementState", CLIENTBOUND, fields=("x", "y", "motion", "on_ground", "flying", "jump_ticks", "sequence", "body_facing", "front_view", "turn_target", "turn_ticks"), required=("x", "y", "motion", "on_ground", "flying", "jump_ticks", "sequence"))

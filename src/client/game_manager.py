@@ -245,6 +245,9 @@ class GameManager:
                 continue
             if self._handle_structure_mouse_event(event):
                 continue
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button in (1, 3):
+                self.client.client_player._mouse_turn_requested = True
+                self.client.client_player.update_mouse_look()
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.client.open_pause_menu()

@@ -138,6 +138,12 @@ def _handle_chunk(packet: dict, client: "Client") -> None:
     pool.submit(client.client_world.load_chunk_packet, packet, load_version)
 
 
+@CLIENT_PACKET_DISPATCHER.handler("PlayerMovementState")
+def _handle_player_movement_state(packet: dict, client: "Client") -> None:
+    if client.client_player is not None:
+        client.client_player.reconcile_movement(packet)
+
+
 @CLIENT_PACKET_DISPATCHER.handler("Teleport")
 def _handle_teleport(packet: dict, client: "Client") -> None:
     client.server_player_uuid = packet.get(
@@ -161,6 +167,9 @@ def _handle_teleport(packet: dict, client: "Client") -> None:
     client.client_player.sleeping = bool(packet.get("sleeping", False))
     client.client_player.sleeping_bed = packet.get("sleeping_bed")
 
+    client.client_player._pending_movement = []
+    client.client_player.jump_ticks = 0
+    client.client_player.jumping = False
     client.client_player.motion.x = 0
     client.client_player.motion.y = 0
     client.client_player.in_fluid = client.client_player.in_water = client.client_player.in_lava = False
@@ -771,14 +780,8 @@ def _encode_packet_object(obj, obj_type=None, args=None) -> Packet | dict:
     if type(obj) == ClientPlayer and obj_type == "PlayerMove":
         return {
             "__class__": "PlayerMove",
-            "x": obj.x,
-            "y": obj.y,
-            "sneaking": obj.sneaking,
-            "sprinting": obj.sprinting,
-            "facing": obj.facing,
-            "on_ground": obj.on_ground,
-            "flying": obj.flying,
-            "look_angle": obj.look_angle,
+            "sequence": obj._movement_sequence,
+            **obj._movement_controls,
         }
     elif isinstance(obj, Block) and obj_type == "BreakBlock":
         location: Location = obj.location

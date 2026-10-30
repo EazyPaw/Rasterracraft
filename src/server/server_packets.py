@@ -295,11 +295,6 @@ def _process_right_click(packet: dict, player: Player) -> None:
         forward_packet_to_others(player, player, mode="entity_update")
 
 
-def _reject_player_move(player: Player) -> None:
-
-    player.teleport_to(player.x, player.y)
-
-
 def _allow_action_this_tick(player: Player, action: str) -> bool:
     current_tick = int(getattr(player.world.server, "server_ticks", 0))
     action_ticks = getattr(player, "_last_action_ticks", None)
@@ -378,104 +373,63 @@ def _handle_player_move(packet: dict, player: Player) -> None:
         return
     if player.sleeping:
         return
+    # Socket workers only enqueue commands. Physics runs at 20 Hz in tick_server.
     try:
-        new_x = float(packet.get("x"))
-        new_y = float(packet.get("y"))
-    except (TypeError, ValueError, OverflowError):
-        _reject_player_move(player)
+        sequence = int(packet["sequence"])
+    except (KeyError, TypeError, ValueError, OverflowError):
         return
-    if not math.isfinite(new_x) or not math.isfinite(new_y):
-        _reject_player_move(player)
-        return
-    if not -64.0 <= new_y <= player.world.attribute.MAX_BUILD_HEIGHT + 64.0:
-        _reject_player_move(player)
-        return
-    destination_rx = int(new_x // 16)
-    if (
-        not player.world.is_chunk_loaded(destination_rx)
-        or destination_rx not in player.client_loaded_regions
-    ):
-        _reject_player_move(player)
-        return
+    if sequence > getattr(player, "_last_queued_input", -1) and len(player._movement_inputs) < 100:
+        player._movement_inputs.append(dict(packet))
+        player._last_queued_input = sequence
 
-    current_tick = int(getattr(player.world.server, "server_ticks", 0))
-    last_tick = int(getattr(player, "_last_move_tick", -1))
-    if last_tick == current_tick:
-        return
-    elapsed_ticks = 1 if last_tick < 0 else max(1, current_tick - last_tick)
-    mode = getattr(getattr(player, "gamemode", None), "name_id", "survival")
-    if mode in {"creative", "spectator"} and player.flying:
-        movement_scale = max(1.0, player.get_attribute_value("flying_speed") / 0.4)
-    else:
-        movement_scale = max(
-            1.0, player.get_attribute_value("movement_speed") / 0.1
-        )
 
-    max_horizontal = (
-        (4.0 if mode in {"creative", "spectator"} else 2.0)
-        * movement_scale
-        * elapsed_ticks
-    )
-    max_vertical = (
-        6.0 if mode in {"creative", "spectator"} else 3.0
-    ) * elapsed_ticks
-    dx = new_x - player.x
-    dy = new_y - player.y
-    if abs(dx) > max_horizontal or abs(dy) > max_vertical:
-        _reject_player_move(player)
-        return
-
-    if mode != "spectator" and player._check_collision_at(
-        new_x, new_y
-    ) and not player._check_collision_at(player.x, player.y):
-        _reject_player_move(player)
-        return
-
-    previous_y = player.y
-    was_on_ground = bool(player.on_ground)
-    player.x = new_x
-    player.y = new_y
-    player.motion.x = dx
-    player.motion.y = dy
-    player.sneaking = packet.get("sneaking") is True
+def _simulate_player_input(packet: dict, player: Player) -> None:
+    """The client predicts movement; collision, impulses and cooldowns run here."""
     try:
+        sequence = int(packet["sequence"])
+        axis = int(packet.get("move_axis", 0))
         facing = int(packet.get("facing", player.facing))
-    except (TypeError, ValueError):
-        facing = player.facing
-    if facing in (0, 1):
-        player.facing = facing
-    try:
-        look_angle = float(packet.get("look_angle", player.look_angle))
+        look = float(packet.get("look_angle", player.look_angle))
     except (TypeError, ValueError, OverflowError):
-        look_angle = player.look_angle
-    if math.isfinite(look_angle):
-        player.look_angle = max(-90.0, min(90.0, look_angle))
-    movement_opposes_look = abs(dx) > 1.0e-3 and (dx > 0.0) != (
-        player.facing == 1
-    )
-    player.sprinting = (
-        not player.blocking
-        and not movement_opposes_look
-        and packet.get("sprinting") is True
-        and (mode != "survival" or player.food_level > 6)
-    )
-    player.flying = mode == "spectator" or (
-        mode == "creative" and packet.get("flying") is True
-    )
-    if mode == "spectator":
-        player.in_fluid = False
-        player.in_water = False
-        player.in_lava = False
-        player.on_ground = False
-        player.fall_distance = 0.0
-    else:
-        player.in_fluid = bool(player._get_fluid_interaction()[0])
-        player.on_ground = bool(player._check_support_at())
-    player._last_move_tick = current_tick
-    if mode != "spectator":
-        player.call_inside_block_hooks()
-    player.record_server_movement(previous_y, was_on_ground, abs(dx))
+        return
+    if axis not in (-1, 0, 1) or facing not in (0, 1) or not math.isfinite(look):
+        return
+    if sequence <= getattr(player, "_last_input_sequence", -1):
+        return
+    current_tick = int(getattr(player.world.server, "server_ticks", 0))
+    if getattr(player, "_last_input_tick", -1) == current_tick:
+        return
+    if (not player.world.is_chunk_loaded(int(player.x // 16))
+            or int(player.x // 16) not in player.client_loaded_regions):
+        return
+    mode = getattr(player.gamemode, "name_id", "survival")
+    player.no_physics = mode == "spectator"
+    player.flying = mode == "spectator" or (mode == "creative" and packet.get("flying") is True)
+    controls = dict(packet)
+    controls["look_angle"] = max(-90.0, min(90.0, look))
+    controls["sprinting"] = packet.get("sprinting") is True and (mode != "survival" or player.food_level > 6)
+    previous_x, previous_y = player.x, player.y
+    was_on_ground = bool(player.on_ground)
+    player.apply_movement_input(controls)
+    player.move_update()
+    destination_rx = int(player.x // 16)
+    if (not player.world.is_chunk_loaded(destination_rx)
+            or destination_rx not in player.client_loaded_regions):
+        player.x = previous_x
+        player.motion.x = 0.0
+    player.record_server_movement(previous_y, was_on_ground, abs(player.x - previous_x))
     player.on_moving()
+    player._last_input_tick = current_tick
+    player._last_input_sequence = sequence
+    player.world.server.send_client_socket(player, {
+        "__class__": "PlayerMovementState", "sequence": sequence,
+        "x": player.x, "y": player.y,
+        "motion": {"x": player.motion.x, "y": player.motion.y},
+        "on_ground": player.on_ground, "flying": player.flying,
+        "jump_ticks": player.jump_ticks,
+        "body_facing": player.body_facing, "front_view": player.front_view,
+        "turn_target": player.turn_target, "turn_ticks": player.turn_ticks,
+    }, "Forward")
     forward_packet_to_others(player, player, mode="entity_update")
 
 

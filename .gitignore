@@ -235,6 +235,7 @@ __marimo__/
 
 !/tests/test_structure_editor.py
 !/tests/test_ender_entities.py
+!/tests/test_biped_movement.py
 
 !/validation/
 /validation/*

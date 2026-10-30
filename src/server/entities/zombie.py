@@ -87,24 +87,7 @@ class ZombieSkeleton(PlayerSkeleton):
         """僵尸没有盔甲渲染层，不进入 PlayerSkeleton 的盔甲缓存流程。"""
 
     def _build_zombie_body(self):
-        self._part_textures = {
-            self.RIGHT: {
-                "head": self._skin((0, 8, 8, 8)),
-                "body": self._skin((16, 20, 4, 12)),
-                "front_arm": self._skin((40, 20, 4, 12)),
-                "back_arm": self._skin((32, 20, 4, 12)),
-                "front_leg": self._skin((0, 20, 4, 12)),
-                "back_leg": self._skin((16, 20, 4, 12)),
-            },
-            self.LEFT: {
-                "head": self._skin((16, 8, 8, 8)),
-                "body": self._skin((28, 20, 4, 12)),
-                "front_arm": self._skin((32, 20, 4, 12)),
-                "back_arm": self._skin((40, 20, 4, 12)),
-                "front_leg": self._skin((16, 20, 4, 12)),
-                "back_leg": self._skin((0, 20, 4, 12)),
-            },
-        }
+        self._part_textures = self._biped_textures()
         textures = self._part_textures[self.RIGHT]
         empty = pygame.Surface((1, 1), pygame.SRCALPHA)
         self.body = {

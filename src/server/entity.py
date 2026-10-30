@@ -3,6 +3,7 @@ import ast
 import logging
 import math
 import random
+import struct
 import uuid
 from uuid import UUID
 
@@ -81,6 +82,10 @@ class Entity:
         self.sneaking = False
         self.interact_range = 3.5
         self.facing = 0  # 0: 左边 1: 右边
+        self.body_facing = self.facing
+        self.front_view = False
+        self.turn_target = None
+        self.turn_ticks = 0
         self.sprinting = False
         self.removed = False
         self.in_fluid = False
@@ -90,6 +95,8 @@ class Entity:
         self._active_fluid_block = None
         self.swimming_up = False
         self._jumped_this_tick = False
+        self.jump_ticks = 0
+        self.jumping = False
         self.fire_ticks = 0
         self.active_effects: dict[str, StatusEffectInstance] = {}
         self.absorption_amount = 0.0
@@ -542,6 +549,8 @@ class Entity:
             "hurt_time": self.hurt_time,
             "aggressive": self.get_target() is not None,
             "look_angle": self.look_angle,
+            "body_facing": self.body_facing,
+            "front_view": self.front_view,
             "attack_animation_ticks": self.attack_animation_ticks,
             "attackable": bool(self.attackable),
             "fire_ticks": max(0, int(self.fire_ticks)),
@@ -930,7 +939,8 @@ class Entity:
         self.on_ground = bool(self._check_support_at())
         return True
 
-    def on_landed(self, fall_distance: float, impact_velocity: float = 0.0) -> bool:
+    def on_landed(self, fall_distance: float, impact_velocity: float = 0.0, *,
+                  apply_velocity: bool = True) -> bool:
         ground = self.get_ground_block()
         location = getattr(ground, "location", None)
         if ground is None or location is None:
@@ -939,7 +949,8 @@ class Entity:
         coordinates = int(location.x), int(location.y), int(location.z)
         changed = bool(ground.on_fallen_on(self, max(0.0, float(fall_distance))))
         replacement = world.get_block(*coordinates)
-        replacement.on_landed(self, float(impact_velocity))
+        if apply_velocity:
+            replacement.on_landed(self, float(impact_velocity))
         return changed and self._resolve_landing_block_overlap(replacement)
 
     def cause_fall_damage(
@@ -1295,15 +1306,76 @@ class Entity:
         self.motion.y -= self.gravity
 
     def jump(self):
+        """Request jumping for this tick; onLivingUpdate handles the cooldown."""
+        self.jumping = True
+
+    def _tick_jump(self):
+        if self.jump_ticks > 0:
+            self.jump_ticks -= 1
+        if not self.jumping:
+            self.jump_ticks = 0
+            return
         if self.flying:
             self.motion += Vector(0, self.jump_height * 1.5)
         elif self._get_fluid_interaction()[0]:
             self.swimming_up = True
-        elif self.is_on_climbable():
-            self.motion.y = max(0.2, self.motion.y)
-        elif self.on_ground:
-            self.motion.y = self.jump_height * self.get_ground_jump_factor()
+        elif self.on_ground and self.jump_ticks == 0:
+            # getJumpUpwardsMotion returns 0.42F (widened to double).
+            # Jump Boost is already included by the jump_strength modifier.
+            boost = self.active_effects.get("jump_boost")
+            level = boost.amplifier + 1 if boost is not None else 0
+            float32 = lambda value: struct.unpack("f", struct.pack("f", value))[0]
+            self.motion.y = float32(self.jump_height - 0.1 * level)
+            self.motion.y += float32(0.10000000149011612 * level)
+            if self.sprinting:
+                self.motion.x += (1 if self.facing == 1 else -1) * 0.20000000298023224
             self._jumped_this_tick = True
+            self.jump_ticks = 10
+
+    def apply_movement_input(self, controls):
+        """Shared prediction/server simulation; controls contain no position or velocity."""
+        self.sneaking = bool(controls.get("sneaking")) and not self.flying
+        self.facing = 1 if controls.get("facing") == 1 else 0
+        self.look_angle = float(controls.get("look_angle", self.look_angle))
+        axis = max(-1, min(1, int(controls.get("move_axis", 0))))
+        self.update_body_facing(axis, controls.get("mouse_active") is True)
+        self.sprinting = bool(controls.get("sprinting")) and not getattr(self, "blocking", False)
+        if axis and (axis > 0) != (self.facing == 1):
+            self.sprinting = False
+        self.jumping = controls.get("jumping") is True
+        if axis:
+            self.motion.x += axis * self.get_move_acceleration()
+        if controls.get("descending") is True:
+            Entity.handle_shift(self)
+
+    TURN_DURATION_TICKS = 3
+
+    def face_cursor(self):
+        self.body_facing = self.facing
+        self.front_view = False
+        self.turn_target = None
+        self.turn_ticks = 0
+
+    def update_body_facing(self, axis, mouse_active=False):
+        """Keyboard reversal passes through front; releasing there holds that view."""
+        if mouse_active:
+            self.face_cursor()
+            return
+        if not axis:
+            self.turn_target = None
+            self.turn_ticks = 0
+            return
+        target = 1 if axis > 0 else 0
+        if not self.front_view and target == self.body_facing:
+            return
+        self.front_view = True
+        self.turn_ticks = self.turn_ticks + 1 if self.turn_target == target else 1
+        self.turn_target = target
+        if self.turn_ticks >= self.TURN_DURATION_TICKS:
+            self.body_facing = target
+            self.front_view = False
+            self.turn_target = None
+            self.turn_ticks = 0
 
     def handle_shift(self):
         if self.flying:
@@ -1347,6 +1419,10 @@ class Entity:
             self.damping = self.air_friction * self.get_ground_friction()
 
     def move_update(self):
+        if abs(self.motion.y) < 0.005:
+            self.motion.y = 0.0
+        self._tick_jump()
+        self.jumping = False
         if self.no_physics:
             self.in_fluid = False
             self.in_water = False

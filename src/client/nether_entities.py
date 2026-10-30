@@ -19,11 +19,13 @@ class PigmanSkeleton(ArmedSkeleton):
 
 
 class NetherSkeleton(ArmedSkeleton):
+    LIMB_DEPTH = 2
     texture_path = "entity.skeleton.wither_skeleton"
     VISUAL_HEIGHT_BLOCKS = 2.4
 
 
 class RegularSkeleton(ArmedSkeleton):
+    LIMB_DEPTH = 2
     texture_path = "entity.skeleton.skeleton"
 
 

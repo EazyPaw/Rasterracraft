@@ -1,6 +1,7 @@
 # Commented and arranged by ChatGPT
 import math as _math
 import random as _random
+from collections import deque
 
 from src.client.game_mode import SurvivalMode
 from src.server.attributes import (
@@ -57,6 +58,7 @@ class Player(Entity):
         super().__init__(x, y, world)
         self.world: World = world
         self.entity_id = "player"
+        self._movement_inputs = deque()
         self.loading_regions = []
 
         self.client_loaded_regions: set[int] = set()
@@ -118,7 +120,6 @@ class Player(Entity):
         self.sleeping = False
         self.sleep_ticks = 0
         self.sleeping_bed: dict[str, int | str] | None = None
-        self._last_move_tick = -1
         self.attack_strength_ticker = 20
         self._last_attribute_attack_tick: int | None = None
         self.exhaustion = 0.0
@@ -1221,7 +1222,11 @@ class Player(Entity):
         if self.on_ground and not was_on_ground:
             landing_distance = self.fall_distance
             impact_velocity = self.motion.y
-            position_corrected = self.on_landed(landing_distance, impact_velocity)
+            # collision_check already applied the block's landing velocity before
+            # gravity/drag; only fall effects remain after server simulation.
+            position_corrected = self.on_landed(
+                landing_distance, impact_velocity, apply_velocity=False
+            )
             if position_corrected:
                 self.teleport_to(self.x, self.y)
             elif self.motion.y > 0.0 and self.motion.y != impact_velocity:
@@ -1282,6 +1287,12 @@ class Player(Entity):
             self.exhaustion = min(40.0, self.exhaustion + amount)
 
     def tick_server(self) -> None:
+        if self._movement_inputs:
+            from src.server.server_packets import _simulate_player_input
+
+            controls = self._movement_inputs.popleft()
+            if self.health > 0 and not self.sleeping and not self.is_awaiting_teleport_confirmation:
+                _simulate_player_input(controls, self)
         self.tick_nether_portal()
         if self.portal_cooldown > 0:
             self.portal_cooldown -= 1
@@ -2358,7 +2369,9 @@ class Player(Entity):
         self.motion.x = 0.0
         self.motion.y = 0.0
         self.fall_distance = 0.0
-        self._last_move_tick = -1
+        self.jump_ticks = 0
+        self.jumping = False
+        self._movement_inputs.clear()
         self.clear_breaking()
         self.clear_eating()
         self.clear_blocking()
