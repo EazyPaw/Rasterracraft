@@ -218,6 +218,7 @@ class ItemStack:
                 float(getattr(holder, "x", 0.0)),
                 float(getattr(holder, "y", 0.0)),
                 int(getattr(holder, "z", 0)),
+                world=holder.world,
             )
 
     def hurt_and_break(self, amount: int, holder=None) -> bool:

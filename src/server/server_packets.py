@@ -54,6 +54,7 @@ def _encode_packet_object(obj, obj_type, args) -> Packet | dict:
             "hurt_time": obj.hurt_time,
             "last_hurt_damage": obj.last_hurt_damage,
             "fire_ticks": max(0, int(obj.fire_ticks)),
+            "has_visual_fire": bool(obj.has_visual_fire),
             "food_level": getattr(obj, "food_level", 20),
             "saturation": getattr(obj, "saturation", 5.0),
             "experience": getattr(obj, "experience", 0),
@@ -485,6 +486,8 @@ def _handle_teleport_confirm(packet: dict, player: Player) -> None:
 
 @SERVER_PACKET_DISPATCHER.handler("ChunkReady")
 def _handle_chunk_ready(packet: dict, player: Player) -> None:
+    if packet.get("world_id", player.world.id_name) != player.world.id_name:
+        return
     try:
         rx = int(packet.get("rx"))
     except (TypeError, ValueError):
@@ -872,6 +875,9 @@ def _handle_request_respawn(packet: dict, player: Player) -> None:
     player.last_hurt_damage = 0.0
     player.last_damage_source = None
     player.last_damage_type = None
+    player.clear_fire()
+    player.portal_counter = 0
+    player.portal_cooldown = 0
     player._death_handled = False
     player.motion.x = 0.0
     player.motion.y = 0.0
@@ -895,7 +901,7 @@ def _handle_request_respawn(packet: dict, player: Player) -> None:
             bed_z = int(saved_spawn["z"])
         except (KeyError, TypeError, ValueError, OverflowError):
             world = None
-        if world is not None and 0 <= bed_y < world.attribute.MAX_BUILD_HEIGHT:
+        if world is not None and world.attribute.ENVIRONMENT != -1 and 0 <= bed_y < world.attribute.MAX_BUILD_HEIGHT:
             if not world.is_chunk_loaded(bed_x // 16):
                 world.generate_chunk(bed_x // 16)
             bed = world.get_block(bed_x, bed_y, bed_z)
@@ -917,11 +923,14 @@ def _handle_request_respawn(packet: dict, player: Player) -> None:
                 return
         server.send_chat_to_player(player, "Your home bed was missing or obstructed.")
 
-    spawn_x = int(getattr(player.world, "spawn_point", 0))
-    block = player.world.find_top_block(spawn_x, 0)
+    respawn_world = player.world.server.worlds["overworld"]
+    spawn_x = int(getattr(respawn_world, "spawn_point", 0))
+    if not respawn_world.is_chunk_loaded(spawn_x // 16):
+        respawn_world.generate_chunk(spawn_x // 16)
+    block = respawn_world.find_top_block(spawn_x, 0)
     if block is not None:
         player.z = 0
-        player.teleport_to(float(spawn_x), block.location.y + 1)
+        player.teleport_to(float(spawn_x), block.location.y + 1, respawn_world)
 
 
 def _read_structure_point(value) -> tuple[int, int, int] | None:
@@ -1007,13 +1016,13 @@ def _send_biome_updates_for_boundary(world, player, rx: int):
 def forward_packet_to_others(packet, player: Player, mode=0):
     if mode == 0:
         for other_player in player.world.server.players:
-            if other_player != player:
+            if other_player != player and other_player.world is player.world:
                 other_player.world.server.send_client_socket(
                     other_player, packet, "Forward"
                 )
     elif mode == "entity_update":
         for other_player in player.world.server.players:
-            if other_player != player and other_player.is_loading_position(
+            if other_player != player and other_player.world is player.world and other_player.is_loading_position(
                 int(player.x), int(player.y), 0
             ):
                 other_player.world.server.send_client_socket(

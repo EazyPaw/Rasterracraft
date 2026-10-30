@@ -60,11 +60,21 @@ def _can_fit(world, entity) -> bool:
             )
             if shape or getattr(block, "is_fluid", False):
                 return False
+    occupants = list(getattr(world, "entities", {}).values())
+    occupants.extend(getattr(getattr(world, "server", None), "players", ()))
+    for other in occupants:
+        if (getattr(other, "world", None) is not world or getattr(other, "removed", False)
+                or not getattr(other, "blocks_block_placement", True)
+                or int(getattr(other, "z", 0)) != int(entity.z)):
+            continue
+        if (entity.x < other.x + other.width and entity.x + entity.width > other.x
+                and entity.y < other.y + other.height and entity.y + entity.height > other.y):
+            return False
     return True
 
 
 def spawn_animals_for_chunk(world, rx: int) -> list:
-    if bool(getattr(world, "disable_mob_generation", False)):
+    if bool(getattr(world, "disable_mob_generation", False)) or world.id_name == "nether":
         return []
     rng = random.Random(f"{world.seed}:{world.id_name}:{int(rx)}:initial_animals")
     probability = _creature_probability(world, rx)
@@ -95,3 +105,99 @@ def spawn_animals_for_chunk(world, rx: int) -> list:
             if not placed:
                 continue
     return spawned
+
+
+NETHER_MONSTER_WEIGHTS = (("ghast", 50), ("zombie_pigman", 100), ("magma_cube", 1))
+FORTRESS_MONSTER_WEIGHTS = (("blaze", 10), ("zombie_pigman", 5),
+                            ("wither_skeleton", 10), ("magma_cube", 3))
+
+
+def tick_enderman_spawning(world):
+    """Rare overworld dark-area spawns, adapted to the game's 2-D population."""
+    if world.id_name != "overworld" or world.disable_mob_generation:
+        return
+    players = [p for p in tuple(world.server.players) if p.world is world and p.health > 0
+               and getattr(p.gamemode, "name_id", "survival") != "spectator"]
+    if not players:
+        return
+    endermen = [e for e in tuple(world.entities.values()) if e.entity_id == "enderman"]
+    for mob in endermen:
+        distance = min((mob.x - p.x) ** 2 + (mob.y - p.y) ** 2 for p in players)
+        if (not mob.persistence_required and not getattr(mob, "name", None)
+                and (distance > 128 ** 2 or (distance > 32 ** 2 and random.randrange(800) == 0))):
+            world.remove_entity(mob)
+    if len(endermen) >= 6 * len(players):
+        return
+    eligible = sorted({rx for p in players for rx in range(int(p.x // 16) - 7, int(p.x // 16) + 8)
+                       if world.is_chunk_loaded(rx)})
+    if not eligible:
+        return
+    for _ in range(8):
+        x = random.choice(eligible) * 16 + random.randrange(16)
+        y = random.randrange(1, world.attribute.MAX_BUILD_HEIGHT - 3)
+        if min((x - p.x) ** 2 + (y - p.y) ** 2 for p in players) < 24 ** 2:
+            continue
+        if (x - world.spawn_point) ** 2 + (y - 64) ** 2 < 24 ** 2:
+            continue
+        ground = world.get_block(x, y - 1, 0)
+        if not ground.solid or ground.block_id == "bedrock":
+            continue
+        sky = world.get_sky_light(x, y)
+        # Skylight arrays store the daytime value; apply the day/night darkening.
+        sky -= 11 if 13000 <= world.world_time % 24000 <= 23000 else 0
+        if max(sky, world.get_block_light(x, y)) > random.randrange(8):
+            continue
+        entity = create_entity("enderman", x + 0.2, y, world, 0)
+        if _can_fit(world, entity):
+            world.spawn_entity(entity)
+            break
+
+
+def tick_nether_spawning(world):
+    """Bound the mob population for a 2-D slice; never spawn beside a player."""
+    if world.id_name != "nether" or world.disable_mob_generation:
+        return
+    players = [p for p in tuple(world.server.players) if p.world is world and p.health > 0
+               and getattr(p.gamemode, "name_id", "survival") != "spectator"]
+    if not players:
+        return
+    monsters = [e for e in tuple(world.entities.values()) if e.entity_id in {
+        "ghast", "zombie_pigman", "magma_cube", "blaze", "wither_skeleton", "skeleton"}]
+    for mob in monsters:
+        distance = min((mob.x - p.x) ** 2 + (mob.y - p.y) ** 2 for p in players)
+        if not mob.persistence_required and (distance > 128 ** 2 or
+                (distance > 32 ** 2 and random.randrange(100) == 0)):
+            world.remove_entity(mob)
+    if len(monsters) >= 24 * len(players):
+        return
+    eligible = sorted({rx for p in players for rx in range(int(p.x // 16) - 7, int(p.x // 16) + 8)
+                       if world.is_chunk_loaded(rx)})
+    if not eligible:
+        return
+    slots = 24 * len(players) - len(monsters)
+    for _ in range(16):
+        x = random.choice(eligible) * 16 + random.randrange(16)
+        y = random.randint(5, 119)
+        if min((x - p.x) ** 2 + (y - p.y) ** 2 for p in players) < 24 ** 2:
+            continue
+        fortress = getattr(world.structure_generator, "fortress_at", lambda *_: False)(x, y)
+        weights = FORTRESS_MONSTER_WEIGHTS if fortress else NETHER_MONSTER_WEIGHTS
+        entity_id = random.choices([key for key, _ in weights], [w for _, w in weights])[0]
+        if entity_id == "wither_skeleton" and random.randrange(5) == 0:
+            entity_id = "skeleton"
+        if entity_id == "ghast" and random.randrange(20) != 0:
+            continue  # EntityGhast#getCanSpawnHere's 1-in-20 check.
+        entity = create_entity(entity_id, x + 0.1, y, world, 0)
+        if not world.is_position_loaded(math.floor(entity.x + entity.width),
+                                        math.floor(entity.y + entity.height), 0):
+            continue
+        if not _can_fit(world, entity):
+            continue
+        if entity_id != "ghast":
+            ground = world.get_block(x, y - 1, 0)
+            if not ground.solid or ground.block_id == "bedrock":
+                continue
+        world.spawn_entity(entity)
+        slots -= 1
+        if slots <= 0:
+            break

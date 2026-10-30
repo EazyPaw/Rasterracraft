@@ -13,7 +13,7 @@ _LIGHT_SOURCE = np.frompyfunc(lambda block: int(block.light_source), 1, 1)
 
 
 def calculate_light_layers_2d(
-    region_array: np.ndarray,
+    region_array: np.ndarray, *, has_sky: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
     layer0 = region_array[:, :, 0]
     layer1 = region_array[:, :, 1]
@@ -25,7 +25,8 @@ def calculate_light_layers_2d(
     sky_exposed = ~np.logical_or.accumulate(solid[:, ::-1], axis=1)[:, ::-1]
 
     light = np.zeros((2, *solid.shape), dtype=np.int16)
-    light[0, sky_exposed] = 15
+    if has_sky:
+        light[0, sky_exposed] = 15
     light[1] = np.minimum(15, source0 + source1)
 
     while True:

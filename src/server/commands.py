@@ -383,12 +383,20 @@ class CommandExecutor:
 
         if args[0].lower() == "structure":
             structure_id = args[1].lower().removeprefix("minecraft:")
+            if structure_id in {"fortress", "nether_fortress"}:
+                if world.id_name != "nether" or not world.generate_structures:
+                    raise ValueError("Nether fortresses are not enabled in this world")
+                location = world.structure_generator.locate(origin_x, max_radius)
+                if location is None:
+                    raise ValueError("Could not locate a Nether fortress")
+                x, y = location
+                return f"The nearest fortress is at ({x}, {y}), {abs(x - origin_x)} blocks away"
             if structure_id != "village":
                 raise ValueError(f"Unknown structure: {args[1]}")
             if not world.generate_structures:
                 raise ValueError("Structure generation is disabled in this world")
             planner = world.structure_generator
-            if not planner.enabled:
+            if world.id_name != "overworld" or not planner.enabled:
                 raise ValueError("Villages are not enabled for this dimension or generator")
             location = planner.locate(origin_x, max_radius)
             if location is None:
@@ -859,7 +867,7 @@ class CommandExecutor:
             if chunk is None:
                 continue
             for player in world.server.players:
-                if rx in player.loading_regions:
+                if player.world is world and rx in player.loading_regions:
                     world.server.send_client_socket(player, chunk, "Chunk")
         world.send_light_updates(changed_light_chunks - affected_chunks)
         if world.structure_build_mode:
@@ -879,7 +887,7 @@ class CommandExecutor:
         """Save build-world selections or place a saved structure template."""
         if not args:
             raise ValueError(
-                "Usage: /structure <save <name> [json|serialized|both]|"
+                "Usage: /structure <save [name] [json|serialized|both]|saveas <name> [format]|"
                 "load <name> [x y z]|list>"
             )
         action = args[0].lower()
@@ -887,16 +895,20 @@ class CommandExecutor:
             names = list_structures()
             return "Structures: " + (", ".join(names) if names else "(none)")
 
-        if action == "save":
-            if len(args) not in (2, 3):
+        if action in {"save", "saveas"}:
+            if len(args) not in (1, 2, 3) or (action == "saveas" and len(args) < 2):
                 raise ValueError(
-                    "Usage: /structure save <name> [json|serialized|both]"
+                    "Usage: /structure save [name] [json|serialized|both] or /structure saveas <name> [format]"
                 )
             if not isinstance(executor, Player):
                 raise ValueError("Only a player in a Structure Build world can save")
             if not executor.world.structure_build_mode:
                 raise ValueError("Structures can only be saved from a Structure Build world")
-            file_format = args[2].lower() if len(args) == 3 else "json"
+            edit = executor.world.structure_edit
+            name = args[1] if len(args) >= 2 else edit.get("name")
+            if not name:
+                raise ValueError("No structure target; use /structure saveas <name> first")
+            file_format = args[2].lower() if len(args) == 3 else (edit.get("format", "json") if len(args) == 1 else "json")
             aliases = {
                 "bin": "serialized",
                 "binary": "serialized",
@@ -908,7 +920,7 @@ class CommandExecutor:
                 raise ValueError("Format must be json, serialized, or both")
             if file_format == "both":
                 json_path, data = capture_structure(
-                    executor.world, args[1], "json"
+                    executor.world, name, "json"
                 )
                 serialized_path = write_structure_data(
                     data["id"], data, "serialized"
@@ -916,9 +928,10 @@ class CommandExecutor:
                 paths = f"{json_path}, {serialized_path}"
             else:
                 path, data = capture_structure(
-                    executor.world, args[1], file_format
+                    executor.world, name, file_format
                 )
                 paths = str(path)
+            executor.world.structure_edit.update(name=data["id"], format=file_format)
             return (
                 f"Saved {data['id']} ({data['size'][0]}x{data['size'][1]}x"
                 f"{data['size'][2]}, {len(data['entities'])} entities) to {paths}"
@@ -952,7 +965,7 @@ class CommandExecutor:
             )
 
         raise ValueError(
-            "Usage: /structure <save <name> [json|serialized|both]|"
+            "Usage: /structure <save [name] [json|serialized|both]|saveas <name> [format]|"
             "load <name> [x y z]|list>"
         )
 

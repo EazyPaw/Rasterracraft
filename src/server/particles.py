@@ -288,6 +288,81 @@ class GENERIC(TextureParticle):
     size = (0.45, 0.60)
 
 
+class PORTAL(TextureParticle):
+    """EntityPortalFX's absolute curved path, growth and increasing brightness.
+
+    Motion is an offset from the birth point, not velocity integrated per tick.
+    This is intentionally independent of the ordinary particle gravity/drag.
+    """
+    particle_id = "minecraft:portal"
+    name = "portal"
+    _texture_paths = tuple(f"particle.generic_{i}" for i in range(8))
+    lifetime_ticks = (40, 49)
+    size = (0.5, 0.7)
+    rotation_speed_range = (0.0, 0.0)
+
+    @client_method
+    def spawn_from_packet(self, manager, client=None):
+        kind = self.data.get("kind", "ambient")
+        end = self.data.get("trail_end", (self.x, self.y))
+        for index in range(self.count):
+            if kind == "teleport":
+                fraction = index / max(1, self.count - 1)
+                x = self.x + (float(end[0]) - self.x) * fraction + random.uniform(-0.6, 0.6)
+                y = self.y + (float(end[1]) - self.y) * fraction + random.uniform(0.0, 2.9)
+                motion = (random.uniform(-0.1, 0.1), random.uniform(-0.1, 0.1))
+            elif kind == "impact":
+                x, y = self.x, self.y + random.random() * 2.0
+                motion = (random.gauss(0.0, 1.0), 0.0)
+            else:
+                width, height = self.data.get("body_size", (0.6, 2.9))
+                x = self.x + random.uniform(-width / 2, width / 2)
+                y = self.y + random.random() * height + self.data.get("y_offset", -0.25)
+                motion = (random.uniform(-1.0, 1.0), -random.random())
+            particle = type(self).from_values(x, y, self.z, motion=motion)
+            if particle.setup_client_state(manager, client=client):
+                manager.add_particle(particle)
+
+    @client_method
+    def setup_client_state(self, manager, *, client=None, **kwargs):
+        if not super().setup_client_state(manager, client=client, **kwargs):
+            return False
+        brightness = random.uniform(0.4, 1.0)
+        color = (round(255 * 0.9 * brightness), round(255 * 0.3 * brightness),
+                 round(255 * brightness))
+        self.texture = client.resources_manager.stain_grayscale(self.texture, color)
+        self._portal_origin = (self.x, self.y)
+        self._portal_scale = self.actual_size
+        self.actual_size = 0.0
+        self.rotation = 0.0
+        return True
+
+    @client_method
+    def update(self, manager, client=None):
+        t = min(1.0, self.age / max(1, self.lifetime))
+        curve = 1.0 + t - 2.0 * t * t
+        self.x = self._portal_origin[0] + self.motion_x * curve
+        self.y = self._portal_origin[1] + self.motion_y * curve + (1.0 - curve)
+        self.age += 1
+        render_t = min(1.0, self.age / max(1, self.lifetime))
+        self.actual_size = self._portal_scale * (1.0 - (1.0 - render_t) ** 2)
+
+    @client_method
+    def draw(self, manager, render, client=None):
+        if self.texture is None or self.actual_size <= 0.0:
+            return
+        sx, sy = render.trans_world_location((self.x, self.y))
+        if not (-render.block_size < sx < render.SCREEN_WIDTH + render.block_size
+                and -render.block_size < sy < render.SCREEN_HEIGHT + render.block_size):
+            return
+        glow = min(1.0, self.age / max(1, self.lifetime)) ** 4
+        tint = tuple(round(c + (255 - c) * glow)
+                     for c in render.get_world_light_tint(self.x, self.y))
+        texture = manager.get_scaled_texture(self.texture, render.trans_scale * self.actual_size)
+        texture = render.get_tinted_surface(texture, tint)
+        render.screen.blit(texture, texture.get_rect(center=(sx, sy)))
+
+
 class SMOKE(TextureParticle):
     particle_id = "minecraft:smoke"
     name = "smoke"

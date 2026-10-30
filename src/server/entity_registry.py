@@ -111,6 +111,9 @@ def _load_builtin_entities() -> None:
         chicken,
         cow,
         egg,
+        enderman,
+        endermite,
+        ender_pearl,
         experience_orb,
         falling_block,
         item,
@@ -119,6 +122,7 @@ def _load_builtin_entities() -> None:
         sheep,
         snow_ball,
         zombie,
+        nether,
     )
 
     _builtins_loaded = True

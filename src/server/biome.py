@@ -207,6 +207,15 @@ def _default_foliage_color(temperature: float, downfall: float) -> tuple[int, in
 # ---------------------------------------------------------------------------
 
 
+class Hell(Biome):
+    biome_id = "hell"
+    name = "Hell"
+    temperature = 2.0
+    downfall = 0.0
+    sky_color = fog_color = (51, 8, 8)
+    surface = subsurface = filler = "netherrack"
+
+
 class Void(Biome):
     biome_id = "void"
     name = "void"

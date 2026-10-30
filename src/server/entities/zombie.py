@@ -49,12 +49,13 @@ class Zombie(Entity):
 
 
 class ZombieSkeleton(PlayerSkeleton):
+    texture_path = "entity.zombie.zombie"
     # 僵尸复用玩家的动作计算，但当前模型没有玩家专用的盔甲渲染部件。
     ARMOR_SOURCE_PARTS = {}
 
     @client_method
     def __init__(self, entity, client=None):
-        EntitySkeleton.__init__(self, client, "entity.zombie.zombie", entity)
+        EntitySkeleton.__init__(self, client, self.texture_path, entity)
         self.size = self.VISUAL_HEIGHT_BLOCKS / self.AUTHORED_HEIGHT_BLOCKS
         self._pinned = False
         self._visual_center = (

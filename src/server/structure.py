@@ -19,6 +19,7 @@ from typing import Any
 import msgpack
 
 from src.server.blocks import AIR, get_block_by_id, has_block_id
+from src.server.block_class import ConnectableBarrier
 from src.server.entity_registry import create_entity_from_save, is_entity_persistent
 from src.server.location import Location
 
@@ -88,6 +89,12 @@ def _capture_structure_data(world, name: str) -> dict[str, Any]:
         raise ValueError("The structure build area is empty")
     x_min, y_min, x_max, y_max = bounds
     width, height, depth = x_max - x_min + 1, y_max - y_min + 1, 2
+    edit = getattr(world, "structure_edit", {})
+    if edit.get("depth") == 1 and not any(
+        p[2] == 1 for p in (world.structure_content_positions
+                           | world.structure_void_positions | world.structure_air_positions)
+    ):
+        depth = 1
     cell_count = width * height * depth
     if cell_count > MAX_TEMPLATE_CELLS:
         raise ValueError(
@@ -129,15 +136,20 @@ def _capture_structure_data(world, name: str) -> dict[str, Any]:
         entities.append(record)
 
     normalized = normalize_structure_name(name)
-    data = {
+    data = deepcopy(edit.get("metadata", {}))
+    anchor = list(data.get("anchor", [0, 0, 0]))
+    original_origin = edit.get("origin", [x_min, y_min, 0])
+    anchor = [anchor[0] + original_origin[0] - x_min,
+              anchor[1] + original_origin[1] - y_min, anchor[2]]
+    data.update({
         "format_version": FORMAT_VERSION,
         "id": normalized,
         "size": [width, height, depth],
-        "anchor": [0, 0, 0],
+        "anchor": anchor,
         "palette": palette,
         "blocks": indices,
         "entities": entities,
-    }
+    })
     return data
 
 
@@ -246,6 +258,8 @@ def load_structure_data(name: str) -> tuple[Path, dict[str, Any]]:
                 nbt.pop("shape")
             if not nbt:
                 entry.pop("nbt", None)
+    if any(type(index) is not int or not 0 <= index < len(palette) for index in blocks):
+        raise ValueError("Structure contains an invalid palette index")
     return path, data
 
 
@@ -311,7 +325,7 @@ def _sync_changed_chunks(world, affected_chunks: set[int]) -> None:
         if chunk is None:
             continue
         for player in world.server.players:
-            if rx in player.loading_regions:
+            if player.world is world and rx in player.loading_regions:
                 world.server.send_client_socket(player, chunk, "Chunk")
     world.send_light_updates(changed_light - affected_chunks)
 
@@ -399,6 +413,8 @@ def place_structure(world, name: str, origin: tuple[int, int, int]) -> dict[str,
     palette = data["palette"]
     affected: set[int] = set()
     placed = skipped = 0
+    editor_cells = {}
+    loaded_blocks = []
     index = 0
     for dx in range(width):
         x = origin_x + dx
@@ -411,10 +427,13 @@ def place_structure(world, name: str, origin: tuple[int, int, int]) -> dict[str,
                 except (IndexError, TypeError, ValueError) as exc:
                     raise ValueError("Structure contains an invalid palette index") from exc
                 index += 1
+                if world.structure_build_mode:
+                    editor_cells[(x, y, z)] = entry["id"]
                 if entry["id"] == "structure_void":
                     skipped += 1
-                    continue
-                block = get_block_by_id(entry["id"])
+                    if not world.structure_build_mode:
+                        continue
+                block = AIR() if entry["id"] == "structure_void" else get_block_by_id(entry["id"])
                 nbt = entry.get("nbt")
                 if isinstance(nbt, dict):
                     block.write_nbt(nbt)
@@ -424,11 +443,26 @@ def place_structure(world, name: str, origin: tuple[int, int, int]) -> dict[str,
                     unload()
                 block.location = Location(world, x, y, z)
                 world.regions[x // 16].region_array[x % 16, y, z] = block
-                load = getattr(block, "on_load", None)
-                if callable(load) and not world.structure_build_mode:
-                    load()
+                loaded_blocks.append(block)
                 affected.add(x // 16)
-                placed += 1
+                if entry["id"] != "structure_void":
+                    placed += 1
+
+    # All cells must exist before deriving connection states. Editor worlds
+    # refresh geometry only; spawners, fluids and crop physics remain inactive.
+    if not world.structure_build_mode:
+        for block in loaded_blocks:
+            load = getattr(block, "on_load", None)
+            if callable(load):
+                load()
+    for x in range(origin_x - 1, origin_x + width + 1):
+        if x // 16 not in world.regions:
+            continue
+        for y in range(origin_y, origin_y + height):
+            for z in range(origin_z, origin_z + depth):
+                block = world.get_block(x, y, z)
+                if isinstance(block, ConnectableBarrier) and block._refresh_connections():
+                    affected.add(x // 16)
 
     spawned = 0
     for source in data.get("entities", []):
@@ -449,9 +483,19 @@ def place_structure(world, name: str, origin: tuple[int, int, int]) -> dict[str,
 
     _sync_changed_chunks(world, affected)
     if world.structure_build_mode:
-        world.note_structure_region_change(
-            origin_x, origin_y, origin_z, width, height, depth
-        )
+        with world._structure_lock:
+            for position, block_id in editor_cells.items():
+                world.structure_void_positions.discard(position)
+                world.structure_air_positions.discard(position)
+                world.structure_content_positions.discard(position)
+                if block_id == "structure_void":
+                    world.structure_void_positions.add(position)
+                elif block_id == "air":
+                    world.structure_air_positions.add(position)
+                else:
+                    world.structure_content_positions.add(position)
+            world._refresh_structure_bounds()
+        world.send_structure_build_state()
     return {"placed": placed, "skipped": skipped, "entities": spawned}
 
 
@@ -465,3 +509,22 @@ def list_structures() -> list[str]:
         if path.is_file()
     }
     return sorted(names)
+
+
+def initialize_structure_editor(world, name: str) -> bool:
+    """Import a new editing workspace once; resumed saves keep their edits."""
+    if not world.structure_build_mode or getattr(world, "structure_edit", {}).get("name"):
+        return False
+    path, data = load_structure_data(name)
+    height = int(data["size"][1])
+    origin = (0, min(100, world.attribute.MAX_BUILD_HEIGHT - height), 0)
+    place_structure(world, name, origin)
+    world.structure_edit = {
+        "name": normalize_structure_name(name),
+        "format": "serialized" if path.suffix == ".structure" else "json",
+        "depth": data["size"][2],
+        "origin": list(origin),
+        "metadata": {key: deepcopy(value) for key, value in data.items()
+                     if key not in {"palette", "blocks", "entities"}},
+    }
+    return True

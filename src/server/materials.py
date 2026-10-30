@@ -26,6 +26,177 @@ def register_material(
 
 
 @register_material
+class SOUL_SAND(BlockItem):
+    name_id = target_block_id = "soul_sand"
+    name = "tile.hellsand.name"
+
+
+@register_material
+class NETHER_QUARTZ_ORE(BlockItem):
+    name_id = target_block_id = "nether_quartz_ore"
+    name = "tile.netherquartz.name"
+
+
+@register_material
+class NETHER_BRICK_FENCE(BlockItem):
+    name_id = target_block_id = "nether_brick_fence"
+    name = "tile.netherFence.name"
+
+
+@register_material
+class NETHER_BRICK_STAIRS(BlockItem):
+    name_id = target_block_id = "nether_brick_stairs"
+    name = "tile.stairsNetherBrick.name"
+
+
+@register_material
+class NETHER_BRICK_SLAB(BlockItem):
+    name_id = target_block_id = "nether_brick_slab"
+    name = "tile.stoneSlab.netherBrick.name"
+
+
+@register_material
+class QUARTZ_SLAB(BlockItem):
+    name_id = target_block_id = "quartz_slab"
+    name = "tile.stoneSlab.quartz.name"
+
+
+@register_material
+class QUARTZ_STAIRS(BlockItem):
+    name_id = target_block_id = "quartz_stairs"
+    name = "tile.stairsQuartz.name"
+
+
+@register_material
+class NETHER_WART(BlockItem):
+    name_id = target_block_id = "nether_wart"
+    name = "item.netherStalkSeeds.name"
+    _texture_path = "items.nether_wart"
+    texture_size = 1.0
+    texture_shadow = False
+
+    @classmethod
+    @client_method
+    def get_texture(cls, size, client=None):
+        return Material.get_texture.__func__(cls, size, client=client)
+
+
+@register_material
+class QUARTZ(Material):
+    name_id = "quartz"
+    name = "item.netherquartz.name"
+    _texture_path = "items.quartz"
+
+
+@register_material
+class GLOWSTONE_DUST(Material):
+    name_id = "glowstone_dust"
+    name = "item.yellowDust.name"
+    _texture_path = "items.glowstone_dust"
+
+
+@register_material
+class NETHER_BRICK(Material):
+    name_id = "nether_brick"
+    name = "item.netherbrick.name"
+    _texture_path = "items.netherbrick"
+
+
+@register_material
+class GOLD_NUGGET(Material):
+    name_id = "gold_nugget"
+    name = "item.goldNugget.name"
+    _texture_path = "items.gold_nugget"
+
+
+@register_material
+class BLAZE_ROD(Material):
+    name_id = "blaze_rod"
+    name = "item.blazeRod.name"
+    _texture_path = "items.blaze_rod"
+
+
+@register_material
+class BLAZE_POWDER(Material):
+    name_id = "blaze_powder"
+    name = "item.blazePowder.name"
+    _texture_path = "items.blaze_powder"
+
+
+@register_material
+class GHAST_TEAR(Material):
+    name_id = "ghast_tear"
+    name = "item.ghastTear.name"
+    _texture_path = "items.ghast_tear"
+
+
+@register_material
+class MAGMA_CREAM(Material):
+    name_id = "magma_cream"
+    name = "item.magmaCream.name"
+    _texture_path = "items.magma_cream"
+
+
+@register_material
+class GUNPOWDER(Material):
+    name_id = "gunpowder"
+    name = "item.sulphur.name"
+    _texture_path = "items.gunpowder"
+
+
+@register_material
+class BONE(Material):
+    name_id = "bone"
+    name = "item.bone.name"
+    _texture_path = "items.bone"
+
+
+@register_material
+class FIRE_CHARGE(Material):
+    name_id = "fire_charge"
+    name = "item.fireball.name"
+    _texture_path = "items.fireball"
+    ignites_blocks = True
+
+    def on_successful_block_use(self, stack, holder, block):
+        if getattr(holder.gamemode, "name_id", "survival") != "creative":
+            stack.reduce_amount(1)
+        return True
+
+
+@register_material
+class SADDLE(Material):
+    name_id = "saddle"
+    name = "item.saddle.name"
+    _texture_path = "items.saddle"
+    max_stack_size = 1
+
+
+@register_material
+class IRON_HORSE_ARMOR(Material):
+    name_id = "iron_horse_armor"
+    name = "item.horsearmormetal.name"
+    _texture_path = "items.iron_horse_armor"
+    max_stack_size = 1
+
+
+@register_material
+class GOLDEN_HORSE_ARMOR(Material):
+    name_id = "golden_horse_armor"
+    name = "item.horsearmorgold.name"
+    _texture_path = "items.gold_horse_armor"
+    max_stack_size = 1
+
+
+@register_material
+class DIAMOND_HORSE_ARMOR(Material):
+    name_id = "diamond_horse_armor"
+    name = "item.horsearmordiamond.name"
+    _texture_path = "items.diamond_horse_armor"
+    max_stack_size = 1
+
+
+@register_material
 class DIRT(BlockItem):
     name_id = "dirt"
     name = "tile.dirt.name"
@@ -1177,6 +1348,7 @@ class ThrowableMaterial(Material):
                 float(holder.y)
                 + float(getattr(holder, "eye_height", holder.height * 0.85)),
                 int(getattr(holder, "z", 0)),
+                world=holder.world,
             )
         return True
 
@@ -1623,7 +1795,7 @@ class QUARTZ_BLOCK(BlockItem):
     target_block_id = "quartz_block"
 
 
-@register_material
+@register_material(aliases=("quartz_pillar",))
 class QUARTZ_COLUMN(BlockItem):
     name_id = "quartz_column"
     name = "tile.quartz_block_lines.name"
@@ -2249,6 +2421,14 @@ class SNOWBALL(ThrowableMaterial):
     name_id = "snowball"
     name = "item.snowball.name"
     _texture_path = "items.snowball"
+
+
+@register_material
+class ENDER_PEARL(ThrowableMaterial):
+    name_id = "ender_pearl"
+    name = "item.enderPearl.name"
+    _texture_path = "items.ender_pearl"
+    max_stack_size = 16
 
 
 def get_block_item(block):

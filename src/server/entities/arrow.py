@@ -130,7 +130,8 @@ class Arrow(Projectile):
         owner = self.get_owner()
         callback = getattr(target, "on_projectile_hit", None)
         if callable(callback):
-            callback(self, result)
+            if callback(self, result) is True:
+                return False
         if self.is_burning():
             ignite = getattr(target, "set_seconds_on_fire", None)
             if callable(ignite):
@@ -161,6 +162,7 @@ class Arrow(Projectile):
                 result.x,
                 result.y,
                 self.z,
+                world=self.world,
             )
         return False
 
@@ -214,7 +216,7 @@ class Arrow(Projectile):
             pickup_stack = ItemStack(ARROW(), 1)
             if player.give_item_stack(pickup_stack) == 1:
                 if server is not None:
-                    server.broadcast_sound("random.pop", self.x, self.y, self.z)
+                    server.broadcast_sound("random.pop", self.x, self.y, self.z, world=self.world)
                 self.discard()
                 return True
         return False

@@ -132,6 +132,7 @@ class Player(Entity):
         self._last_sprint_particle_x: float | None = None
         self.spawn_point = 0
         self.portal_cooldown = 0
+        self.portal_counter = 0
         self.portal_effect_ticks = 0
         self._apply_gamemode_state()
 
@@ -337,6 +338,8 @@ class Player(Entity):
         entities.extend(getattr(self.world.server, "players", ()))
         seen = set()
         for entity in entities:
+            if getattr(entity, "world", None) is not self.world:
+                continue
             identity = id(entity)
             if identity in seen or getattr(entity, "removed", False):
                 continue
@@ -435,7 +438,7 @@ class Player(Entity):
         server = getattr(self.world, "server", None)
         if server is not None:
             server.broadcast_sound(
-                block.get_place_sound(), x + 0.5, y + 0.5, z
+                block.get_place_sound(), x + 0.5, y + 0.5, z, world=self.world
             )
         return True
 
@@ -773,6 +776,7 @@ class Player(Entity):
             self.y,
             getattr(self, "z", 0),
             volume=volume,
+            world=self.world,
         )
 
     def add_experience(self, amount: int) -> int:
@@ -983,6 +987,7 @@ class Player(Entity):
             self.x + self.width * 0.5,
             self.y + getattr(self, "eye_height", self.height * 0.85),
             getattr(self, "z", 0),
+            world=self.world,
         )
         self._equipment_attribute_signature = None
         self.sync_inventory()
@@ -1152,7 +1157,7 @@ class Player(Entity):
 
     def _play_eating_sound(self, sound_id: str) -> None:
         mouth_x, mouth_y, z = self._mouth_position()
-        self.world.server.broadcast_sound(sound_id, mouth_x, mouth_y, z)
+        self.world.server.broadcast_sound(sound_id, mouth_x, mouth_y, z, world=self.world)
 
     def tick_eating(self) -> None:
         if not self.eating:
@@ -1326,6 +1331,11 @@ class Player(Entity):
         self._sync_modified_attributes()
 
     def begin_nether_portal(self, location=None) -> None:
+        # Arrival portals hold the travel cooldown until the player leaves.
+        # Collision hooks must not restart the visual effect during that time.
+        if self.portal_cooldown > 0:
+            self.end_nether_portal()
+            return
         if getattr(self, "_portal_effect_active", False):
             return
         self._portal_effect_active = True
@@ -1344,8 +1354,18 @@ class Player(Entity):
                     for z in layers:
                         block = self.world.get_block(x, y, z)
                         if getattr(block, "block_id", None) == "nether_portal":
+                            if self.portal_cooldown > 0:
+                                self.portal_cooldown = 10
+                                self.portal_counter = 0
+                                self.end_nether_portal()
+                                return
                             self.begin_nether_portal(block.location)
+                            self.portal_counter += 1
+                            delay = 1 if getattr(self.gamemode, "name_id", "survival") == "creative" else 80
+                            if self.portal_counter >= delay:
+                                self.travel_through_nether_portal(block.location)
                             return
+        self.portal_counter = max(0, self.portal_counter - 4)
         self.end_nether_portal()
 
     def end_nether_portal(self) -> None:
@@ -1357,8 +1377,21 @@ class Player(Entity):
             server.send_client_socket(self, {"__class__": "PortalEffect", "active": False}, "Forward")
 
     def travel_through_nether_portal(self, location=None):
-        """Reserved server-authoritative destination hook for future dimensions."""
-        return None
+        if self.world.id_name not in {"overworld", "nether"}:
+            return False
+        destination = self.world.server.worlds.get(
+            "overworld" if self.world.id_name == "nether" else "nether")
+        if destination is None:
+            return False
+        from src.server.nether_portal import find_or_create_portal
+        factor = 8.0 if self.world.id_name == "nether" else 0.125
+        x, y = find_or_create_portal(destination, self.x * factor, self.y)
+        self.z = 0
+        self.portal_counter = 0
+        self.portal_cooldown = 10
+        self.teleport_to(x, y, destination)
+        self.end_nether_portal()
+        return True
 
     def _sync_modified_attributes(self) -> None:
         self.refresh_attribute_modifiers()
@@ -2288,12 +2321,40 @@ class Player(Entity):
             )
 
     def teleport_to(self, x, y, world=None):
+        previous_world = self.world
         if self.sleeping:
             self.stop_sleeping(reposition=False, sync=False)
         self.x = x
         self.y = y
         if world:
             self.world = world
+        if previous_world is not self.world:
+            server = self.world.server
+            for observer in tuple(server.players):
+                if observer is not self and observer.world is previous_world:
+                    server.send_client_socket(observer, self, "EntityRemove")
+            for container_id, container in tuple(self.open_inventory_containers.items()):
+                owner = getattr(container, "owner_block", getattr(container, "furnace", None))
+                close_for = getattr(owner, "close_for", None)
+                if callable(close_for):
+                    close_for(self)
+                self.unregister_inventory_container(container_id)
+            self.loading_regions.clear()
+            self.client_loaded_regions.clear()
+            self.initial_load_complete_sent = False
+            center = int(x // 16)
+            server.send_client_socket(self, {
+                "__class__": "WorldLoadStart", "reset": True,
+                "world_id": self.world.id_name,
+                "environment": self.world.attribute.ENVIRONMENT,
+                "height": self.world.attribute.MAX_BUILD_HEIGHT,
+                "regions": list(range(center - server.view_distance, center + server.view_distance + 1)),
+            }, "Forward")
+            server.send_client_socket(self, self.world.get_weather_packet(), "Forward")
+            server.send_client_socket(self, {"__class__": "TimeUpdate", "time": self.world.world_time}, "Forward")
+            for observer in tuple(server.players):
+                if observer is not self and observer.world is self.world and observer.is_loading_position(int(x), int(y), self.z):
+                    server.send_client_socket(observer, self, "EntitySpawn")
         self.motion.x = 0.0
         self.motion.y = 0.0
         self.fall_distance = 0.0
@@ -2304,6 +2365,8 @@ class Player(Entity):
         self.clear_bow_use()
         self._teleport_id += 1
         self._pending_teleport_id = self._teleport_id
+        self.in_fluid = self.in_water = self.in_lava = False
+        self._active_fluid_block = None
         self.world.server.send_client_socket(self, self, "Teleport")
 
     def confirm_teleport(self, teleport_id) -> bool:

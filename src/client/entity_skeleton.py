@@ -506,7 +506,8 @@ class EntitySkeleton(ABC):
 
     def draw_fire_overlay(self) -> None:
         """Draw the vanilla-style alternating, tapering fire billboards."""
-        if int(getattr(self.entity, "fire_ticks", 0)) <= 0:
+        if (int(getattr(self.entity, "fire_ticks", 0)) <= 0
+                and not getattr(self.entity, "has_visual_fire", False)):
             return
         try:
             entity_width = max(0.0, float(self.entity.width))

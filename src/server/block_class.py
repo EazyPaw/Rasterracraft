@@ -390,7 +390,7 @@ class Block(ABC):
         if server is None:
             return
         for player in tuple(getattr(server, "players", ())):
-            if player.is_loading_position(
+            if player.world is world and player.is_loading_position(
                 self.location.x, self.location.y, self.location.z
             ):
                 server.send_client_socket(player, self, "BlockUpdate")
@@ -777,7 +777,7 @@ class FluidBlock(Block):
         world = self.location.world
         world.mark_chunk_dirty(int(self.location.x) // 16)
         for player in world.server.players:
-            if player.is_loading_position(
+            if player.world is world and player.is_loading_position(
                 self.location.x, self.location.y, self.location.z
             ):
                 world.server.send_client_socket(player, self, "BlockUpdate")
@@ -1601,6 +1601,23 @@ class ConnectableBarrier(Block):
 
     def on_update(self):
         self._refresh_connections()
+
+    def on_load(self):
+        if self.location is None:
+            return
+        world = self.location.world
+        # Generated/saved structures bypass placement. Refresh both sides of
+        # chunk borders when the adjacent chunk becomes available as well.
+        for dx in (0, -1, 1):
+            location = self.location.add(dx, 0, 0)
+            block = world.get_block(location)
+            if not isinstance(block, ConnectableBarrier) or not block._refresh_connections():
+                continue
+            world.mark_chunk_dirty(int(location.x) // 16)
+            world.invalidate_chunk_packet(int(location.x) // 16)
+            for player in tuple(world.server.players):
+                if player.world is world and player.is_loading_position(location):
+                    world.server.send_client_socket(player, block, "BlockUpdate")
 
     def get_collision_box(self) -> BlockCollisionBox:
         min_x, _min_y, max_x, _max_y = self.post_bounds

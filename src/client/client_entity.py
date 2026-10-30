@@ -8,12 +8,15 @@ from src.client.entity_skeleton import PlayerSkeleton
 from src.server.entities.falling_block import FallingBlockSkeleton
 from src.server.entities.primed_tnt import PrimedTNTSkeleton
 from src.server.entities.zombie import ZombieSkeleton
+from src.client.nether_entities import PigmanSkeleton, NetherSkeleton, RegularSkeleton, NetherMobSkeleton
 from src.server.entities.chicken import ChickenSkeleton
 from src.server.entities.cow import CowSkeleton
 from src.server.entities.pig import PigSkeleton
 from src.server.entities.sheep import SheepSkeleton
 from src.server.entities.snow_ball import SnowBallSkeleton
 from src.server.entities.egg import EggSkeleton
+from src.server.entities.ender_pearl import EnderPearlSkeleton
+from src.client.ender_entities import EndermanSkeleton, EndermiteSkeleton
 from src.server.entities.arrow import ArrowSkeleton
 from src.server.blocks import get_block_by_id
 from src.server.item_class import ItemStack
@@ -197,6 +200,7 @@ class ClientEntity:
         self.owner_uuid = packet.get("owner_uuid")
         self.in_ground = bool(packet.get("in_ground", False))
         self.fire_ticks = max(0, int(packet.get("fire_ticks", 0)))
+        self.has_visual_fire = bool(packet.get("has_visual_fire", False))
         self.critical = bool(packet.get("critical", False))
         self.flame = bool(packet.get("flame", False))
         self.shake_time = max(0, int(packet.get("shake_time", 0)))
@@ -226,6 +230,9 @@ class ClientEntity:
         self.apply_packet(packet, initial=True)
 
     def apply_packet(self, packet: dict, *, initial: bool = False):
+        self.screaming = bool(packet.get("screaming", getattr(self, "screaming", False)))
+        self.carried_block = packet.get("carried_block", getattr(self, "carried_block", None))
+        self.teleport_revision = int(packet.get("teleport_revision", getattr(self, "teleport_revision", 0)))
         old_attack_animation_ticks = self.attack_animation_ticks
         new_x = float(packet.get("x", self.x))
         new_y = float(packet.get("y", self.y))
@@ -291,6 +298,7 @@ class ClientEntity:
         self.owner_uuid = packet.get("owner_uuid", self.owner_uuid)
         self.in_ground = bool(packet.get("in_ground", self.in_ground))
         self.fire_ticks = max(0, int(packet.get("fire_ticks", self.fire_ticks)))
+        self.has_visual_fire = bool(packet.get("has_visual_fire", self.has_visual_fire))
         self.critical = bool(packet.get("critical", self.critical))
         self.flame = bool(packet.get("flame", self.flame))
         self.shake_time = max(0, int(packet.get("shake_time", self.shake_time)))
@@ -379,6 +387,18 @@ class ClientEntity:
             self.skeleton = ExperienceOrbRenderer(self)
         elif self.entity_id == "zombie":
             self.skeleton = ZombieSkeleton(self)
+        elif self.entity_id == "enderman":
+            self.skeleton = EndermanSkeleton(self)
+        elif self.entity_id == "endermite":
+            self.skeleton = EndermiteSkeleton(self)
+        elif self.entity_id == "zombie_pigman":
+            self.skeleton = PigmanSkeleton(self)
+        elif self.entity_id == "wither_skeleton":
+            self.skeleton = NetherSkeleton(self)
+        elif self.entity_id == "skeleton":
+            self.skeleton = RegularSkeleton(self)
+        elif self.entity_id in {"ghast", "blaze", "magma_cube", "fireball", "small_fireball"}:
+            self.skeleton = NetherMobSkeleton(self)
         elif self.entity_id == "chicken":
             self.skeleton = ChickenSkeleton(self)
         elif self.entity_id == "cow":
@@ -393,5 +413,7 @@ class ClientEntity:
             self.skeleton = SnowBallSkeleton(self)
         elif self.entity_id == "egg":
             self.skeleton = EggSkeleton(self)
+        elif self.entity_id == "ender_pearl":
+            self.skeleton = EnderPearlSkeleton(self)
         elif self.entity_id == "arrow":
             self.skeleton = ArrowSkeleton(self)

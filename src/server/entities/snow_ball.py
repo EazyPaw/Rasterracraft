@@ -10,6 +10,12 @@ class SnowBall(ThrownItem):
     translation_key = "entity.Snowball.name"
     _texture_path = "items.snowball"
 
+    def on_hit_entity(self, result):
+        if getattr(result.target, "entity_id", "") == "blaze":
+            result.target.apply_damage(3.0, self.damage_type, source=self.get_owner() or self)
+            return True
+        return super().on_hit_entity(result)
+
 
 class SnowBallSkeleton(ThrownItemSkeleton):
     pass

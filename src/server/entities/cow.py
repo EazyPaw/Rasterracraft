@@ -62,7 +62,7 @@ class Cow(Animal):
                 player.sync_inventory()
             server = getattr(self.world, "server", None)
             if server is not None and not self.silent:
-                server.broadcast_sound(self.sounds["milk"], self.x, self.y, self.z)
+                server.broadcast_sound(self.sounds["milk"], self.x, self.y, self.z, world=self.world)
             return True
         return super().interact(player, held_stack)
 

@@ -18,6 +18,9 @@ class ThrownItem(Projectile):
         self.height = 0.5
 
     def on_hit(self, result: ProjectileHitResult) -> None:
+        super().on_hit(result)
+        if not self.removed:
+            return
         spawner = getattr(self.world, "spawn_particle", None)
         if callable(spawner):
             spawner(
@@ -34,10 +37,11 @@ class ThrownItem(Projectile):
                     },
                 )
             )
-        super().on_hit(result)
 
 
 class ThrownItemSkeleton(EntitySkeleton):
+    visual_size = None
+
     @client_method
     def __init__(self, entity, client=None):
         super().__init__(client, f"items.{entity.entity_id}", entity)
@@ -48,8 +52,8 @@ class ThrownItemSkeleton(EntitySkeleton):
     def draw(self):
         render = self.client.render
         size = (
-            max(2, round(render.block_size * self.entity.width)),
-            max(2, round(render.block_size * self.entity.height)),
+            max(2, round(render.block_size * (self.visual_size or self.entity.width))),
+            max(2, round(render.block_size * (self.visual_size or self.entity.height))),
         )
         if self._scaled_texture is None or self._scaled_size != size:
             self._scaled_texture = pygame.transform.scale(self.texture, size)

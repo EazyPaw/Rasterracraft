@@ -163,6 +163,8 @@ def _handle_teleport(packet: dict, client: "Client") -> None:
 
     client.client_player.motion.x = 0
     client.client_player.motion.y = 0
+    client.client_player.in_fluid = client.client_player.in_water = client.client_player.in_lava = False
+    client.client_player._active_fluid_block = None
     if client.client_player is not None:
         for key in (
             "health",
@@ -170,6 +172,7 @@ def _handle_teleport(packet: dict, client: "Client") -> None:
             "hurt_time",
             "last_hurt_damage",
             "fire_ticks",
+            "has_visual_fire",
             "food_level",
             "saturation",
             "experience",
@@ -372,6 +375,28 @@ def _handle_time_update(packet: dict, client: "Client") -> None:
 
 @CLIENT_PACKET_DISPATCHER.handler("WorldLoadStart")
 def _handle_world_load_start(packet: dict, client: "Client") -> None:
+    if packet.get("reset", False):
+        from src.client.client_world import ClientWorld
+        client.client_world = ClientWorld(client)
+        client.render.client_world = client.client_world
+        client.client_player.world = client.client_world
+        client.initial_sync_received = False
+        client.loaded_chunk_regions = set()
+        client.particle_manager.particles.clear()
+        client.world_loading = True
+        client.render.sky_cache_key = None
+        client.render.current_sky_state = None
+        client.render._invalidate_world_scale_caches(client.render.block_size, client.render.block_size)
+        for gui in client.render.drawing_GUIs[:]:
+            client.render.close_gui(gui)
+        # Rebuild the persistent HUD/chat after closing world-bound screens.
+        client.client_player.game_mode.update_gui()
+        client.client_player.portal_effect_active = False
+        client.client_player.portal_effect_ticks = 0
+        client.client_player.portal_strength = 0.0
+    client.client_world.id_name = str(packet.get("world_id", "overworld"))
+    client.client_world.environment = int(packet.get("environment", 0))
+    client.client_world.y_max = int(packet.get("height", 256))
     client.handle_initial_world_start(packet["regions"])
 
 
@@ -637,6 +662,8 @@ def _handle_entity_update(packet: dict, client: "Client") -> None:
     }:
         if "fire_ticks" in packet:
             player.fire_ticks = max(0, int(packet["fire_ticks"]))
+        if "has_visual_fire" in packet:
+            player.has_visual_fire = bool(packet["has_visual_fire"])
         return
     client.client_world.update_entity(packet)
 

@@ -225,3 +225,17 @@ __marimo__/
 !/tests/
 /tests/*
 !/tests/test_village_generation.py
+
+# Ship Nether fortress templates and their regression suites.
+!/structures/
+/structures/*
+!/structures/nether_fortress/
+!/tests/test_nether*.py
+!/tests/test_fortress_generation.py
+
+!/tests/test_structure_editor.py
+!/tests/test_ender_entities.py
+
+!/validation/
+/validation/*
+!/validation/ender_entities_preview.py

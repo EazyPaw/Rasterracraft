@@ -403,10 +403,14 @@ class Client:
         self.loading_screen = LoadingScreen(self.render, loading_title_key)
         self.render.show_gui(self.loading_screen)
 
-    def on_chunk_loaded(self, rx: int) -> None:
-        self.loaded_chunk_regions.add(int(rx))
+    def on_chunk_loaded(self, rx: int, *, world=None) -> None:
+        world = world or self.client_world
+        loaded_regions = self.loaded_chunk_regions
+        if world is not self.client_world:
+            return
+        loaded_regions.add(int(rx))
         if self.client_player is not None:
-            self.sent_packet(make_packet("ChunkReady", rx=int(rx)))
+            self.sent_packet(make_packet("ChunkReady", rx=int(rx), world_id=world.id_name))
         self._try_finish_world_loading()
 
     def handle_initial_world_complete(self, regions) -> None:

@@ -19,6 +19,12 @@ RECIPES_ROOT = Path("data/minecraft/recipes")
 MINECRAFT_1_8_RECIPES = (
     {
         "type": "minecraft:crafting_shaped",
+        "key": {"#": {"item": "minecraft:nether_bricks"}},
+        "pattern": ["###", "###"],
+        "result": {"item": "minecraft:nether_brick_fence", "count": 6},
+    },
+    {
+        "type": "minecraft:crafting_shaped",
         "key": {
             "#": {"item": "minecraft:gold_block"},
             "X": {"item": "minecraft:apple"},
@@ -91,6 +97,8 @@ def _trim(grid: list[list[ItemStack | None]]) -> list[list[ItemStack | None]]:
 def load_recipes() -> tuple[dict, ...]:
     recipes = list(MINECRAFT_1_8_RECIPES)
     for path in RECIPES_ROOT.glob("*.json"):
+        if path.stem == "nether_brick_fence":
+            continue  # 1.8 uses six brick blocks, before the item-brick recipe.
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):

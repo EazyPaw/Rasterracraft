@@ -223,6 +223,7 @@ def create_save(
     generate_structures: bool = True,
     allow_cheats: bool = False,
     bonus_chest: bool = False,
+    edit_structure: str = "",
 ) -> dict[str, Any]:
     ensure_saves_root()
     base_id = _safe_save_id(display_name)
@@ -233,6 +234,10 @@ def create_save(
         "max_build_height": 256,
         "generate_structures": bool(generate_structures),
     }
+    if generator_name == "StructureBuild" and edit_structure.strip():
+        from src.server.structure import load_structure_data, normalize_structure_name
+        path, _data = load_structure_data(edit_structure)
+        world_meta["edit_structure"] = normalize_structure_name(edit_structure) + path.suffix
     if generator_options:
         world_meta["generator_options"] = dict(generator_options)
 

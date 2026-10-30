@@ -41,6 +41,8 @@ class Entity:
     blocks_block_placement = True
     attackable = True
     fire_immune = False
+    # Cosmetic flame overlay, independent of ignition and fire damage.
+    has_visual_fire = False
     translation_key: str | None = None
     ambient_sound_interval = (160, 360)
     initial_ambient_sound_interval = (80, 220)
@@ -543,6 +545,7 @@ class Entity:
             "attack_animation_ticks": self.attack_animation_ticks,
             "attackable": bool(self.attackable),
             "fire_ticks": max(0, int(self.fire_ticks)),
+            "has_visual_fire": bool(self.has_visual_fire),
         }
         if hasattr(self, "z"):
             data["z"] = getattr(self, "z")
@@ -601,6 +604,10 @@ class Entity:
             if breaking_target is not None:
                 data["break_target"] = list(breaking_target[:3])
         data.update(self.get_synced_data())
+        held = getattr(self, "held_item", None)
+        if held is not None:
+            data["held_item_data"] = {"id": held.material.name_id,
+                                      "amount": held.amount, "nbt": held.nbt}
         return data
 
     def get_synced_data(self) -> dict:
@@ -629,6 +636,7 @@ class Entity:
             "sneaking": bool(self.sneaking),
             "sprinting": bool(self.sprinting),
             "fire_ticks": max(0, int(self.fire_ticks)),
+            "has_visual_fire": bool(self.has_visual_fire),
             "absorption_amount": float(self.absorption_amount),
             "active_effects": [
                 instance.to_dict(include_hidden=True)
@@ -665,6 +673,7 @@ class Entity:
         self.sneaking = bool(data.get("sneaking", self.sneaking))
         self.sprinting = bool(data.get("sprinting", self.sprinting))
         self.fire_ticks = max(0, int(data.get("fire_ticks", self.fire_ticks)))
+        self.has_visual_fire = bool(data.get("has_visual_fire", self.has_visual_fire))
         self.absorption_amount = max(
             0.0,
             min(
@@ -1450,7 +1459,8 @@ class Entity:
         server = getattr(self.world, "server", None)
         if server is not None:
             server.broadcast_sound(
-                sound, self.x, self.y, getattr(self, "z", 0), volume=0.9
+                sound, self.x, self.y, getattr(self, "z", 0),
+                volume=0.9, world=self.world,
             )
 
     def is_burning(self) -> bool:
@@ -1476,6 +1486,7 @@ class Entity:
             "__class__": "EntityUpdate",
             "uuid": str(self.uuid),
             "fire_ticks": max(0, int(self.fire_ticks)),
+            "has_visual_fire": bool(self.has_visual_fire),
         }
         send(self, packet, "Forward")
 
@@ -1627,9 +1638,9 @@ class Entity:
         ):
             return 0.0
 
-        if self.has_status_effect("fire_resistance") and self._damage_type_has_tag(
-            damage_type, DamageTag.IS_FIRE
-        ):
+        if (
+            self.fire_immune or self.has_status_effect("fire_resistance")
+        ) and self._damage_type_has_tag(damage_type, DamageTag.IS_FIRE):
             return 0.0
 
         bypasses_cooldown = self._damage_type_has_tag(
@@ -1687,7 +1698,7 @@ class Entity:
         sound = self.get_hurt_sound(damage_type, actual_damage)
         server = getattr(self.world, "server", None)
         if sound and server is not None:
-            server.broadcast_sound(sound, self.x, self.y, getattr(self, "z", 0))
+            server.broadcast_sound(sound, self.x, self.y, getattr(self, "z", 0), world=self.world)
         ai = getattr(self, "ai", None)
         notifier = getattr(ai, "on_hurt", None)
         if callable(notifier) and self.health > 0:
@@ -1780,7 +1791,7 @@ class Entity:
         server = getattr(self.world, "server", None)
         death_sound = self.get_sound("death")
         if death_sound and not self.silent and server is not None:
-            server.broadcast_sound(death_sound, self.x, self.y, getattr(self, "z", 0))
+            server.broadcast_sound(death_sound, self.x, self.y, getattr(self, "z", 0), world=self.world)
         self.spawn_death_particles()
         self.spawn_drops()
         self.spawn_experience_reward()

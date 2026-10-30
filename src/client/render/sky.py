@@ -84,6 +84,10 @@ class SkyMixin:
         每帧检查缓存：若屏幕尺寸或时间区间变化，则重新生成天空图层。
         天空图层包含：上下渐变背景 + 黄昏霞光 + 星星。
         """
+        if getattr(self.client_world, "environment", 0) == -1:
+            self.current_sky_state = self.get_sky_state()
+            self.screen.fill((51, 8, 8))
+            return
         self.update_day_time()
         self.update_weather()
         sky_state = self.get_sky_state()
@@ -150,6 +154,10 @@ class SkyMixin:
         :return: 包含 upper, lower, twilight, twilight_color, daylight, night, sky_light_weight 的字典
 
         """
+        if getattr(self.client_world, "environment", 0) == -1:
+            return {"upper": (51, 8, 8), "lower": (51, 8, 8),
+                    "twilight": 0.0, "twilight_color": (51, 8, 8),
+                    "daylight": 0.0, "night": 0.0, "sky_light_weight": 0.0}
         time_value = self.day_time % DAY_TICKS
 
         # 天空上下层颜色（循环关键帧插值）

@@ -215,7 +215,7 @@ class Server:
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
                 for other in self.server.players:
-                    if other is not player and other.is_loading_position(
+                    if other is not player and other.world is player.world and other.is_loading_position(
                         int(player.x), int(player.y), 0
                     ):
                         self.server.send_client_socket(other, player, "EntitySpawn")
@@ -227,6 +227,9 @@ class Server:
                     player,
                     {
                         "__class__": "WorldLoadStart",
+                        "world_id": player.world.id_name,
+                        "environment": player.world.attribute.ENVIRONMENT,
+                        "height": player.world.attribute.MAX_BUILD_HEIGHT,
                         "regions": list(
                             range(
                                 initial_center - self.server.view_distance,
@@ -503,6 +506,13 @@ class Server:
                 world_meta.get("entities", ())
             )
             if self.worlds["overworld"].structure_build_mode:
+                edit_world = self.worlds["overworld"]
+                if world_meta.get("edit_structure"):
+                    from src.server.structure import initialize_structure_editor
+                    if initialize_structure_editor(edit_world, world_meta["edit_structure"]):
+                        # Persist imported cells before recording the initialized target.
+                        save_manager.save_chunks(self.save_id, "overworld", list(edit_world.regions.values()))
+                        self._save_world_entities(edit_world, list(edit_world.regions))
                 world_meta["disable_mob_generation"] = True
                 world_meta["structure_build_state"] = self.worlds[
                     "overworld"
@@ -526,6 +536,14 @@ class Server:
                     )
                 ),
             )
+        nether_meta = (self.level_data or {}).get("worlds", {}).get("nether", {})
+        self.worlds["nether"] = World(
+            self, "nether", generator.Nether, WorldAttribute(environment=-1),
+            seed, generate_structures=bool(world_meta.get("generate_structures", True)),
+        )
+        self.worlds["nether"].world_time = int(nether_meta.get("world_time", world_time))
+        self.worlds["nether"].queue_saved_entities(nether_meta.get("entities", ()))
+        self.worlds["nether"].disable_mob_generation = bool(nether_meta.get("disable_mob_generation", False))
         self.initialized = True
         self.ready.set()  # 通知 socket 线程服务器已就绪
         elapsed = time.perf_counter() - t_start
@@ -549,6 +567,10 @@ class Server:
         for world in self.worlds.values():
             world.world_time = (world.world_time + 1) % 24000
             world.tick_weather()
+            if self.server_ticks % 20 == 0:
+                from src.server.entity_spawning import tick_nether_spawning, tick_enderman_spawning
+                tick_nether_spawning(world)
+                tick_enderman_spawning(world)
             world.tick_block_entities()
             world.tick_random_blocks()
         self._finish_sleeping_nights()
@@ -744,6 +766,7 @@ class Server:
         player.sneaking = bool(data.get("sneaking", player.sneaking))
         player.sprinting = bool(data.get("sprinting", player.sprinting))
         player.fire_ticks = max(0, int(data.get("fire_ticks", player.fire_ticks)))
+        player.has_visual_fire = bool(data.get("has_visual_fire", False))
         player.hurt_time = max(0, int(data.get("hurt_time", player.hurt_time)))
         player.last_hurt_damage = max(
             0.0, float(data.get("last_hurt_damage", player.last_hurt_damage))
@@ -896,6 +919,7 @@ class Server:
             "sneaking": bool(player.sneaking),
             "sprinting": bool(player.sprinting),
             "fire_ticks": max(0, int(player.fire_ticks)),
+            "has_visual_fire": bool(player.has_visual_fire),
             "hurt_time": max(0, int(player.hurt_time)),
             "last_hurt_damage": max(0.0, float(player.last_hurt_damage)),
             "fall_distance": max(0.0, float(player.fall_distance)),
@@ -980,6 +1004,7 @@ class Server:
         *,
         volume: float = 1.0,
         positional: bool = True,
+        world=None,
     ) -> None:
         """向所有客户端发送音效；默认按给定世界坐标进行空间混音。"""
         packet = {
@@ -992,7 +1017,8 @@ class Server:
             "global": not positional,
         }
         for player in tuple(self.players):
-            self.send_client_socket(player, packet, "Forward")
+            if world is None or player.world is world:
+                self.send_client_socket(player, packet, "Forward")
 
     def broadcast_chat(self, msg, color=None, exclude=None):
         """向所有玩家广播聊天消息。

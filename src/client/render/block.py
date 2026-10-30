@@ -119,15 +119,23 @@ class BlockRenderMixin:
         :return: 着色后的 RGB 颜色元组
 
         """
+        environment = getattr(self.client_world, "environment", 0)
+        if environment == -1:
+            # No sky contribution, including at zero where a 0.5 fallback
+            # would otherwise switch the ambient tint at the dark boundary.
+            sky_ratio = 0.0
         b_key, b = quantize_unit(brightness, BLOCK_LIGHT_LEVELS)
         r_key, sky_ratio = quantize_unit(sky_ratio, BLOCK_RATIO_LEVELS)
-        key = (b_key, r_key, sky_color)
+        key = (b_key, r_key, sky_color, environment)
 
         cache = self.corner_color_cache
         if key in cache:
             cache.move_to_end(key)
             return cache[key]
 
+        if environment == -1:
+            # WorldProviderHell: minimum ambient brightness 0.1.
+            b = 0.1 + 0.9 * b / (4.0 - 3.0 * b)
         base = int(b * 255)
         # 色调强度：亮度 0 和 1 时为 0，亮度 0.5 时最大（二次函数 b*(1-b)*4）
         tint_amount = b * (1.0 - b) * 4.0
@@ -1325,10 +1333,10 @@ class BlockRenderMixin:
         # ---- 5. 全黑快速路径 ----
         # 完全无光且无透明像素的方块直接绘制黑色矩形
         if (
-            ftl == 0.0
-            and ftr == 0.0
-            and fbl == 0.0
-            and fbr == 0.0
+            color_tl == (0, 0, 0)
+            and color_tr == (0, 0, 0)
+            and color_bl == (0, 0, 0)
+            and color_br == (0, 0, 0)
             and not block.has_transparent_pixels
         ):
             pygame.draw.rect(screen, (0, 0, 0), (sx, sy, bs, bs))
@@ -1359,6 +1367,7 @@ class BlockRenderMixin:
         key = (
             block.block_id,
             tex,
+            getattr(self.client_world, "environment", 0),
             q_ftl,
             q_ftr,
             q_fbl,
@@ -1400,14 +1409,15 @@ class BlockRenderMixin:
         else:
             # ---- 完整高度方块（走缓存） ----
             # 7a. 获取/生成渐变纹理
-            _q = lambda c: (c[0] >> 3, c[1] >> 3, c[2] >> 3)
             # 同一组光照颜色在不同镜头缩放下需要不同尺寸的渐变 Surface。
+            # Brightness/tint have already been quantized. Dropping more RGB
+            # bits here aliases dim gradients and introduces visible seams.
             grad_key = (
                 bs,
-                _q(color_tl),
-                _q(color_tr),
-                _q(color_bl),
-                _q(color_br),
+                color_tl,
+                color_tr,
+                color_bl,
+                color_br,
             )
             grad_cache = self.gradient_cache
             if grad_key in grad_cache:

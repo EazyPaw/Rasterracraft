@@ -124,7 +124,7 @@ class Item(CollectibleEntity):
         before = self.item.amount
         player.give_item_stack(self.item)
         if self.item.amount != before:
-            self.world.server.broadcast_sound("random.pop", self.x, self.y, self.z)
+            self.world.server.broadcast_sound("random.pop", self.x, self.y, self.z, world=self.world)
         if self.item.amount <= 0:
             self.world.remove_entity(self)
         return True

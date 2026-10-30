@@ -206,6 +206,7 @@ class WorldAttribute:
     def __init__(self, environment=0, max_build_height=256):
         self.ENVIRONMENT = environment
         self.MAX_BUILD_HEIGHT = max_build_height
+        self.HAS_SKY = environment != -1
 
 
 class Weather(Enum):
@@ -236,11 +237,16 @@ class World:
             self.generator, attribute.MAX_BUILD_HEIGHT,
             enabled=self.generate_structures and id_name == "overworld",
         )
+        if attribute.ENVIRONMENT == -1:
+            from src.server.generator.nether import NetherFortressGenerator
+            self.structure_generator = NetherFortressGenerator(
+                self.generator, attribute.MAX_BUILD_HEIGHT, enabled=self.generate_structures)
         self.disable_mob_generation = self.structure_build_mode
         self.structure_bounds: tuple[int, int, int, int] | None = None
         self.structure_void_positions: set[tuple[int, int, int]] = set()
         self.structure_air_positions: set[tuple[int, int, int]] = set()
         self.structure_content_positions: set[tuple[int, int, int]] = set()
+        self.structure_edit = {}
         self._structure_lock = threading.RLock()
         # 每次方块变动都会影响整区块光照。把同一 tick 的变动合并处理，
         # 避免重力/流体连锁时反复重算并发送相同的大型光照包。
@@ -280,6 +286,8 @@ class World:
     ) -> None:
         if isinstance(weather, str):
             weather = Weather(weather.lower())
+        if not self.attribute.HAS_SKY:
+            weather = Weather.CLEAR
         self.weather = weather
         self.weather_tick = (
             max(1, int(duration_ticks))
@@ -292,6 +300,8 @@ class World:
                 self.server.send_client_socket(player, packet, "Forward")
 
     def tick_weather(self) -> None:
+        if not self.attribute.HAS_SKY:
+            return
         self.weather_tick -= 1
         if self.weather_tick <= 0:
             next_weather = (
@@ -444,7 +454,7 @@ class World:
             start_x = index * chunk_width
             ext_region[start_x : start_x + chunk_width, :, :] = chunk.region_array
 
-        ext_sky, ext_block = calculate_light_layers_2d(ext_region)
+        ext_sky, ext_block = calculate_light_layers_2d(ext_region, has_sky=self.attribute.HAS_SKY)
 
         changed_chunks: set[int] = set()
         for index, chunk in enumerate(chunks):
@@ -472,7 +482,7 @@ class World:
             chunk = self.regions.get(rx)
             if chunk is None:
                 continue
-            recipients = [player for player in players if rx in player.loading_regions]
+            recipients = [player for player in players if player.world is self and rx in player.loading_regions]
             send_many = getattr(self.server, "send_client_sockets", None)
             if callable(send_many):
                 send_many(recipients, chunk.get_light_update_packet(), "LightUpdate")
@@ -564,7 +574,7 @@ class World:
             players = self.server.players
 
         for player in players:
-            if player.is_loading_position(int(particle.x), int(particle.y), particle.z):
+            if player.world is self and player.is_loading_position(int(particle.x), int(particle.y), particle.z):
                 self.server.send_client_socket(player, particle, "Particle")
 
     def play_particle(
@@ -608,7 +618,7 @@ class World:
         with self._entities_lock:
             self.entities[entity_uuid] = entity
         for player in self.server.players:
-            if player.is_loading_position(
+            if player.world is self and player.is_loading_position(
                 math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)
             ):
                 self.server.send_client_socket(player, entity, "EntitySpawn")
@@ -733,7 +743,7 @@ class World:
         for entity in removed:
             entity_uuid = str(entity.uuid)
             for player in self.server.players:
-                if player.is_loading_position(
+                if player.world is self and player.is_loading_position(
                     math.floor(entity.x),
                     math.floor(entity.y),
                     getattr(entity, "z", 0),
@@ -749,6 +759,8 @@ class World:
         if removed is not None:
             removed.removed = True
             for player in self.server.players:
+                if player.world is not self:
+                    continue
                 self.server.send_client_socket(
                     player, {"uuid": entity_uuid}, "EntityRemove"
                 )
@@ -776,7 +788,7 @@ class World:
             recipients = [
                 player
                 for player in self.server.players
-                if player.is_loading_position(
+                if player.world is self and player.is_loading_position(
                     math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)
                 )
             ]
@@ -842,6 +854,8 @@ class World:
         接受 xy 二维坐标
         """
         chunk = self.regions.get(x // 16)
+        if chunk is None or not 0 <= y < chunk.sky_light_array.shape[1]:
+            return 0
         rela_x = x % 16
         light = cast(int, chunk.sky_light_array[rela_x, y])
         return light
@@ -852,6 +866,8 @@ class World:
         接受 xy 二维坐标
         """
         chunk = self.regions.get(x // 16)
+        if chunk is None or not 0 <= y < chunk.block_light_array.shape[1]:
+            return 0
         rela_x = x % 16
         light = cast(int, chunk.block_light_array[rela_x, y])
         return light
@@ -869,6 +885,8 @@ class World:
 
     def get_sum_light(self, x: int, y: int) -> int:
         chunk = self.regions.get(x // 16)
+        if chunk is None or not 0 <= y < chunk.sky_light_array.shape[1]:
+            return 0
         rela_x = x % 16
         sky_light = cast(int, chunk.sky_light_array[rela_x, y])
         block_light = cast(int, chunk.block_light_array[rela_x, y])
@@ -921,7 +939,7 @@ class World:
                 self.schedule_light_recalculation(chunk.x)
         if send_packet and explosion_changes is None:
             for player in self.server.players:
-                if player.is_loading_position(x, y, z):
+                if player.world is self and player.is_loading_position(x, y, z):
                     self.server.send_client_socket(player, block, "BlockUpdate")
         if (
             block_update
@@ -950,7 +968,7 @@ class World:
                 if old_nbt != new_nbt:
                     self.mark_chunk_dirty(nx // 16)
                     for player in self.server.players:
-                        if player.is_loading_position(nx, ny, nz):
+                        if player.world is self and player.is_loading_position(nx, ny, nz):
                             self.server.send_client_socket(
                                 player, neighbor_block, "BlockUpdate"
                             )
@@ -964,6 +982,11 @@ class World:
             on_load()
 
         if self.structure_build_mode:
+            from src.server.block_class import ConnectableBarrier
+            for nx in (x - 1, x, x + 1):
+                neighbor = self.get_block(nx, y, z)
+                if isinstance(neighbor, ConnectableBarrier):
+                    neighbor.on_load()
             self.note_structure_block_change(x, y, z, block)
 
         return set()
@@ -985,6 +1008,7 @@ class World:
             return result
 
         with self._structure_lock:
+            self.structure_edit = dict(data.get("edit", {}))
             self.structure_void_positions = read_positions("void")
             self.structure_air_positions = read_positions("air")
             self.structure_content_positions = read_positions("content")
@@ -993,6 +1017,7 @@ class World:
     def structure_build_state_data(self) -> dict:
         with self._structure_lock:
             return {
+                "edit": self.structure_edit,
                 "bounds": list(self.structure_bounds) if self.structure_bounds else None,
                 "void": [list(value) for value in sorted(self.structure_void_positions)],
                 "air": [list(value) for value in sorted(self.structure_air_positions)],
@@ -1147,6 +1172,8 @@ class World:
         # 第二阶段（临界区）：写入 regions 字典并做跨区块光照计算
         # 光照计算需要读取相邻区块，因此需要串行化以保证一致性
         with self._regions_lock:
+            if rx in self.regions:
+                return {rx}
             self.regions[rx] = new_chunk
             self._initialize_chunk_blocks(new_chunk)
             self.mark_chunk_dirty(rx)
@@ -1166,12 +1193,23 @@ class World:
         普通方块没有这个钩子，因此不会增加加载成本；需要持续效果的
         方块（例如火把）可以在这里恢复定时器，而不依赖玩家重新放置。
         """
-        if self.structure_build_mode:
-            return
+        from src.server.block_class import ConnectableBarrier
+
         for block in chunk.region_array.flat:
+            if self.structure_build_mode and not isinstance(block, ConnectableBarrier):
+                continue
             on_load = getattr(block, "on_load", None)
             if callable(on_load):
                 on_load()
+        # A newly loaded full wall can connect to a fence in the old chunk
+        # without having its own on_load hook. Revisit both adjacent edges.
+        for rx, local_x in ((chunk.x - 1, 15), (chunk.x + 1, 0)):
+            neighbor = self.regions.get(rx)
+            if neighbor is None:
+                continue
+            for block in neighbor.region_array[local_x, :, :].flat:
+                if isinstance(block, ConnectableBarrier):
+                    block.on_load()
 
     def break_block(
         self,
@@ -1227,7 +1265,7 @@ class World:
             self.spawn_experience(x + 0.5, y + 0.5, z, experience)
         if notify_clients and not batching_explosion:
             for player in self.server.players:
-                if player.is_loading_position(x, y, z):
+                if player.world is self and player.is_loading_position(x, y, z):
                     self.server.send_client_socket(player, location, "BreakBlock")
         self.set_block(
             AIR(), x, y, z, send_packet=False, block_update=block_update
@@ -1397,6 +1435,8 @@ class World:
         candidates.extend(getattr(self.server, "players", ()))
         seen: set[str] = set()
         for entity in candidates:
+            if getattr(entity, "world", None) is not self:
+                continue
             entity_key = str(getattr(entity, "uuid", id(entity)))
             if entity_key in seen or getattr(entity, "removed", False):
                 continue

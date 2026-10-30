@@ -62,7 +62,7 @@ class Chicken(Animal):
                 )
                 server = getattr(self.world, "server", None)
                 if server is not None and not self.silent:
-                    server.broadcast_sound(self.sounds["egg"], self.x, self.y, self.z)
+                    server.broadcast_sound(self.sounds["egg"], self.x, self.y, self.z, world=self.world)
                 self.egg_time = random.randint(6000, 12000)
 
     def get_synced_data(self) -> dict:

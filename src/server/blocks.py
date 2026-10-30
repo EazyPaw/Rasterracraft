@@ -1,5 +1,6 @@
 # Commented and arranged by ChatGPT
 import os
+import math
 
 import src.server.materials as materials
 from src.server.biome import get_biome_by_id, get_precipitation_type
@@ -91,6 +92,7 @@ class TillableBlockMixin:
                 float(location.x) + 0.5,
                 float(location.y) + 0.5,
                 int(location.z),
+                world=self.location.world,
             )
         return True
 
@@ -176,6 +178,8 @@ class NETHER_PORTAL(Block):
     has_transparent_pixels = True
     redstone_conducting = False
     light_source = 11
+    hardness = -1.0
+    drops = ()
 
     def on_entity_inside(self, entity) -> None:
         begin = getattr(entity, "begin_nether_portal", None)
@@ -197,6 +201,10 @@ class NETHER_PORTAL(Block):
             x, y, z = pending.pop()
             cells.append((x, y, z))
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                # The other half of a frame can be in an unloaded chunk.
+                # Missing chunk data is not evidence of a broken portal.
+                if not world.is_chunk_loaded((x + dx) // 16):
+                    return
                 neighbor = world.get_block(x + dx, y + dy, z)
                 block_id = getattr(neighbor, "block_id", None)
                 if block_id == self.block_id:
@@ -231,7 +239,7 @@ def _portal_frame(world, x, y, z, width, height):
 
 
 def activate_nether_portal(world, x, y, z) -> bool:
-    """Light a valid 1.8.9-style upright portal; dimension travel is deferred."""
+    """Light a valid 1.8.9-style upright portal."""
     for width in range(2, 22):
         for height in range(3, 22):
             for ox in range(int(x) - width, int(x) + 2):
@@ -1208,6 +1216,7 @@ class DoorBlock(PairedBlock):
                 self.location.x + 0.5,
                 self.location.y + 0.5,
                 self.location.z,
+                world=self.location.world,
             )
         return True
 
@@ -1427,6 +1436,13 @@ class BED(PairedBlock):
         world = head.location.world
         server = getattr(world, "server", None)
         foot = head.get_counterpart()
+        if getattr(world.attribute, "ENVIRONMENT", 0) == -1:
+            loc = head.location
+            for part in (head, foot):
+                if part is not None:
+                    world.set_block(AIR(), part.location, block_update=False)
+            world.spawn_explosion(Location(world, loc.x + 0.5, loc.y + 0.5, int(loc.z)), power=5.0, catch_fire=True)
+            return True
         if foot is None or any(
             not world.get_block(location.add(0, 1, 0)).replaceable
             for location in (foot.location, head.location)
@@ -1948,6 +1964,10 @@ class GLOWSTONE(Block):
     hardness = 0.3
     preferred_tool = "pickaxe"
 
+    def get_drops(self, material):
+        from src.server.item_class import ItemStack
+        return [ItemStack(materials.GLOWSTONE_DUST(), random.randint(2, 4))]
+
 
 @register_block
 class GLASS(Block):
@@ -2213,6 +2233,12 @@ class WATER(FluidBlock):
     flowing_sound = "liquid.water"
     source_sound = "liquid.water"
 
+    def place_at(self, location):
+        if getattr(getattr(location.world, "attribute", None), "ENVIRONMENT", 0) == -1:
+            location.world.server.broadcast_sound("random.fizz", location.x, location.y, location.z, world=location.world)
+            return True
+        return super().place_at(location)
+
 
 @register_block
 class LAVA(FluidBlock):
@@ -2226,11 +2252,8 @@ class LAVA(FluidBlock):
 
     max_level = 7
 
-    flow_level_step = 2
-    horizontal_flow_range = 2
     light_source = 15
     can_create_source = False
-    flow_speed_ticks = 30
     flowing_sound = "liquid.lava"
     source_sound = "liquid.lavapop"
     entity_horizontal_drag = 0.5
@@ -2238,6 +2261,23 @@ class LAVA(FluidBlock):
     # 1.8.9 applies water currents through handleMaterialAcceleration, while
     # lava travel only uses its movement acceleration, drag and gravity.
     entity_current_push = 0.0
+
+    def _in_nether(self):
+        world = getattr(self.location, "world", None)
+        return getattr(getattr(world, "attribute", None), "ENVIRONMENT",
+                       getattr(world, "environment", 0)) == -1
+
+    @property
+    def flow_level_step(self):
+        return 1 if self._in_nether() else 2
+
+    @property
+    def flow_speed_ticks(self):
+        return 10 if self._in_nether() else 30
+
+    @property
+    def horizontal_flow_range(self):
+        return 4 if self._in_nether() else 2
 
 
 @register_block
@@ -2855,7 +2895,7 @@ class TNT(Block):
         world.spawn_entity(primed)
         server = getattr(world, "server", None)
         if server is not None and play_sound:
-            server.broadcast_sound("game.tnt.primed", x + 0.5, y + 0.5, z)
+            server.broadcast_sound("game.tnt.primed", x + 0.5, y + 0.5, z, world=self.location.world)
         return True
 
     def on_use(self, player, material) -> bool:
@@ -3209,6 +3249,8 @@ class NETHER_BRICKS(Block):
     _texture_path = "blocks.nether_brick"
     preferred_tool = "pickaxe"
     requires_correct_tool = True
+    hardness = 2.0
+    blast_resistance = 6.0
 
 
 @register_block
@@ -3218,6 +3260,8 @@ class NETHERRACK(Block):
     _texture_path = "blocks.netherrack"
     preferred_tool = "pickaxe"
     requires_correct_tool = True
+    hardness = 0.4
+    blast_resistance = 0.4
 
 
 @register_block
@@ -3506,7 +3550,7 @@ class CHEST(Block):
             return
         for player in tuple(getattr(server, "players", ())):
             is_loading = getattr(player, "is_loading_position", None)
-            if callable(is_loading) and is_loading(
+            if player.world is world and callable(is_loading) and is_loading(
                 int(chest.location.x),
                 int(chest.location.y),
                 int(chest.location.z),
@@ -3747,6 +3791,7 @@ class CHEST(Block):
                     self.location.x + 0.5,
                     self.location.y + 0.5,
                     self.location.z,
+                    world=self.location.world,
                 )
             server.send_client_socket(
                 player,
@@ -3776,6 +3821,7 @@ class CHEST(Block):
                     self.location.x + 0.5,
                     self.location.y + 0.5,
                     self.location.z,
+                    world=self.location.world,
                 )
 
     def close_all_viewers(self) -> None:
@@ -3851,6 +3897,183 @@ class LADDER(Block):
     suffocating = False
     redstone_conducting = False
     light_attenuation = 1
+
+
+@register_block
+class SOUL_SAND(Block):
+    block_id = "soul_sand"
+    name = "tile.hellsand.name"
+    _texture_path = "blocks.soul_sand"
+    hardness = blast_resistance = 0.5
+    preferred_tool = "shovel"
+    speed_factor = 0.4
+    collision_box = BlockCollisionBox.from_box(0, 0, 1, 14 / 16)
+
+
+@register_block
+class NETHER_QUARTZ_ORE(Block):
+    block_id = "nether_quartz_ore"
+    name = "tile.netherquartz.name"
+    _texture_path = "blocks.quartz_ore"
+    hardness = 3.0
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    drops = (BlockDrop(materials.QUARTZ),)
+
+    def get_experience(self, material):
+        return random.randint(2, 5) if self.can_harvest(material) else 0
+
+
+@register_block
+class NETHER_BRICK_FENCE(FENCES):
+    block_id = "nether_brick_fence"
+    name = "tile.netherFence.name"
+    _texture_path = "blocks.nether_brick"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    hardness = 2.0
+    blast_resistance = 6.0
+
+
+@register_block
+class NETHER_BRICK_STAIRS(STAIRS):
+    block_id = "nether_brick_stairs"
+    name = "tile.stairsNetherBrick.name"
+    _texture_path = "blocks.nether_brick"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    hardness = 2.0
+    blast_resistance = 6.0
+
+
+@register_block
+class NETHER_BRICK_SLAB(SLABS):
+    block_id = "nether_brick_slab"
+    name = "tile.stoneSlab.netherBrick.name"
+    _texture_path = "blocks.nether_brick"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    hardness = 2.0
+    blast_resistance = 6.0
+
+
+@register_block
+class QUARTZ_SLAB(SLABS):
+    block_id = "quartz_slab"
+    name = "tile.stoneSlab.quartz.name"
+    _texture_path = "blocks.quartz_block_side"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    hardness = 2.0
+    blast_resistance = 6.0
+
+
+@register_block
+class QUARTZ_STAIRS(STAIRS):
+    block_id = "quartz_stairs"
+    name = "tile.stairsQuartz.name"
+    _texture_path = "blocks.quartz_block_side"
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    hardness = 0.8
+    blast_resistance = 0.8
+
+
+@register_block
+class NETHER_WART(Crop):
+    block_id = "nether_wart"
+    name = "tile.netherStalk.name"
+    _texture_path = "blocks.nether_wart"
+    max_age = 3
+    maintains_farmland = False
+    render_offset_blocks = (0.0, 0.0)
+
+    def __init__(self, nbt=None, *, age=0):
+        super().__init__(nbt)
+        self.age = max(0, min(3, int(age if nbt is None else self.age)))
+
+    def on_update(self):
+        if self.location is not None and self.location.world.get_block(
+            self.location.add(0, -1, 0)).block_id != "soul_sand":
+            self.location.world.break_block(self.location)
+
+    def place_at(self, location):
+        if location.world.get_block(location.add(0, -1, 0)).block_id != "soul_sand":
+            return False
+        return super().place_at(location)
+
+    def on_random_tick(self):
+        if self.location is None:
+            return
+        self.on_update()
+        if self.location.world.get_block(self.location) is self and self.age < 3 and random.randrange(10) == 0:
+            self.age += 1
+            self.notify_state_changed()
+
+    def get_texture_path(self):
+        return f"blocks.nether_wart_stage_{0 if self.age == 0 else 2 if self.age == 3 else 1}"
+
+    def get_drops(self, material):
+        from src.server.item_class import ItemStack
+        return [ItemStack(materials.NETHER_WART(), random.randint(2, 4) if self.age == 3 else 1)]
+
+
+@register_block
+class MOB_SPAWNER(Block):
+    block_id = "mob_spawner"
+    name = "tile.mobSpawner.name"
+    _texture_path = "blocks.mob_spawner"
+    hardness = 5.0
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    has_transparent_pixels = True
+    light_attenuation = 1
+    drops = ()
+
+    def __init__(self, nbt=None):
+        self.spawn_delay = 20
+        self.spawn_entity_id = "blaze"
+        super().__init__(nbt)
+
+    def on_load(self):
+        if self.location is not None and getattr(self.location.world, "server", None) is not None:
+            self.location.world.register_ticking_block(self)
+
+    def on_unload(self):
+        if self.location is not None and getattr(self.location.world, "server", None) is not None:
+            self.location.world.unregister_ticking_block(self)
+
+    def get_experience(self, material):
+        return 15 + random.randrange(15) + random.randrange(15) if self.can_harvest(material) else 0
+
+    def tick_server(self):
+        loc = self.location
+        world = loc.world
+        if not any(p.world is world and p.health > 0
+                   and getattr(p.gamemode, "name_id", "survival") != "spectator"
+                   and (p.x - loc.x) ** 2 + (p.y - loc.y) ** 2 <= 256
+                   for p in tuple(world.server.players)):
+            return
+        self.spawn_delay -= 1
+        if self.spawn_delay > 0:
+            return
+        self.spawn_delay = random.randint(200, 799)
+        world.mark_chunk_dirty(int(loc.x) // 16)
+        from src.server.entity_registry import create_entity
+        from src.server.entity_spawning import _can_fit
+        nearby = sum(1 for e in tuple(world.entities.values())
+                     if e.entity_id == self.spawn_entity_id and abs(e.x - loc.x) < 8 and abs(e.y - loc.y) < 4)
+        for _ in range(min(4, max(0, 6 - nearby))):
+            entity = create_entity(self.spawn_entity_id, loc.x + random.uniform(-4, 4),
+                                   loc.y + random.randint(0, 1), world, int(loc.z))
+            if not (world.is_position_loaded(math.floor(entity.x), math.floor(entity.y), entity.z)
+                    and world.is_position_loaded(math.floor(entity.x + entity.width), math.floor(entity.y + entity.height), entity.z)):
+                continue
+            if (self.spawn_entity_id == "blaze" and world.get_sum_light(
+                    int(entity.x), int(entity.y)) > 11):
+                continue
+            if world.is_chunk_loaded(int(entity.x // 16)) and _can_fit(world, entity):
+                world.spawn_entity(entity)
 
 
 def get_block_by_id(block_id: str) -> Block:

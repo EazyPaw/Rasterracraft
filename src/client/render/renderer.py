@@ -797,7 +797,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         )
         block_level = float(block_map[local_x, block_y]) / 15.0
         brightness = min(1.0, sky_level + block_level)
-        if brightness <= 0.0:
+        if brightness <= 0.0 and getattr(self.client_world, "environment", 0) != -1:
             return (0, 0, 0)
 
         night_tint = (36, 48, 128)

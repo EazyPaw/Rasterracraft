@@ -98,6 +98,9 @@ class CreateWorldMenu(_DirtMenu):
         self.parent = parent
         self.advanced = False
         self.creating = False
+        self.error_message = ""
+        self._seed_text = ""
+        self._edit_text = ""
         self.game_mode = "survival"
         self.world_type = "default"
         self.generate_structures = True
@@ -195,14 +198,15 @@ class CreateWorldMenu(_DirtMenu):
     def _draw_advanced(self) -> None:
         self.seed_box.draw(self.render)
         self.render.render_text(
-            "Leave blank for a random seed",
+            self.error_message or ("Leave blank for a new structure"
+                if self.world_type == "structure_build" else "Leave blank for a random seed"),
             (self.seed_box.rect.x, self.seed_box.rect.bottom + self.small_gap),
-            GRAY,
+            ERROR if self.error_message else GRAY,
             self.detail_size,
             shadow=True,
         )
         self.render.render_text(
-            "Empty template workspace"
+            "Structure template workspace"
             if self.world_type == "structure_build"
             else "Villages, dungeons etc",
             (self.structures_button.rect.x, self.structures_button.rect.bottom + 5),
@@ -257,6 +261,11 @@ class CreateWorldMenu(_DirtMenu):
         self._refresh_buttons()
 
     def toggle_world_type(self) -> None:
+        was_editor = self.world_type == "structure_build"
+        if was_editor:
+            self._edit_text = self.seed_box.text
+        else:
+            self._seed_text = self.seed_box.text
         if pygame.key.get_mods() & pygame.KMOD_ALT:
             self.world_type = "structure_build"
             self.game_mode = "creative"
@@ -267,6 +276,9 @@ class CreateWorldMenu(_DirtMenu):
             self.world_type = (
                 "superflat" if self.world_type == "default" else "default"
             )
+        self.seed_box.set_text(self._edit_text if self.world_type == "structure_build" else self._seed_text, notify=False)
+        self.seed_box.label = "Structure Name to Edit" if self.world_type == "structure_build" else "Seed for the World Generator"
+        self.error_message = ""
         self._refresh_buttons()
 
     def toggle_cheats(self) -> None:
@@ -289,6 +301,14 @@ class CreateWorldMenu(_DirtMenu):
     def create_world(self) -> None:
         if self.creating:
             return
+        if self.world_type == "structure_build" and self.seed_box.text.strip():
+            from src.server.structure import load_structure_data
+            try:
+                load_structure_data(self.seed_box.text)
+            except (ValueError, TypeError, OSError) as exc:
+                self.error_message = str(exc)
+                self.show_more_options()
+                return
         display_name = self.name_box.text.strip() or "New World"
         self.creating = True
         for button in self.buttons:
@@ -307,7 +327,8 @@ class CreateWorldMenu(_DirtMenu):
             display_name,
             version=getattr(self.client, "version", ""),
             game_mode=self.game_mode,
-            seed=self.seed_box.text,
+            seed="" if self.world_type == "structure_build" else self.seed_box.text,
+            edit_structure=self.seed_box.text if self.world_type == "structure_build" else "",
             generator_name=generator_name,
             generator_options=generator_options,
             generate_structures=self.generate_structures,
@@ -323,6 +344,7 @@ class CreateWorldMenu(_DirtMenu):
         self._switch_to(self.parent)
 
     def _refresh_buttons(self) -> None:
+        self.seed_box.label = "Structure Name to Edit" if self.world_type == "structure_build" else "Seed for the World Generator"
         mode_name = "Survival" if self.game_mode == "survival" else "Creative"
         self.game_mode_button.text = f"Game Mode: {mode_name}"
         self.structures_button.text = (

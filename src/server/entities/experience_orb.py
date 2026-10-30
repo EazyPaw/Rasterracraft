@@ -170,7 +170,7 @@ class ExperienceOrb(CollectibleEntity):
         player.add_experience(self.value)
         server = getattr(self.world, "server", None)
         if server is not None:
-            server.broadcast_sound("random.orb", self.x, self.y, self.z)
+            server.broadcast_sound("random.orb", self.x, self.y, self.z, world=self.world)
         self.count -= 1
         if self.count <= 0:
             self.world.remove_entity(self)

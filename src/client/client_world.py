@@ -23,6 +23,7 @@ class ClientWorld:
 
     def __init__(self, client):
         self.id_name = "null"
+        self.environment = 0
         self._regions: dict[int, np.ndarray[Any, np.dtype[Block]]] = {}
         self.light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
         self.sky_light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
@@ -88,8 +89,8 @@ class ClientWorld:
                 if "biome_array" in packet:
                     self.load_biomes(rx, packet["biome_array"], load_version)
             callback = getattr(self.client, "on_chunk_loaded", None)
-            if self.is_chunk_loaded(rx) and callable(callback):
-                callback(rx)
+            if self.client.client_world is self and self.is_chunk_loaded(rx) and callable(callback):
+                callback(rx, world=self)
         except Exception:
             logging.exception("Failed to decode chunk %s", rx)
 

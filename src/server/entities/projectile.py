@@ -504,7 +504,8 @@ class Projectile(Entity, ABC):
         owner = self.get_owner()
         callback = getattr(target, "on_projectile_hit", None)
         if callable(callback):
-            callback(self, result)
+            if callback(self, result) is True:
+                return False
         damage = max(0.0, float(self.impact_damage))
         target.apply_damage(
             damage,
