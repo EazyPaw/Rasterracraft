@@ -594,7 +594,18 @@ class Player(Entity):
         if notify and old_target is not None:
             self._send_break_progress(old_target, 0.0, False)
 
+    def can_mine_with_held_item(self) -> bool:
+        held = self.inventory[self.selected_slot]
+        return not (
+            getattr(self.gamemode, "name_id", "survival") == "creative"
+            and not held.is_empty()
+            and getattr(held.material, "tool_type", None) == "sword"
+        )
+
     def request_breaking(self, x: int, y: int, z: int) -> bool:
+        if not self.can_mine_with_held_item():
+            self.clear_breaking()
+            return False
         if self.eating:
             self.clear_eating(sync=True)
         if self.blocking:
@@ -662,6 +673,9 @@ class Player(Entity):
         target = self.breaking_target
         if target is None:
             return
+        if not self.can_mine_with_held_item():
+            self.clear_breaking()
+            return
         current_tick = int(getattr(self.world.server, "server_ticks", 0))
 
         if (
@@ -701,7 +715,8 @@ class Player(Entity):
             repr(getattr(held_stack, "nbt", {})),
         )
         valid_target = (
-            target is not None
+            self.can_mine_with_held_item()
+            and target is not None
             and target[:3] == (x, y, z)
             and getattr(block, "block_id", "air") == target[3]
             and getattr(block, "breakable", False)

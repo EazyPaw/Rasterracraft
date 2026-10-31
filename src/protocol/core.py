@@ -231,7 +231,7 @@ packet_spec("PlayerAction", SERVERBOUND, fields=("action", "x", "y", "z"), requi
 packet_spec("BreakBlock", SERVERBOUND, CLIENTBOUND, fields=("x", "y", "z"), required=("x", "y", "z"))
 packet_spec("RightClick", SERVERBOUND, fields=("x", "y", "z", "context"))
 packet_spec("PickupItem", SERVERBOUND, fields=("uuid",), required=("uuid",))
-packet_spec("AttackEntity", SERVERBOUND, fields=("uuid",), required=("uuid",))
+packet_spec("AttackEntity", SERVERBOUND, fields=("uuid", "direction"), required=("uuid",))
 packet_spec("InteractEntity", SERVERBOUND, fields=("uuid",), required=("uuid",))
 packet_spec("SelfDamage", SERVERBOUND)
 packet_spec("ChatMessage", SERVERBOUND, CLIENTBOUND, fields=("text", "color"), required=("text",))

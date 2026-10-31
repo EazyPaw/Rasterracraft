@@ -23,6 +23,7 @@ from src.client.camera import Camera
 from src.client.status_effect_shader import StatusEffectShader
 from src.server.biome import get_biome_by_id
 from src.server.block_class import PlacementContext
+from src.server.targeting import pick_entity, player_eye
 from src.server.text import (
     Text,
     darken_text_color,
@@ -1329,6 +1330,19 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             + self.camera.y
             - 0.5,
         )
+
+    def get_attack_direction(self):
+        player = self.client.client_player
+        mouse = self.get_mouse_world_position()
+        eye = player_eye(player)
+        return mouse[0] - eye[0], mouse[1] - eye[1]
+
+    def get_attack_target(self):
+        player = self.client.client_player
+        if player is None:
+            return None
+        return pick_entity(player, self.client_world,
+                           self.client_world.iter_entities(), self.get_attack_direction())
 
     def get_hovered_entity(self):
         player = self.client.client_player

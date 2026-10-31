@@ -13,6 +13,7 @@ from src.server.inventory import (
 from src.server.item_class import EmptyItemStack
 from src.server.particles import ParticleEffect
 from src.server.player import Player
+from src.server.targeting import pick_entity
 from src.server.world_class import Chunk
 from src.server.structure import apply_structure_mask
 from src.protocol import (
@@ -506,9 +507,16 @@ def _handle_pickup_item(packet: dict, player: Player) -> None:
 
 @SERVER_PACKET_DISPATCHER.handler("AttackEntity")
 def _handle_attack_entity(packet: dict, player: Player) -> None:
-    if player.sleeping:
+    if player.sleeping or player.health <= 0:
         return
-    target = _find_attack_target(player, packet.get("uuid", ""))
+    direction = packet.get("direction")
+    if direction is None:
+        angle = math.radians(player.look_angle)
+        facing = 1.0 if player.facing == 1 else -1.0
+        direction = facing * math.cos(angle), facing * math.sin(angle)
+    candidates = (*tuple(player.world.entities.values()),
+                  *tuple(player.world.server.players))
+    target = pick_entity(player, player.world, candidates, direction)
     current_tick = int(getattr(player.world.server, "server_ticks", 0))
     if (
         target is not None
@@ -516,6 +524,7 @@ def _handle_attack_entity(packet: dict, player: Player) -> None:
         and _can_player_reach_entity(player, target)
     ):
         player._last_attack_tick = current_tick
+        player.clear_breaking()
         player.clear_eating(sync=True)
         player.clear_blocking(sync=True)
         player.clear_bow_use(sync=True)

@@ -159,8 +159,12 @@ class GameManager:
             player.choosing_entity = self.client.render.get_hovered_entity()
             if mouse_button[0]:
                 first_left_press = not self.client.hold_mouse_buttons[0]
-                if player.choosing_entity is not None:
-                    player.game_mode.left_click_on_entity(player.choosing_entity)
+                attack_target = self.client.render.get_attack_target()
+                if attack_target is not None:
+                    reset_breaking = getattr(player.game_mode, "reset_breaking", None)
+                    if callable(reset_breaking):
+                        reset_breaking(notify_server=True)
+                    player.game_mode.left_click_on_entity(attack_target)
                 elif (
                     player.choosing_block is not None
                     and (loc := player.choosing_block.location) is not None

@@ -169,6 +169,7 @@ class GameMode(ABC):
             {
                 "__class__": "AttackEntity",
                 "uuid": str(entity.uuid),
+                "direction": list(self.player.client.render.get_attack_direction()),
             }
         )
 
@@ -227,6 +228,9 @@ class CreativeMode(GameMode):
 
     def left_click_on_block(self, block: Block):
         if self.player.client.hold_mouse_buttons[0]:
+            return
+        held = self.player.inventory[self.player.selected_slot]
+        if not held.is_empty() and getattr(held.material, "tool_type", None) == "sword":
             return
         location = self.player.choosing_block.location
         block = self.player.client.client_world.get_block(location)
