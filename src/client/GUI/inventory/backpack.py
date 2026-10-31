@@ -41,6 +41,9 @@ class Backpack(GUI):
     crafting_output_offset = (154, 28)
     quick_move_screen = "inventory"
     inventory_offset = (7, 83)
+    player_preview_rect = (26, 8, 49, 70)
+    player_preview_feet = (51, 75)
+    player_preview_scale = 30
     equipment_offsets = (
         ("head", (7, 7)),
         ("chest", (7, 25)),
@@ -828,6 +831,24 @@ class Backpack(GUI):
         elif button == 3:
             self._drop_cursor_item(single=True)
 
+    def _draw_player_preview(self, gui_x, gui_y):
+        # Other Backpack subclasses render container layouts without a portrait.
+        if self._texture_path != "gui.container.inventory" and not (
+            getattr(self, "active_tab", None) == "inventory"
+        ):
+            return
+        player = getattr(self.render.client, "client_player", None)
+        skeleton = getattr(player, "skeleton", None)
+        if skeleton is None:
+            return
+        scale = self.render.gui_scale
+        x, y, width, height = self.player_preview_rect
+        panel = pygame.Rect(round(gui_x + x * scale), round(gui_y + y * scale),
+                            round(width * scale), round(height * scale))
+        feet = (gui_x + self.player_preview_feet[0] * scale,
+                gui_y + self.player_preview_feet[1] * scale)
+        skeleton.draw_inventory_preview(self.render, panel, feet, self.player_preview_scale * scale)
+
     def draw(self):
         """
         渲染背包界面的完整流程：
@@ -843,6 +864,7 @@ class Backpack(GUI):
         x = (self.render.SCREEN_WIDTH - texture.get_width()) // 2
         y = (self.render.SCREEN_HEIGHT - texture.get_height()) // 2
         self.render.blit(texture, (x, y))
+        self._draw_player_preview(x, y)
         self.selecting_solt = None
         self.selecting_item = None
 

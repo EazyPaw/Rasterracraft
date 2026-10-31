@@ -42,6 +42,7 @@ class ClientPlayer(Entity):
         self._input_axis = 0
         self._input_descending = False
         self._mouse_turn_requested = False
+        self._turn_tap_axis = 0
         self.set_attribute_base_value("waypoint_receive_range", 60_000_000.0)
         self.set_attribute_base_value("waypoint_transmit_range", 60_000_000.0)
         self.max_health = 20
@@ -125,7 +126,7 @@ class ClientPlayer(Entity):
             self.facing,
         )
         buttons = pygame.mouse.get_pressed()
-        if (buttons[0] or buttons[2] or self._mouse_turn_requested) and not self.client.game_manager.gameplay_input_blocked():
+        if (buttons[0] or buttons[2] or getattr(self, "_mouse_turn_requested", False)) and not self.client.game_manager.gameplay_input_blocked():
             self.face_cursor()
         if self._movement_opposes_look(self.motion.x):
             self.sprinting = False
@@ -150,6 +151,10 @@ class ClientPlayer(Entity):
 
     def handle_shift(self):
         self._input_descending = True
+
+    def begin_keyboard_turn(self, axis):
+        """Capture even a press/release that fits between two 20 Hz input polls."""
+        self._turn_tap_axis = axis
 
     def switch_sprint(self, mode=None):
         self.update_mouse_look()
@@ -198,6 +203,8 @@ class ClientPlayer(Entity):
         if self.dead or self.sleeping or not self.client.can_simulate_player(self):
             self._input_axis = 0
             self._input_descending = False
+            self._turn_tap_axis = 0
+            self._mouse_turn_requested = False
             self.jumping = False
         if self.dead:
             return
@@ -222,8 +229,10 @@ class ClientPlayer(Entity):
             "sprinting": self.sprinting, "facing": self.facing,
             "look_angle": self.look_angle, "flying": self.flying,
             "mouse_active": not blocked and bool(buttons[0] or buttons[2] or self._mouse_turn_requested),
+            "turn_tap": (self._turn_tap_axis if not blocked and not (keys[pygame.K_a] or keys[pygame.K_d]) else 0),
         }
         self._mouse_turn_requested = False
+        self._turn_tap_axis = 0
         self._input_axis = 0
         self._input_descending = False
         self._movement_sequence += 1

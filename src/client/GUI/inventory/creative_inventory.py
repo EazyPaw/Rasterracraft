@@ -29,6 +29,9 @@ class CreativeInventory(Backpack):
     catalog_offset = (8, 17)
     hotbar_offset = (8, 111)
     survival_inventory_offset = (8, 52)
+    player_preview_rect = (73, 6, 31, 43)
+    player_preview_feet = (88, 45)
+    player_preview_scale = 20
     scroll_offset = (175, 18)
     scroll_track_height = 90
     delete_offset = (173, 111)
@@ -259,6 +262,7 @@ class CreativeInventory(Backpack):
             self._draw_stack_at(self.inventory[slot], pos)
 
     def _draw_inventory_tab(self, gui_x, gui_y):
+        self._draw_player_preview(gui_x, gui_y)
         self._draw_inventory_slots(gui_x, gui_y)
         mouse = (self.render.mouse_x, self.render.mouse_y)
         size = self.slot_size * self.render.gui_scale

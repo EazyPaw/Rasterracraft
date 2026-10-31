@@ -224,7 +224,7 @@ class PacketDispatcher(Generic[ContextT]):
 # optional extra fields remain accepted during the migration for compatibility.
 packet_spec("ClientHello", SERVERBOUND, fields=("name",), required=("name",))
 packet_spec("DisconnectAck", SERVERBOUND)
-packet_spec("PlayerMove", SERVERBOUND, fields=("sneaking", "sprinting", "facing", "flying", "look_angle", "move_axis", "jumping", "descending", "sequence", "mouse_active"), required=("sequence", "move_axis", "jumping"))
+packet_spec("PlayerMove", SERVERBOUND, fields=("sneaking", "sprinting", "facing", "flying", "look_angle", "move_axis", "jumping", "descending", "sequence", "mouse_active", "turn_tap"), required=("sequence", "move_axis", "jumping"))
 packet_spec("TeleportConfirm", SERVERBOUND, fields=("teleport_id",))
 packet_spec("ChunkReady", SERVERBOUND, fields=("rx", "world_id"), required=("rx",))
 packet_spec("PlayerAction", SERVERBOUND, fields=("action", "x", "y", "z"), required=("action",))

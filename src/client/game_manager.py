@@ -249,6 +249,8 @@ class GameManager:
                 self.client.client_player._mouse_turn_requested = True
                 self.client.client_player.update_mouse_look()
             if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_a, pygame.K_d) and not getattr(event, "repeat", False):
+                    self.client.client_player.begin_keyboard_turn(1 if event.key == pygame.K_d else -1)
                 if event.key == pygame.K_ESCAPE:
                     self.client.open_pause_menu()
                     continue

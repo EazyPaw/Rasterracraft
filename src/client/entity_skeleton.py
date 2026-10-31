@@ -3,6 +3,7 @@ import math
 import time
 from abc import ABC
 from collections import OrderedDict
+from copy import copy
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -71,6 +72,7 @@ class BodyPart:
         self.target_flip_x = False
 
         self.render_scale = 1.0
+        self.vertical_scale = 1.0
         # ModelBox expands each face without moving the model's joint.
         self.inflate = 0.0
         # Optional high-resolution scaling along an authored visual axis. Sword
@@ -185,8 +187,9 @@ class BodyPart:
     def rebuild_texture(self, scale: float):
         """按当前渲染缩放和实体大小生成最终贴图。"""
         effective_scale = scale * self.render_scale
+        vertical_scale = effective_scale * self.vertical_scale
         width = max(1, round((self.original_texture.get_width() + 2 * self.inflate) * effective_scale))
-        height = max(1, round((self.original_texture.get_height() + 2 * self.inflate) * effective_scale))
+        height = max(1, round((self.original_texture.get_height() + 2 * self.inflate) * vertical_scale))
         # 普通肢体的 pivot 只改变贴图相对关节的位置，不改变缩放/旋转后的
         # 像素。把它从像素变换键中拿掉，避免大量实体在姿态插值期间仅因
         # pivot 小幅变化就重复 scale + rotate。沿局部轴压缩的手持物仍走
@@ -204,6 +207,7 @@ class BodyPart:
             self.flip_x,
             round(self.render_scale, 4),
             round(self.inflate, 4),
+            round(self.vertical_scale, 4),
             round(self.local_axis_scale, 4),
             round(self.local_axis_alignment_angle, 2),
             pivot_key,
@@ -213,7 +217,7 @@ class BodyPart:
                 pivot_x = (self.pivot[0] + self.inflate) * effective_scale
                 if self.flip_x:
                     pivot_x = self.base_texture.get_width() - pivot_x
-                self._render_pivot = (pivot_x, (self.pivot[1] + self.inflate) * effective_scale)
+                self._render_pivot = (pivot_x, (self.pivot[1] + self.inflate) * vertical_scale)
             return
 
         prepared_key = (
@@ -236,7 +240,7 @@ class BodyPart:
                 else None
             )
             pivot_x = (self.pivot[0] + self.inflate) * effective_scale
-            pivot = pygame.Vector2(pivot_x, (self.pivot[1] + self.inflate) * effective_scale)
+            pivot = pygame.Vector2(pivot_x, (self.pivot[1] + self.inflate) * vertical_scale)
             if self.flip_x:
                 base = pygame.transform.flip(base, True, False)
                 if overlay is not None:
@@ -271,7 +275,7 @@ class BodyPart:
             pivot_x = (self.pivot[0] + self.inflate) * effective_scale
             if self.flip_x:
                 pivot_x = base.get_width() - pivot_x
-            pivot = (pivot_x, (self.pivot[1] + self.inflate) * effective_scale)
+            pivot = (pivot_x, (self.pivot[1] + self.inflate) * vertical_scale)
         self.base_texture = base
         self.base_overlay_texture = overlay
         self._render_pivot = pivot
@@ -340,7 +344,7 @@ class EntitySkeleton(ABC):
 
     _instances = []
 
-    def __init__(self, client, texture: str, entity):
+    def __init__(self, client, texture: str, entity, *, register=True):
         self.client = client
         self.texture: pygame.Surface = client.resources_manager.get_texture_img(texture)
         self.entity = entity
@@ -366,7 +370,8 @@ class EntitySkeleton(ABC):
         self._tick_start = time.perf_counter()
         self._tick_duration = 1.0 / max(getattr(client, "rate", 20), 1)
 
-        EntitySkeleton._instances.append(self)
+        if register:
+            EntitySkeleton._instances.append(self)
 
     @classmethod
     def get_all_instances(cls):
@@ -640,8 +645,8 @@ class PlayerSkeleton(EntitySkeleton):
     }
 
     @client_method
-    def __init__(self, player, *, pinned: bool = True, client=None):
-        super().__init__(client, "entity.steve", player)
+    def __init__(self, player, *, pinned: bool = True, client=None, register=True):
+        super().__init__(client, "entity.steve", player, register=register)
         # 视觉模型高度与碰撞体高度分离：模型按固定 1.8 格绘制，
         # 脚底对齐 entity.y，模型向上延伸约 1.8 格。
         self.size = self.VISUAL_HEIGHT_BLOCKS / self.AUTHORED_HEIGHT_BLOCKS
@@ -758,7 +763,7 @@ class PlayerSkeleton(EntitySkeleton):
         }
         for kind, right, left, right_wear, left_wear in (
                 ("arm", (40, 16), (32, 48), (40, 32), (48, 48)),
-                ("leg", (0, 16), (16, 48), (0, 32), (0, 48)):
+                ("leg", (0, 16), (16, 48), (0, 32), (0, 48))):
             for position in ("front", "back"):
                 is_left = position == "back"
                 parts[f"{position}_{kind}"] = self._box_front(
@@ -770,6 +775,51 @@ class PlayerSkeleton(EntitySkeleton):
         if modern:
             parts["body_overlay"] = self._box_front((16, 32), (8, 12, 4))
         return parts
+
+    def draw_inventory_preview(self, render, panel_rect, feet, model_scale):
+        """Draw a full-bright GUI portrait using an independent front-facing pose."""
+        portrait = copy(self.entity)
+        portrait.front_view = True
+        portrait.sleeping = portrait.sneaking = False
+        portrait.blocking = portrait.using_bow = False
+        portrait.look_angle = 0.0
+        portrait.motion = pygame.Vector2()
+        preview = getattr(self, "_inventory_model", None)
+        if preview is None:
+            preview = PlayerSkeleton(portrait, pinned=False, client=self.client, register=False)
+            self._inventory_model = preview
+        preview.entity = portrait
+        if preview.texture is not self.texture:
+            preview.texture = self.texture
+            preview._build_player_body()
+            preview._current_texture_side = None
+            preview._armor_texture_side = None
+            preview._held_item_texture_side = None
+        preview.facing = self.RIGHT
+        preview._animation_age = getattr(self, "_animation_age", 0.0)
+        preview._apply_pose(instant=True)
+        rect = pygame.Rect(panel_rect)
+        canvas = getattr(self, "_inventory_canvas", None)
+        if canvas is None or canvas.get_size() != rect.size:
+            canvas = pygame.Surface(rect.size, pygame.SRCALPHA)
+            self._inventory_canvas = canvas
+        canvas.fill((0, 0, 0, 0))
+        center_x = getattr(portrait, "width", 0.6) * 0.5
+        for part in preview._parts_in_draw_order():
+            if not part.show:
+                continue
+            part.rebuild_texture(model_scale / 16.0 * preview.size)
+            anchor = pygame.Vector2(
+                feet[0] - rect.x + (part.anchor[0] - center_x) * model_scale,
+                feet[1] - rect.y - part.anchor[1] * model_scale,
+            )
+            top_left = (anchor - pygame.Vector2(part.texture.get_size()) * 0.5
+                        - part.get_rotated_pivot_offset())
+            position = (round(top_left.x), round(top_left.y))
+            canvas.blit(part.texture, position)
+            if part.overlay_texture is not None:
+                canvas.blit(part.overlay_texture, position, special_flags=pygame.BLEND_RGB_ADD)
+        render.blit(canvas, rect.topleft)
 
     def _build_player_body(self):
         self._part_textures = self._biped_textures(player=True)
@@ -1361,7 +1411,7 @@ class PlayerSkeleton(EntitySkeleton):
                 continue
             overlay, source = self.body[overlay_name], self.body[source_name]
             for attr in ("anchor", "target_anchor", "pivot", "target_pivot", "angle",
-                         "target_angle", "show", "target_show", "flip_x", "target_flip_x"):
+                         "target_angle", "show", "target_show", "flip_x", "target_flip_x", "vertical_scale"):
                 setattr(overlay, attr, getattr(source, attr))
         for armor_name, source_name in self.ARMOR_SOURCE_PARTS.items():
             armor = self.body[armor_name]
@@ -1378,6 +1428,7 @@ class PlayerSkeleton(EntitySkeleton):
             armor.target_show = equipped and source.target_show
             armor.flip_x = source.flip_x
             armor.target_flip_x = source.target_flip_x
+            armor.vertical_scale = source.vertical_scale
 
     def _pose_part(
         self,
@@ -1392,7 +1443,7 @@ class PlayerSkeleton(EntitySkeleton):
         """给指定部件写入目标姿态，减少 _apply_pose() 里的重复代码。"""
         if flip_x is None:
             flip_x = self.facing == self.LEFT
-        if name in ("front_arm", "back_arm", "front_leg", "back_leg"):
+        if name in ("front_arm", "back_arm", "front_leg", "back_leg") and self.texture_view != self.FRONT:
             pivot = (self.LIMB_DEPTH / 2, pivot[1])
         self.body[name].set_pose(Pose(anchor, pivot, angle, visible, flip_x))
 
@@ -1402,6 +1453,8 @@ class PlayerSkeleton(EntitySkeleton):
         self._set_facing_textures()
         self._update_held_item_texture()
         self._update_armor_textures()
+        for part in self.body.values():
+            part.vertical_scale = 1.0
 
         if getattr(self.entity, "sleeping", False):
             facing_changed = self._last_facing != self.facing
@@ -1587,8 +1640,59 @@ class PlayerSkeleton(EntitySkeleton):
         # Arms point down at zero degrees in this skeleton.  Rotating +/-90
         # makes the held arm horizontal, then look_angle follows the cursor.
         aim_angle = direction * 90.0 + look_angle
-        angles["front_arm_angle"] = aim_angle
-        angles["back_arm_angle"] = aim_angle - direction * math.degrees(0.4)
+        idle_x, _ = self._idle_arm_angles()
+        idle = -direction * math.degrees(idle_x)
+        if self.facing == self.LEFT:
+            idle = -idle
+        angles["front_arm_angle"] = aim_angle + idle
+        angles["back_arm_angle"] = aim_angle - direction * math.degrees(0.4) - idle
+
+    def _write_front_pose(self, angles, instant):
+        scale = self.size
+        cx = getattr(self.entity, "width", 0.6) * 0.5
+        crouch = -0.16 * scale if getattr(self.entity, "sneaking", False) else 0.0
+        neck_y = 1.5 * scale + crouch
+        hip_y = 0.75 * scale + crouch
+        _idle_x, idle_z = self._idle_arm_angles()
+        phase = getattr(self, "_render_limb_swing", self.walk_time) * 0.6662
+        amount = getattr(self, "_render_limb_amount", 0.0)
+        right_arm_x = math.cos(phase + math.pi) * amount + _idle_x
+        left_arm_x = math.cos(phase) * amount - _idle_x
+        right_leg_x = math.cos(phase) * 1.4 * amount
+        left_leg_x = math.cos(phase + math.pi) * 1.4 * amount
+        right_z = -math.degrees(idle_z)
+        left_z = math.degrees(idle_z)
+        # ModelBiped joints and the front quads, projected straight onto screen.
+        self._pose_part("body", (cx, neck_y), (4, 0), 0, flip_x=False)
+        self._pose_part("head", (cx, neck_y), (4, 8), 0, flip_x=False)
+        self._pose_part("head_overlay", (cx, neck_y), (4, 8), 0, flip_x=False)
+        right_shoulder = (cx - 5 / 16 * scale, neck_y - 2 / 16 * scale)
+        left_shoulder = (cx + 5 / 16 * scale, neck_y - 2 / 16 * scale)
+        self._pose_part("front_arm", right_shoulder, (3, 2), right_z, flip_x=False)
+        self._pose_part("back_arm", left_shoulder, (1, 2), left_z, flip_x=False)
+        self._pose_part("front_leg", (cx - 1.9 / 16 * scale, hip_y), (2, 0), 0, flip_x=False)
+        self._pose_part("back_leg", (cx + 1.9 / 16 * scale, hip_y), (2, 0), 0, flip_x=False)
+        # X-axis swing points into/out of the screen; project length, not sideways kick.
+        for name, pitch in (("front_arm", right_arm_x), ("back_arm", left_arm_x),
+                            ("front_leg", right_leg_x), ("back_leg", left_leg_x)):
+            self.body[name].vertical_scale = max(0.05, math.cos(pitch))
+        arm = self.body["front_arm"]
+        arm_angle = math.radians(right_z)
+        hand_length = 10 / 16 * scale * arm.vertical_scale
+        hand = (right_shoulder[0] + math.sin(arm_angle) * hand_length,
+                right_shoulder[1] - math.cos(arm_angle) * hand_length)
+        visible = bool(self._held_item_key is not None and self._held_item_key[1])
+        self._pose_part("held_item", hand, self._held_item_pivot, right_z,
+                        visible=visible, flip_x=False)
+        for armor_name, source_name in self.ARMOR_SOURCE_PARTS.items():
+            source = self.body[source_name]
+            self.body[armor_name].set_pose(Pose(
+                source.target_anchor, source.target_pivot, source.target_angle,
+                self._armor_part_visible.get(armor_name, False), False))
+        if instant:
+            for part in self.body.values():
+                part.tick(1.0)
+            self._sync_armor_parts_to_body()
 
     def _write_pose(self, angles: dict, instant: bool, facing_changed: bool):
         """计算锚点坐标并写入全部身体部件。"""

@@ -1338,6 +1338,9 @@ class Entity:
         self.facing = 1 if controls.get("facing") == 1 else 0
         self.look_angle = float(controls.get("look_angle", self.look_angle))
         axis = max(-1, min(1, int(controls.get("move_axis", 0))))
+        tap = controls.get("turn_tap", 0)
+        if not axis and tap in (-1, 1):
+            self.update_body_facing(tap)
         self.update_body_facing(axis, controls.get("mouse_active") is True)
         self.sprinting = bool(controls.get("sprinting")) and not getattr(self, "blocking", False)
         if axis and (axis > 0) != (self.facing == 1):
@@ -1348,7 +1351,7 @@ class Entity:
         if controls.get("descending") is True:
             Entity.handle_shift(self)
 
-    TURN_DURATION_TICKS = 3
+    TURN_DURATION_TICKS = 2
 
     def face_cursor(self):
         self.body_facing = self.facing
