@@ -370,6 +370,8 @@ class Skeleton(RangedMob):
         self.held_item = ItemStack(get_material_by_id("bow"), 1)
 
     def update_ai(self):
+        from src.server.mob_rules import tick_sunlight_burning
+        tick_sunlight_burning(self)
         target = self.choose_target()
         self.shot_ticks -= 1
         if target is not None and visible(self, target) and self.shot_ticks <= 0:

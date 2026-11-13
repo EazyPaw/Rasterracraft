@@ -11,6 +11,7 @@ from src.server.entity_AI import ZombieAI
 from src.server.entity_registry import register_entity
 from src.server.item_class import ItemStack
 from src.server.materials import ROTTEN_FLESH
+from src.server.mob_rules import tick_sunlight_burning
 from src.server.utils import client_method
 
 
@@ -45,6 +46,7 @@ class Zombie(Entity):
         self.ai = ZombieAI(self)
 
     def update_ai(self) -> None:
+        tick_sunlight_burning(self)
         self.ai.tick()
 
 

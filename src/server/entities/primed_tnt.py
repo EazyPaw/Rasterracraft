@@ -14,6 +14,8 @@ from src.server.utils import client_method
 
 @register_entity(summonable=False)
 class PrimedTNT(Entity):
+    receives_damage = False
+    fire_immune = True
     entity_id = "primed_tnt"
     translation_key = "entity.PrimedTnt.name"
 

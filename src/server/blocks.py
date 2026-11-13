@@ -1521,28 +1521,37 @@ class BED(PairedBlock):
         foot = head.get_counterpart()
         if foot is None:
             return None
-        bed_locations = (foot.location, head.location)
-
-        for location in (
-            foot.location.add(-head.facing, 0, 0),
-            head.location.add(head.facing, 0, 0),
-        ):
+        # Players always occupy the foreground, even when the bed is behind
+        # them. Check exits against foreground collision and support too.
+        bed_locations = tuple(Location(world, loc.x, loc.y, 0)
+                              for loc in (foot.location, head.location))
+        foot_front, head_front = bed_locations
+        candidates = [foot_front.add(-head.facing, 0, 0),
+                      head_front.add(head.facing, 0, 0)]
+        candidates.extend(head_front.add(dx, dy, 0)
+                          for radius in range(1, 9)
+                          for dx in (-radius, radius)
+                          for dy in (0, 1, -1, 2, -2))
+        for location in candidates:
             if (
-                world.get_block(location).replaceable
-                and world.get_block(location.add(0, 1, 0)).replaceable
+                world.is_chunk_loaded(int(location.x) // 16)
+                and all(not world.get_block(location.add(0, dy, 0)).has_collision_box()
+                        and not getattr(world.get_block(location.add(0, dy, 0)), "is_fluid", False)
+                        for dy in (0, 1))
                 and self._has_support(world, location)
             ):
-                return float(location.x) + 0.2, float(location.y), int(location.z)
+                return float(location.x) + 0.2, float(location.y), 0
 
         for location in bed_locations:
             if (
-                world.get_block(location.add(0, 1, 0)).replaceable
+                isinstance(world.get_block(location), BED)
+                and world.get_block(location.add(0, 1, 0)).replaceable
                 and world.get_block(location.add(0, 2, 0)).replaceable
             ):
                 return (
                     float(location.x) + 0.2,
                     float(location.y) + 9 / 16,
-                    int(location.z),
+                    0,
                 )
         return None
 
@@ -2357,10 +2366,62 @@ class VINE(GrassStain):
     name = "tile.vine.name"
     _texture_path = "blocks.vine"
     light_attenuation = 1
+    climbable = True
+    suffocating = False
+    redstone_conducting = False
+    hardness = 0.2
+    drops = ()
+    # Depth faces represent Minecraft's north/south wall attachments.
+    faces = ("left", "right", "back", "front", "up")
+
+    def supported_faces(self, location):
+        world = location.world
+        allowed = set(self.faces)
+        supported = set()
+        offsets = {"left": (-1, 0, 0), "right": (1, 0, 0),
+                   "back": (0, 0, 1), "front": (0, 0, -1), "up": (0, 1, 0)}
+        # A vine may hang from another vine with the same attached face.
+        # Walk upward iteratively so a long hanging chain cannot recurse.
+        for y in range(int(location.y), world.attribute.MAX_BUILD_HEIGHT):
+            for face in allowed:
+                dx, dy, dz = offsets[face]
+                z = int(location.z) + dz
+                if not 0 <= z <= 1:
+                    continue
+                if not world.is_chunk_loaded((int(location.x) + dx) // 16):
+                    supported.add(face)
+                elif SupportedBlock.is_full_block(world.get_block(location.x + dx, y + dy, z)):
+                    supported.add(face)
+            above = world.get_block(location.x, y + 1, location.z)
+            if not isinstance(above, VINE):
+                break
+            allowed.intersection_update(above.faces)
+            if not allowed:
+                break
+        return supported
+
+    def get_state_for_placement(self, location, **kwargs):
+        faces = self.supported_faces(location)
+        if not faces and not getattr(location.world, "structure_build_mode", False):
+            return None
+        if faces:
+            self.faces = tuple(sorted(faces))
+        return self
+
+    def place_at(self, location):
+        if self.get_state_for_placement(location) is None:
+            return False
+        return super().place_at(location)
 
     def on_update(self):
-
-        pass
+        if self.location is None or getattr(self.location.world, "structure_build_mode", False):
+            return
+        faces = self.supported_faces(self.location)
+        if not faces:
+            self.location.world.break_block(self.location)
+        elif set(self.faces) != faces:
+            self.faces = tuple(sorted(faces))
+            self.location.world.set_block(self, self.location)
 
 
 @register_block

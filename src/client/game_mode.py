@@ -197,6 +197,10 @@ class GameMode(ABC):
     def mouse_wheel(self, direction):
         pass
 
+    def select_hotbar_slot(self, slot):
+        if self.name_id != "spectator":
+            CreativeMode.select_hotbar_slot(self, slot)
+
     def open_inventory(self):
         pass
 
@@ -232,9 +236,12 @@ class CreativeMode(GameMode):
         held = self.player.inventory[self.player.selected_slot]
         if not held.is_empty() and getattr(held.material, "tool_type", None) == "sword":
             return
-        location = self.player.choosing_block.location
+        target = self.player.choosing_block
+        location = getattr(target, "location", None)
+        if location is None:
+            return
         block = self.player.client.client_world.get_block(location)
-        if block.breakable:
+        if block.can_player_break(creative=True):
             self.player.client.sent_packet(
                 {
                     "__class__": "PlayerAction",
@@ -258,7 +265,13 @@ class CreativeMode(GameMode):
         super().right_click_on_block(block)
 
     def get_choosing_block(self):
-        block_x, block_y = self.player.client.render.choosing_position
+        block_x, block_y = self.player.client.render.get_hovered_block_position()
+        if block_x is None or block_y is None:
+            self.player.choosing_block = None
+            reset = getattr(self, "reset_breaking", None)
+            if callable(reset):
+                reset(notify_server=True)
+            return
         if self.player.fore_place:
             foreground = self.player.client.client_world.get_block(block_x, block_y, 0)
             if getattr(foreground, "solid", False):
@@ -291,12 +304,14 @@ class CreativeMode(GameMode):
         hotbar_slots = min(9, len(self.player.inventory))
         if direction == 0 or hotbar_slots == 0:
             return
-        self.stop_item_use(notify_server=True)
-
         slot_delta = -1 if direction > 0 else 1
-        self.player.selected_slot = (
-            self.player.selected_slot + slot_delta
-        ) % hotbar_slots
+        self.select_hotbar_slot((self.player.selected_slot + slot_delta) % hotbar_slots)
+
+    def select_hotbar_slot(self, slot):
+        if not 0 <= slot < min(9, len(self.player.inventory)):
+            return
+        self.stop_item_use(notify_server=True)
+        self.player.selected_slot = slot
         self.player.client.sent_packet(
             {
                 "__class__": "SelectHotbarSlot",
@@ -422,8 +437,11 @@ class SurvivalMode(GameMode):
 
     def left_click_on_block(self, block: Block):
         target = self.player.choosing_block
+        if target is None:
+            self.reset_breaking(notify_server=True)
+            return
         if not target.on_left_click(self.player):
-            if target is None or not target.breakable or isinstance(target, AIR):
+            if not target.can_player_break():
                 self.reset_breaking(notify_server=True)
                 return
             key = self._target_key(target)

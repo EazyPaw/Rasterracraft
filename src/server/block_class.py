@@ -124,6 +124,11 @@ class Block(ABC):
         """Return the effective placement sound without creating NBT state."""
         return self.place_sound or self.break_sound
 
+    def can_player_break(self, creative: bool = False) -> bool:
+        if self.block_id == "air" or getattr(self, "is_fluid", False):
+            return False
+        return creative or (self.breakable and self.hardness >= 0)
+
     def get_collision_box(self) -> BlockCollisionBox:
         return coerce_collision_shape(self.collision_box)
 

@@ -245,6 +245,8 @@ class ClientPlayer(Entity):
         self.client.sent_packet(self, "PlayerMove")
 
     def reconcile_movement(self, packet):
+        if getattr(self, "sleeping", False):
+            return
         """Restore the server result, then predict only inputs it has not acknowledged."""
         self.x, self.y = float(packet["x"]), float(packet["y"])
         self.motion.x, self.motion.y = float(packet["motion"]["x"]), float(packet["motion"]["y"])

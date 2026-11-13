@@ -6,6 +6,8 @@ from src.server.entity import Entity
 
 
 class CollectibleEntity(Entity):
+    receives_damage = False
+    fire_immune = True
     blocks_block_placement = False
     projectile_collidable = False
     lifetime = 6000

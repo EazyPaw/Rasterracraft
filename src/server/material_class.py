@@ -113,7 +113,33 @@ class Material:
         The server is the only caller allowed to turn this result into gameplay
         state.  Materials which support right-click use override this method.
         """
-        return False
+        if not getattr(self, "ignites_blocks", False) or target is None:
+            return False
+        from src.server.blocks import FIRE, activate_nether_portal
+
+        world = holder.world
+        fire = FIRE()
+        location = fire.get_placement_location(target, context=context)
+        if location is None or location.world is not world:
+            return False
+        x, y, z = int(location.x), int(location.y), int(location.z)
+        if (not 0 <= y < world.attribute.MAX_BUILD_HEIGHT
+                or z not in (0, 1)
+                or x // 16 not in holder.client_loaded_regions
+                or not world.is_chunk_loaded(x // 16)
+                or not holder.can_reach_block(x, y, z)
+                or world.get_block(x, y, z).block_id != "air"):
+            return False
+        if not activate_nether_portal(world, x, y, z):
+            world.set_block(fire, location)
+            if world.get_block(location) is not fire:
+                return False
+        self.on_successful_block_use(stack, holder, target)
+        world.server.broadcast_sound(
+            "fire.ignite", x + 0.5, y + 0.5, z, world=world
+        )
+        holder.sync_inventory()
+        return True
 
     def consume(self, stack, consumer) -> bool:
         """Finish consuming ``stack``. Non-consumable materials return False."""

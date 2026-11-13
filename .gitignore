@@ -236,6 +236,8 @@ __marimo__/
 !/tests/test_structure_editor.py
 !/tests/test_ender_entities.py
 !/tests/test_biped_movement.py
+!/tests/test_gameplay_regressions.py
+!/tests/test_gameplay_followup.py
 
 !/validation/
 /validation/*

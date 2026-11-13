@@ -528,9 +528,15 @@ class Player(Entity):
         if self.sleeping:
             self.stop_sleeping(reposition=True)
 
+        # A background bed never moves the player into its depth layer.
+        self.z = 0
+        sleep_x = float(location.x) + 0.5 - self.width * 0.5
+        sleep_y = float(location.y) + 9 / 16
+        if self._check_collision_at(sleep_x, sleep_y):
+            return False
         self.teleport_to(
-            float(location.x) + 0.5 - self.width * 0.5,
-            float(location.y) + 9 / 16,
+            sleep_x,
+            sleep_y,
         )
         self.facing = 1 if int(getattr(bed, "facing", 1)) == 1 else 0
         self.sneaking = False
@@ -554,6 +560,7 @@ class Player(Entity):
         self.sleeping = False
         self.sleep_ticks = 0
         self.sleeping_bed = None
+        self.z = 0
         if wake_position is not None:
             wake_x, wake_y, wake_z = wake_position
             self.z = int(wake_z)
@@ -626,7 +633,7 @@ class Player(Entity):
             return False
         block = world.get_block(x, y, z)
         if (
-            not getattr(block, "breakable", False)
+            not block.can_player_break(self.gamemode.name_id == "creative")
             or getattr(block, "block_id", "air") == "air"
         ):
             self.clear_breaking()
@@ -688,7 +695,7 @@ class Player(Entity):
         block = self.world.get_block(x, y, z)
         if (
             getattr(block, "block_id", "air") != block_id
-            or not getattr(block, "breakable", False)
+            or not block.can_player_break(self.gamemode.name_id == "creative")
             or not self.can_reach_block(x, y, z)
         ):
             self.clear_breaking()
@@ -719,7 +726,7 @@ class Player(Entity):
             and target is not None
             and target[:3] == (x, y, z)
             and getattr(block, "block_id", "air") == target[3]
-            and getattr(block, "breakable", False)
+            and block.can_player_break(self.gamemode.name_id == "creative")
             and self.can_reach_block(x, y, z)
             and current_tool_key == self._breaking_tool_key
         )
@@ -1409,9 +1416,12 @@ class Player(Entity):
             "overworld" if self.world.id_name == "nether" else "nether")
         if destination is None:
             return False
-        from src.server.nether_portal import find_or_create_portal
+        from src.server.nether_portal import request_portal_destination
         factor = 8.0 if self.world.id_name == "nether" else 0.125
-        x, y = find_or_create_portal(destination, self.x * factor, self.y)
+        arrival = request_portal_destination(destination, self.x * factor, self.y)
+        if arrival is None:
+            return False
+        x, y = arrival
         self.z = 0
         self.portal_counter = 0
         self.portal_cooldown = 10

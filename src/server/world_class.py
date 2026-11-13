@@ -770,9 +770,11 @@ class World:
             entities = list(self.entities.values())
         timings: list[tuple[str, float, float, float]] = []
         for entity in entities:
-            if entity.removed:
+            if entity.removed or entity.world is not self:
                 continue
             started = time.perf_counter()
+            if entity.tick_entity_portal():
+                continue
             entity.update()
             updated = time.perf_counter()
             if entity.removed:
@@ -785,13 +787,31 @@ class World:
                     )
                 )
                 continue
+            # EntityTracker in 1.8.9 tracks living mobs every three ticks.
+            # Keep simulation at 20 Hz and send hurt/attack/fuse transitions
+            # immediately; stagger ordinary movement to avoid bursty ticks.
+            tracking_ticks = getattr(entity, "_tracking_ticks", 0) + 1
+            entity._tracking_ticks = tracking_ticks
+            urgent_state = (
+                entity.health, entity.hurt_time > 0,
+                entity.attack_animation_ticks > 0, entity.fire_ticks > 0,
+                getattr(entity, "swell_state", None),
+                getattr(entity, "powered", None),
+                getattr(entity, "climbing", None),
+                getattr(entity, "teleport_revision", None),
+            )
+            send_update = (
+                not hasattr(entity, "ai")
+                or (tracking_ticks + entity.uuid.int) % 3 == 0
+                or urgent_state != getattr(entity, "_last_tracking_state", None)
+            )
             recipients = [
                 player
                 for player in self.server.players
                 if player.world is self and player.is_loading_position(
                     math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)
                 )
-            ]
+            ] if send_update else []
             tracked = time.perf_counter()
             send_many = getattr(self.server, "send_client_sockets", None)
             if callable(send_many):
@@ -799,6 +819,8 @@ class World:
             else:
                 for player in recipients:
                     self.server.send_client_socket(player, entity, "EntityUpdate")
+            if recipients:
+                entity._last_tracking_state = urgent_state
             finished = time.perf_counter()
             timings.append(
                 (

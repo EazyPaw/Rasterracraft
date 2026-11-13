@@ -156,6 +156,7 @@ class GameManager:
 
         if self.ing_mouse_lock == 0:
             player = self.client.client_player
+            player.game_mode.get_choosing_block()
             player.choosing_entity = self.client.render.get_hovered_entity()
             if mouse_button[0]:
                 first_left_press = not self.client.hold_mouse_buttons[0]
@@ -176,7 +177,7 @@ class GameManager:
                     )
                 if first_left_press and not getattr(
                     player.game_mode, "_breaking_request_active", False
-                ):
+                ) and not getattr(player.choosing_block, "is_fluid", False):
                     player.skeleton.trigger_swing()
                 self.client.hold_mouse_buttons[0] = True
             else:

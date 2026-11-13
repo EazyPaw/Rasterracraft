@@ -453,9 +453,13 @@ def _handle_chunk_ready(packet: dict, player: Player) -> None:
 
 @SERVER_PACKET_DISPATCHER.handler("PlayerAction")
 def _handle_player_action(packet: dict, player: Player) -> None:
+    action = packet.get("action")
+    if action == "wake_up":
+        if player.sleeping:
+            player.stop_sleeping(reposition=True)
+        return
     if player.sleeping:
         return
-    action = packet.get("action")
     if action == "abort_breaking":
         player.clear_breaking()
         return

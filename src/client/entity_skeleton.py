@@ -1,6 +1,7 @@
 # Commented and arranged by ChatGPT
 import math
 import time
+import weakref
 from abc import ABC
 from collections import OrderedDict
 from copy import copy
@@ -342,7 +343,8 @@ class EntitySkeleton(ABC):
     MAX_FIRE_OVERLAY_CACHE = 512
     _fire_overlay_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
 
-    _instances = []
+    # Removed mobs must not keep their model, textures and ClientEntity alive.
+    _instances = weakref.WeakSet()
 
     def __init__(self, client, texture: str, entity, *, register=True):
         self.client = client
@@ -371,11 +373,11 @@ class EntitySkeleton(ABC):
         self._tick_duration = 1.0 / max(getattr(client, "rate", 20), 1)
 
         if register:
-            EntitySkeleton._instances.append(self)
+            EntitySkeleton._instances.add(self)
 
     @classmethod
     def get_all_instances(cls):
-        return cls._instances
+        return list(cls._instances)
 
     def _parts_in_draw_order(self) -> Iterable[BodyPart]:
         """按 layer 从后到前绘制，保证后侧手脚在身体后面。"""
@@ -406,22 +408,30 @@ class EntitySkeleton(ABC):
                 self._tick_duration = elapsed_since_last
             self._tick_duration = min(max(self._tick_duration, 0.016), 0.2)
 
-            # 以前一个目标位置为起点（不用当前渲染位置），保证插值始终完整
-            self._prev_x = self._target_x
-            self._prev_y = self._target_y
+            # Start from the displayed position so early packets cannot jump.
+            self._prev_x = self._render_x
+            self._prev_y = self._render_y
             self._target_x = self.entity.x
             self._target_y = self.entity.y
             self._tick_start = now
 
         elapsed = now - self._tick_start
         progress = min(max(elapsed / self._tick_duration, 0.0), 1.0)
-        smooth_progress = progress * progress * (3.0 - 2.0 * progress)
+        # Constant-speed interpolation; easing every packet makes walking pulse.
+        smooth_progress = progress
         self._render_x = (
             self._prev_x + (self._target_x - self._prev_x) * smooth_progress
         )
         self._render_y = (
             self._prev_y + (self._target_y - self._prev_y) * smooth_progress
         )
+        revision = getattr(self.entity, "teleport_revision", 0)
+        if (revision != getattr(self, "_render_teleport_revision", revision)
+                or abs(self.entity.x - self._render_x) > 8
+                or abs(self.entity.y - self._render_y) > 8):
+            self._prev_x = self._target_x = self._render_x = self.entity.x
+            self._prev_y = self._target_y = self._render_y = self.entity.y
+        self._render_teleport_revision = revision
 
     def conv_size(self):
         """渲染缩放或实体视觉大小变化时，重建所有部件贴图。"""
@@ -514,6 +524,8 @@ class EntitySkeleton(ABC):
 
     def draw_fire_overlay(self) -> None:
         """Draw the vanilla-style alternating, tapering fire billboards."""
+        if getattr(self.entity, "health", 1) <= 0:
+            return
         if (int(getattr(self.entity, "fire_ticks", 0)) <= 0
                 and not getattr(self.entity, "has_visual_fire", False)):
             return
@@ -1305,6 +1317,9 @@ class PlayerSkeleton(EntitySkeleton):
                 (0.5, mapped.y * height / strip.get_height()))
 
     def _update_facing(self):
+        if getattr(self.entity, "sleeping", False):
+            self.facing = int(self.entity.facing)
+            return
         if self._pinned:
             update_mouse_look = getattr(self.entity, "update_mouse_look", None)
             if callable(update_mouse_look):
@@ -1339,10 +1354,12 @@ class PlayerSkeleton(EntitySkeleton):
         self._last_update_time = now
         self._animation_age = getattr(self, "_animation_age", 0.0) + dt * 20.0
 
-        dx = self.entity.x - self._last_x
-        dy = self.entity.y - self._last_y
-        self._last_x = self.entity.x
-        self._last_y = self.entity.y
+        x = self.entity.x if self._pinned else self._render_x
+        y = self.entity.y if self._pinned else self._render_y
+        dx = x - self._last_x
+        dy = y - self._last_y
+        self._last_x = x
+        self._last_y = y
 
         # EntityLivingBase.moveEntityWithHeading: measured displacement per 20 Hz
         # tick, amount += (min(distance * 4, 1) - amount) * 0.4.
@@ -1395,12 +1412,35 @@ class PlayerSkeleton(EntitySkeleton):
         self._was_sleeping = is_sleeping
 
         self._apply_pose(instant=sneaking_changed or sleeping_changed)
+        self._apply_death_pose()
         super().update()
         self._sync_armor_parts_to_body()
 
+    def _apply_death_pose(self):
+        if getattr(self.entity, "entity_id", "player") != "player":
+            return
+        if getattr(self.entity, "health", 20) > 0:
+            self._death_started = None
+            return
+        now = time.perf_counter()
+        if getattr(self, "_death_started", None) is None:
+            self._death_started = now
+        elapsed = now - self._death_started
+        progress = min(1.0, elapsed / 0.5)
+        angle = -self._facing_sign() * 90.0 * math.sqrt(progress)
+        radians = math.radians(angle)
+        co, si = math.cos(radians), math.sin(radians)
+        cx, cy = self.entity.width * 0.5, 0.12
+        for part in self.body.values():
+            x, y = part.target_anchor[0] - cx, part.target_anchor[1] - cy
+            part.target_anchor = (cx + x * co - y * si, cy + x * si + y * co)
+            part.target_angle += angle
+            if elapsed >= 1.25:
+                part.target_show = False
+
     def _part_smoothness(self, part: BodyPart) -> float:
         # Vanilla interpolates limbSwing/limbSwingAmount, not the resulting angles.
-        if part.name in ("front_leg", "back_leg", "front_arm", "back_arm"):
+        if part.name in ("front_leg", "back_leg", "front_arm", "back_arm", "held_item"):
             return 1.0
         return 0.28
 

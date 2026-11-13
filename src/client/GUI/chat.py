@@ -105,6 +105,10 @@ class ChatGUI(GUI):
         self._text_input_started = True
 
     def close_chat(self):
+        if getattr(getattr(self.render.client, "client_player", None), "sleeping", False):
+            self.input_text = ""
+            self.cursor_pos = 0
+            return
         if not self.is_open:
             return
         self.is_open = False
@@ -207,6 +211,11 @@ class ChatGUI(GUI):
                     events.remove(event)
 
             elif event.type == pygame.KEYDOWN:
+                if (getattr(getattr(self.render.client, "client_player", None), "sleeping", False)
+                        and event.key in (pygame.K_LSHIFT, pygame.K_RSHIFT)):
+                    self.render.client.sent_packet({"__class__": "PlayerAction", "action": "wake_up"})
+                    events.remove(event)
+                    continue
                 if not self.is_open:
                     if self.render.client.game_manager.ing_mouse_lock > 0:
                         continue

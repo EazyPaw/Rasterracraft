@@ -613,6 +613,10 @@ class Client:
                 pygame.K_e: self.client_player.game_mode.open_inventory,
                 pygame.K_LCTRL: self.client_player.switch_sprint,
             }
+            for slot, key in enumerate((pygame.K_1, pygame.K_2, pygame.K_3,
+                                        pygame.K_4, pygame.K_5, pygame.K_6,
+                                        pygame.K_7, pygame.K_8, pygame.K_9)):
+                self.key_map[key] = lambda slot=slot: self.client_player.game_mode.select_hotbar_slot(slot)
             if self.under_dev:
                 self.key_map[pygame.K_F8] = self.open_debug_exec
             if self.fore_place_switch_mode == "switch":

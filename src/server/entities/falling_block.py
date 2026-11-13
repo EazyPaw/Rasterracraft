@@ -11,6 +11,8 @@ from src.server.utils import client_method
 
 @register_entity(summonable=False)
 class FallingBlock(Entity):
+    receives_damage = False
+    fire_immune = True
     entity_id = "falling_block"
 
     def __init__(self, x, y, z, world, block: blocks.Block):

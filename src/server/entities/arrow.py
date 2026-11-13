@@ -121,9 +121,12 @@ class Arrow(Projectile):
         return min(2_147_483_647, damage)
 
     def get_impact_knockback(self, target) -> Vector | None:
-        if self.punch_level <= 0 or abs(self.motion.x) <= 1.0e-12:
+        if abs(self.motion.x) <= 1.0e-12:
             return None
-        return Vector(math.copysign(self.punch_level * 0.6, self.motion.x), 0.1)
+        # LivingBase.attackEntityFrom supplies the normal hit impulse; Punch
+        # adds its separate arrow velocity bonus in EntityArrow's hit path.
+        return Vector(math.copysign(0.4 + self.punch_level * 0.6, self.motion.x),
+                      0.4 + (0.1 if self.punch_level else 0.0))
 
     def on_hit_entity(self, result: ProjectileHitResult) -> bool:
         target = result.target
@@ -286,17 +289,8 @@ class ArrowSkeleton(EntitySkeleton):
         )
         rect.clamp_ip(pygame.Rect(0, 0, atlas_width, atlas_height))
         face = atlas.subsurface(rect).copy()
-        # Keep the authored vertex aspect ratio (16 x 4), not the atlas crop's
-        # 16 x 5 texel ratio; this is what the original textured quad does.
-        model_width = max(x for x, _ in cls.SIDE_VERTICES) - min(
-            x for x, _ in cls.SIDE_VERTICES
-        )
-        model_height = max(y for _, y in cls.SIDE_VERTICES) - min(
-            y for _, y in cls.SIDE_VERTICES
-        )
-        target_height = max(1, round(face.get_width() * model_height / model_width))
-        if face.get_height() != target_height:
-            face = pygame.transform.scale(face, (face.get_width(), target_height))
+        # Preserve all five authored rows. Nearest-neighbor 5 -> 4 scaling
+        # drops row 2, which contains the entire wooden shaft.
         return face
 
     def draw(self):
@@ -316,17 +310,11 @@ class ArrowSkeleton(EntitySkeleton):
         if key != self._render_key:
             width = key[0]
             height = max(
-                1,
+                5,
                 round(
                     width
-                    * (
-                        max(y for _, y in self.SIDE_VERTICES)
-                        - min(y for _, y in self.SIDE_VERTICES)
-                    )
-                    / (
-                        max(x for x, _ in self.SIDE_VERTICES)
-                        - min(x for x, _ in self.SIDE_VERTICES)
-                    )
+                    * self._side_texture.get_height()
+                    / self._side_texture.get_width()
                 ),
             )
             scaled = pygame.transform.scale(self._side_texture, (width, height))

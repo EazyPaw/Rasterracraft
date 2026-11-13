@@ -109,6 +109,7 @@ def _load_builtin_entities() -> None:
     from src.server.entities import (  # noqa: F401
         arrow,
         chicken,
+        creeper,
         cow,
         egg,
         enderman,
@@ -120,6 +121,7 @@ def _load_builtin_entities() -> None:
         pig,
         primed_tnt,
         sheep,
+        spider,
         snow_ball,
         zombie,
         nether,

@@ -35,6 +35,7 @@ class Projectile(Entity, ABC):
     """
 
     _texture_path = None
+    receives_damage = False
     blocks_block_placement = False
     attackable = False
     projectile_collidable = False

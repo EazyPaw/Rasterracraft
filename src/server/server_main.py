@@ -2,6 +2,7 @@
 import heapq
 import itertools
 import logging
+import math
 import random
 import socket
 import struct
@@ -30,28 +31,13 @@ from src.server.crafting import load_recipes
 from src.server.experience import total_experience_for_level
 from src.server.player import Player
 from src.server.performance import TickPerformanceMonitor
+from src.server.packet_sender import PacketSender, msgpack_default as _msgpack_default
 from src.server.player_identity import player_uuid_from_name
 from src.server.server_packets import encode_packet, decode_packet
 from src.server.text import Text
 from src.server.utils import recv_exact, set_client, set_server
 from src.server.world_class import Weather, World, WorldAttribute
 from src.protocol import SERVERBOUND, decode_payload
-
-
-def _msgpack_default(value):
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, np.floating):
-        return float(value)
-    if isinstance(value, np.bool_):
-        return bool(value)
-    if isinstance(value, np.str_):
-        return str(value)
-    if isinstance(value, np.bytes_):
-        return str(value)
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    raise TypeError(f"Cannot serialize {type(value).__name__}")
 
 
 class Server:
@@ -142,6 +128,7 @@ class Server:
             self.server_sock.listen(5)
             self.connections: dict[Player, tuple[socket.socket, Any]] = {}
             self.send_locks: dict[Player, threading.Lock] = {}
+            self.packet_senders: dict[Player, PacketSender] = {}
             self.thread = threading.Thread(target=self.run, name="SocketServerThread")
             self.thread.daemon = True
             self.thread.start()
@@ -212,6 +199,10 @@ class Server:
                 player.name = player_name
                 self.connections[player] = (client_sock, client_addr)
                 self.send_locks[player] = threading.Lock()
+                client_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                self.packet_senders[player] = PacketSender(
+                    client_sock, name=f"SocketWriter:{player.uuid}"
+                )
                 self.server.players.append(player)
                 logging.info(f"Client {client_addr} connected")
                 for other in self.server.players:
@@ -567,10 +558,10 @@ class Server:
         for world in self.worlds.values():
             world.world_time = (world.world_time + 1) % 24000
             world.tick_weather()
+            from src.server.entity_spawning import tick_nether_spawning, tick_monster_spawning
+            tick_monster_spawning(world)
             if self.server_ticks % 20 == 0:
-                from src.server.entity_spawning import tick_nether_spawning, tick_enderman_spawning
                 tick_nether_spawning(world)
-                tick_enderman_spawning(world)
             world.tick_block_entities()
             world.tick_random_blocks()
         self._finish_sleeping_nights()
@@ -1084,6 +1075,12 @@ class Server:
         ):
             return False
         try:
+            senders = getattr(self.socket_server, "packet_senders", None)
+            if senders is not None:
+                sender = senders.get(player)
+                return sender is not None and sender.enqueue(frame, encoded_obj)
+            # Compatibility for socket adapters without a managed writer.
+            # Real SocketServer connections always use the queue above.
             connection = self.socket_server.connections[player][0]
             with self.socket_server.send_locks.setdefault(player, threading.Lock()):
                 connection.sendall(frame)
@@ -1151,6 +1148,9 @@ class Server:
         for player, missing_regions in wanted_by_player:
             if sends_remaining <= 0:
                 break
+            sender = getattr(self.socket_server, "packet_senders", {}).get(player)
+            if sender is not None and sender.pending_bytes >= sender.CHUNK_BACKPRESSURE_BYTES:
+                continue
             for x in missing_regions:
                 if x not in player.world.regions:
                     continue
@@ -1229,6 +1229,11 @@ class Server:
                 for pending_world, rx in self._chunk_gen_futures
                 if pending_world is world
             )
+            for (portal_world, _, _), job in getattr(self, "_portal_destination_jobs", {}).items():
+                if portal_world is world and (not job["future"].done()
+                        or self.server_ticks - job["last_used"] <= 20):
+                    protected.update(range(math.floor(job["x"] - 128) // 16,
+                                           math.floor(job["x"] + 128) // 16 + 1))
             unload_rxs = [
                 rx for rx in list(world.regions.keys()) if rx not in protected
             ]
@@ -1251,14 +1256,17 @@ class Server:
                 self.send_client_socket(player, other, "EntitySpawn")
 
     def close_server(self):
-        self.save_all(force=True)
         self.running = False
         self.socket_server.running = False
+        for sender in tuple(getattr(self.socket_server, "packet_senders", {}).values()):
+            sender.close()
+        getattr(self.socket_server, "packet_senders", {}).clear()
         try:
             self.socket_server.server_sock.close()
         except Exception:
             pass
         self.chunk_gen_pool.shutdown(wait=True)
+        self.save_all(force=True)
         logging.info("Server closed")
 
     def check_player_connection(self, client_sock, client_addr) -> Text | str | None:
@@ -1347,6 +1355,9 @@ class Server:
         self.on_player_disconnect(player)
 
     def _close_player_connection(self, player: Player) -> None:
+        sender = getattr(self.socket_server, "packet_senders", {}).pop(player, None)
+        if sender is not None:
+            sender.close()
         connection_info = self.socket_server.connections.get(player)
         if connection_info is None:
             return
@@ -1378,3 +1389,6 @@ class Server:
             self.players.remove(player)
         self.socket_server.connections.pop(player, None)
         self.socket_server.send_locks.pop(player, None)
+        sender = getattr(self.socket_server, "packet_senders", {}).pop(player, None)
+        if sender is not None:
+            sender.close()

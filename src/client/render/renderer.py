@@ -395,7 +395,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
 
     def draw_portal_effect(self) -> None:
         strength, _ = self._portal_effect_strength()
-        if strength <= 0.0:
+        if strength <= 0.001:
             return
         frame = self.client.resources_manager.get_texture_img("blocks.portal")
         if frame is not None:
@@ -410,6 +410,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             overlay.set_alpha(round(255 * (strength ** 4 * 0.8 + 0.2)))
             self.blit(overlay, (0, 0))
         shader = self._portal_effect_shader
+        # Portal strength is updated by the simulation thread. If it crossed
+        # the activation threshold after this frame chose its draw surface,
+        # the shader's bound world surface still holds an older frame.
+        if shader is not None and shader.world_surface is not self.screen:
+            shader = None
         if shader is not None:
             shader.set_uniforms(pygame.time.get_ticks() / 1000.0, 0.0, 0.0, 0.0, strength)
             processed = shader.present(include_gui=False)
@@ -975,6 +980,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.draw_player()
                     self._apply_bow_view_zoom()
                     self.draw_portal_effect()
+                    self.draw_sleep_overlay()
                     offscreen_effect_frame = (
                         self._shader_is_offscreen
                         and self.shader_effects_enabled
@@ -1106,6 +1112,18 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         player.skeleton.draw_fire_overlay()
         if getattr(self, "show_entity_hitboxes", False):
             self.draw_skeleton_hitbox(player, player.skeleton)
+
+    def draw_sleep_overlay(self) -> None:
+        player = self.client.client_player
+        if not getattr(player, "sleeping", False):
+            return
+        age = max(0.0, time.perf_counter() - getattr(player, "_sleep_started_at", time.perf_counter()))
+        overlay = getattr(self, "_sleep_overlay", None)
+        if overlay is None or overlay.get_size() != self.screen.get_size():
+            overlay = self._sleep_overlay = pygame.Surface(self.screen.get_size())
+            overlay.fill((16, 16, 32))
+        overlay.set_alpha(round(220 * min(1.0, age / 5.0)))
+        self.blit(overlay, (0, 0))
 
     def _entity_is_visible(self, entity) -> bool:
         """Cheap world-space culling with room for limbs, armor, and interpolation."""
@@ -1402,6 +1420,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         )
 
         if distance > self.client.client_player.block_interaction_range:
+            self.choosing_position = (None, None)
+            self.client.client_player.choosing_block = None
             return None, None
 
         self.choosing_position = (block_x, block_y)

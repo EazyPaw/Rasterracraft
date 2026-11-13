@@ -222,10 +222,12 @@ class AttributeMap:
             for definition in ATTRIBUTE_REGISTRY.values()
         }
         self._dirty_syncable: set[str] = set()
+        self._sync_snapshot_cache = None
 
     def _changed(self, instance: AttributeInstance) -> None:
         if instance.definition.syncable:
             self._dirty_syncable.add(instance.definition.id)
+            self._sync_snapshot_cache = None
         if self._on_dirty is not None:
             self._on_dirty(instance)
 
@@ -287,11 +289,15 @@ class AttributeMap:
                 continue
 
     def sync_snapshot(self) -> list[dict]:
-        return [
-            instance.to_dict()
-            for instance in self._instances.values()
-            if instance.definition.syncable
-        ]
+        # Snapshots are immutable payloads by convention. Rebuild only after
+        # a syncable attribute changes, rather than for every movement packet.
+        if self._sync_snapshot_cache is None:
+            self._sync_snapshot_cache = [
+                instance.to_dict()
+                for instance in self._instances.values()
+                if instance.definition.syncable
+            ]
+        return self._sync_snapshot_cache
 
     def take_dirty_syncable(self) -> set[str]:
         dirty = set(self._dirty_syncable)

@@ -673,7 +673,6 @@ class DecorationMixin(NoiseMixin):
                 (cx + dx, cy) for dx in range(-upper_half, upper_half + 1)
             )
         background.difference_update(trunks)
-        foreground.difference_update(trunks)
         cache[key] = trunks, background, foreground
         return cache[key]
 

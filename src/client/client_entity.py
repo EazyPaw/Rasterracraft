@@ -17,6 +17,7 @@ from src.server.entities.snow_ball import SnowBallSkeleton
 from src.server.entities.egg import EggSkeleton
 from src.server.entities.ender_pearl import EnderPearlSkeleton
 from src.client.ender_entities import EndermanSkeleton, EndermiteSkeleton
+from src.client.hostile_models import CreeperSkeleton, SpiderSkeleton
 from src.server.entities.arrow import ArrowSkeleton
 from src.server.blocks import get_block_by_id
 from src.server.item_class import ItemStack
@@ -230,6 +231,10 @@ class ClientEntity:
         self.apply_packet(packet, initial=True)
 
     def apply_packet(self, packet: dict, *, initial: bool = False):
+        for key, default in (("swell_state", -1), ("fuse_ticks", 0), ("fuse_time", 30)):
+            setattr(self, key, int(packet.get(key, getattr(self, key, default))))
+        for key in ("powered", "climbing"):
+            setattr(self, key, bool(packet.get(key, getattr(self, key, False))))
         self.screaming = bool(packet.get("screaming", getattr(self, "screaming", False)))
         self.carried_block = packet.get("carried_block", getattr(self, "carried_block", None))
         self.teleport_revision = int(packet.get("teleport_revision", getattr(self, "teleport_revision", 0)))
@@ -270,8 +275,9 @@ class ClientEntity:
                 if effect is not None and instance.duration != 0:
                     effects[effect.id] = instance
             self.active_effects = effects
-        if "attributes" in packet:
+        if "attributes" in packet and packet["attributes"] != getattr(self, "_last_attribute_payload", None):
             self.attributes.apply_sync_snapshot(packet["attributes"])
+            self._last_attribute_payload = packet["attributes"]
         self.hurt_time = int(packet.get("hurt_time", self.hurt_time))
         self.aggressive = bool(packet.get("aggressive", self.aggressive))
         self.look_angle = float(packet.get("look_angle", self.look_angle))
@@ -389,6 +395,10 @@ class ClientEntity:
             self.skeleton = ExperienceOrbRenderer(self)
         elif self.entity_id == "zombie":
             self.skeleton = ZombieSkeleton(self)
+        elif self.entity_id == "creeper":
+            self.skeleton = CreeperSkeleton(self)
+        elif self.entity_id == "spider":
+            self.skeleton = SpiderSkeleton(self)
         elif self.entity_id == "enderman":
             self.skeleton = EndermanSkeleton(self)
         elif self.entity_id == "endermite":

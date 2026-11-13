@@ -1,5 +1,6 @@
 # Commented and arranged by ChatGPT
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from src.client.client_player import ClientPlayer
@@ -164,8 +165,8 @@ def _handle_teleport(packet: dict, client: "Client") -> None:
     else:
         client.client_player.using_bow = using_bow
         client.client_player.bow_draw_ticks = bow_draw_ticks
-    client.client_player.sleeping = bool(packet.get("sleeping", False))
-    client.client_player.sleeping_bed = packet.get("sleeping_bed")
+    client.client_player.z = int(packet.get("z", 0))
+    _apply_sleep_state(packet, client)
 
     client.client_player._pending_movement = []
     client.client_player.jump_ticks = 0
@@ -673,8 +674,33 @@ def _handle_entity_update(packet: dict, client: "Client") -> None:
             player.fire_ticks = max(0, int(packet["fire_ticks"]))
         if "has_visual_fire" in packet:
             player.has_visual_fire = bool(packet["has_visual_fire"])
+        _apply_sleep_state(packet, client)
         return
     client.client_world.update_entity(packet)
+
+
+def _apply_sleep_state(packet, client):
+    if "sleeping" not in packet:
+        return
+    player = client.client_player
+    was_sleeping = bool(getattr(player, "sleeping", False))
+    player.sleeping = bool(packet["sleeping"])
+    player.sleeping_bed = packet.get("sleeping_bed")
+    chat = getattr(client, "chat_gui", None)
+    if player.sleeping:
+        if not was_sleeping:
+            player._sleep_started_at = time.perf_counter()
+            if chat is not None:
+                chat.open_chat()
+        player.x = float(packet.get("x", player.x))
+        player.y = float(packet.get("y", player.y))
+        player.facing = int(packet.get("facing", player.facing))
+        player.z = 0
+        player.motion.x = player.motion.y = 0.0
+        player._pending_movement = []
+        player.sprinting = player.sneaking = False
+    elif was_sleeping and chat is not None:
+        chat.close_chat()
 
 
 @CLIENT_PACKET_DISPATCHER.handler("EntityRemove")

@@ -104,6 +104,7 @@ class BlockRenderMixin:
         brightness: float,
         sky_ratio: float,
         sky_color: tuple[int, int, int],
+        occlusion: float = 1.0,
     ) -> tuple[int, int, int]:
         """根据亮度和天空/方块光源比例计算角落着色颜色。
 
@@ -126,7 +127,7 @@ class BlockRenderMixin:
             sky_ratio = 0.0
         b_key, b = quantize_unit(brightness, BLOCK_LIGHT_LEVELS)
         r_key, sky_ratio = quantize_unit(sky_ratio, BLOCK_RATIO_LEVELS)
-        key = (b_key, r_key, sky_color, environment)
+        key = (b_key, r_key, sky_color, environment, occlusion)
 
         cache = self.corner_color_cache
         if key in cache:
@@ -136,6 +137,7 @@ class BlockRenderMixin:
         if environment == -1:
             # WorldProviderHell: minimum ambient brightness 0.1.
             b = 0.1 + 0.9 * b / (4.0 - 3.0 * b)
+        b *= occlusion
         base = int(b * 255)
         # 色调强度：亮度 0 和 1 时为 0，亮度 0.5 时最大（二次函数 b*(1-b)*4）
         tint_amount = b * (1.0 - b) * 4.0
@@ -1299,11 +1301,12 @@ class BlockRenderMixin:
             )
             ao_br = max(0.2, 1.0 - s_br * ao_mul)
 
-        # ---- 3. 最终角亮度 = 光照 × AO ----
-        ftl = tl * ao_tl
-        ftr = tr * ao_tr
-        fbl = bl * ao_bl
-        fbr = br * ao_br
+        # Emissive foreground surfaces must not inherit dark seams from
+        # neighboring opaque cells in the shared two-dimensional light map.
+        emission = min(1.0, float(getattr(block, "light_source", 0)) / 15.0)
+        tl, tr, bl, br = (max(v, emission) for v in (tl, tr, bl, br))
+        # Apply occlusion after the Nether ambient floor/brightness curve.
+        ftl, ftr, fbl, fbr = tl, tr, bl, br
 
         # ---- 3b. 离散化用于缓存键 ----
         q_ftl, ftl_q = quantize_unit(ftl, BLOCK_LIGHT_LEVELS)
@@ -1316,10 +1319,10 @@ class BlockRenderMixin:
         q_sr_br, sr_br_q = quantize_unit(sr_br, BLOCK_RATIO_LEVELS)
 
         # ---- 3c. 计算着色后的角落 RGB ----
-        color_tl = self._compute_corner_color(ftl_q, sr_tl_q, sky_color)
-        color_tr = self._compute_corner_color(ftr_q, sr_tr_q, sky_color)
-        color_bl = self._compute_corner_color(fbl_q, sr_bl_q, sky_color)
-        color_br = self._compute_corner_color(fbr_q, sr_br_q, sky_color)
+        color_tl = self._compute_corner_color(ftl_q, sr_tl_q, sky_color, ao_tl)
+        color_tr = self._compute_corner_color(ftr_q, sr_tr_q, sky_color, ao_tr)
+        color_bl = self._compute_corner_color(fbl_q, sr_bl_q, sky_color, ao_bl)
+        color_br = self._compute_corner_color(fbr_q, sr_br_q, sky_color, ao_br)
 
         # ---- 4. 屏幕坐标 ----
         # 方块占据世界坐标 [y, y+1]，用 y+1 定位顶部，纹理从顶部向下绘制
@@ -1368,6 +1371,7 @@ class BlockRenderMixin:
             block.block_id,
             tex,
             getattr(self.client_world, "environment", 0),
+            (ao_tl, ao_tr, ao_bl, ao_br),
             q_ftl,
             q_ftr,
             q_fbl,

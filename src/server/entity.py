@@ -8,6 +8,7 @@ import uuid
 from uuid import UUID
 
 from src.server.damange_type import (
+    ARROW,
     DamageType,
     GENERIC,
     LAVA,
@@ -41,6 +42,7 @@ class Entity:
 
     blocks_block_placement = True
     attackable = True
+    receives_damage = True
     fire_immune = False
     # Cosmetic flame overlay, independent of ignition and fire damage.
     has_visual_fire = False
@@ -654,6 +656,7 @@ class Entity:
             "no_ai": bool(self.no_ai),
             "silent": bool(self.silent),
             "persistence_required": bool(self.persistence_required),
+            "portal_cooldown": max(0, int(getattr(self, "portal_cooldown", 0))),
             **({"name": str(self.name)} if hasattr(self, "name") else {}),
             "data": self.get_persistent_data(),
         }
@@ -682,6 +685,7 @@ class Entity:
         self.sneaking = bool(data.get("sneaking", self.sneaking))
         self.sprinting = bool(data.get("sprinting", self.sprinting))
         self.fire_ticks = max(0, int(data.get("fire_ticks", self.fire_ticks)))
+        self.portal_cooldown = max(0, int(data.get("portal_cooldown", 0)))
         self.has_visual_fire = bool(data.get("has_visual_fire", self.has_visual_fire))
         self.absorption_amount = max(
             0.0,
@@ -1319,6 +1323,10 @@ class Entity:
             self.motion += Vector(0, self.jump_height * 1.5)
         elif self._get_fluid_interaction()[0]:
             self.swimming_up = True
+        elif self.is_on_climbable() and not self.sneaking:
+            # In the two-dimensional projection the wall may be behind us,
+            # so use the upward input as well as vanilla's wall collision.
+            self.motion.y = max(0.2, self.motion.y)
         elif self.on_ground and self.jump_ticks == 0:
             # getJumpUpwardsMotion returns 0.42F (widened to double).
             # Jump Boost is already included by the jump_strength modifier.
@@ -1626,7 +1634,40 @@ class Entity:
         return self.apply_damage(4.0, LAVA, source=None)
 
     def can_take_damage(self, damage_type: type[DamageType] = GENERIC) -> bool:
-        return not self.removed and self.health > 0
+        return self.receives_damage and not self.removed and self.health > 0
+
+    def tick_entity_portal(self) -> bool:
+        """Non-player portal travel, including entities with custom update loops."""
+        cooldown = max(0, int(getattr(self, "portal_cooldown", 0)) - 1)
+        self.portal_cooldown = cooldown
+        layers = (0, 1) if int(getattr(self, "z", 0)) == 0 else (1,)
+        for x in range(math.floor(self.x + 0.001), math.ceil(self.x + self.width - 0.001)):
+            for y in range(math.floor(self.y + 0.001), math.ceil(self.y + self.height - 0.001)):
+                for z in layers:
+                    if getattr(self.world.get_block(x, y, z), "block_id", None) != "nether_portal":
+                        continue
+                    if cooldown:
+                        self.portal_cooldown = 300
+                        return False
+                    destination_id = {"overworld": "nether", "nether": "overworld"}.get(self.world.id_name)
+                    destination = self.world.server.worlds.get(destination_id)
+                    if destination is None:
+                        return False
+                    from src.server.nether_portal import request_portal_destination
+
+                    factor = 8.0 if self.world.id_name == "nether" else 0.125
+                    arrival = request_portal_destination(destination, self.x * factor, self.y)
+                    if arrival is None:
+                        return False
+                    tx, ty = arrival
+                    self.world.remove_entity(self)
+                    self.x, self.y, self.z = tx, ty, 0
+                    self.portal_cooldown = 300
+                    self.fall_distance = 0.0
+                    self.teleport_revision = getattr(self, "teleport_revision", 0) + 1
+                    destination.spawn_entity(self)
+                    return True
+        return False
 
     @staticmethod
     def _damage_type_has_tag(damage_type, tag: DamageTag) -> bool:
@@ -1761,7 +1802,7 @@ class Entity:
         if knockback is not None:
             self.apply_knockback(
                 knockback,
-                minecraft_18_melee=damage_type in {PLAYER_ATTACK, MOB_ATTACK},
+                minecraft_18_melee=damage_type in {PLAYER_ATTACK, MOB_ATTACK, ARROW},
                 minecraft_18_base=not already_hurt,
             )
         self.on_damage_applied(actual_damage, raw_damage, damage_type, source)

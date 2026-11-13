@@ -259,10 +259,10 @@ class AnimalSkeleton(EntitySkeleton):
         now = time.perf_counter()
         dt = min(max(now - self._last_update_time, 0.0), 0.05)
         self._last_update_time = now
-        dx = self.entity.x - self._last_x
-        self._last_x = self.entity.x
+        dx = self._render_x - self._last_x
+        self._last_x = self._render_x
         speed = max(
-            abs(getattr(self.entity.motion, "x", 0.0)), abs(dx) / max(dt, 0.001)
+            abs(getattr(self.entity.motion, "x", 0.0)), abs(dx) / max(dt * 20.0, 0.001)
         )
         self.walk_time += dt * (9.0 if speed > 0.015 else 2.0)
         return speed

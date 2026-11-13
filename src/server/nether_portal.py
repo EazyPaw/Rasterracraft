@@ -1,19 +1,75 @@
 """Server-side destination search and safe return portal construction."""
 import math
+import logging
+import threading
 
 from src.server.blocks import AIR, OBSIDIAN, NETHER_PORTAL
 
 
+def request_portal_destination(world, target_x, target_y):
+    """Prepare on the server's generation pool; never wait in the game tick."""
+    server = world.server
+    pool = getattr(server, "chunk_gen_pool", None)
+    if pool is None:
+        return find_or_create_portal(world, target_x, target_y)
+    jobs = getattr(server, "_portal_destination_jobs", None)
+    if jobs is None:
+        jobs = server._portal_destination_jobs = {}
+    key = (world, math.floor(target_x / 16), math.floor(target_y / 16))
+    job = jobs.get(key)
+    if job is None:
+        lock = getattr(world, "_portal_search_lock", None)
+        if lock is None:
+            lock = world._portal_search_lock = threading.Lock()
+
+        def prepare():
+            with lock:
+                return find_or_create_portal(world, target_x, target_y)
+
+        job = jobs[key] = {"future": pool.submit(prepare), "x": target_x,
+                           "last_used": server.server_ticks}
+        # Idle completed entries need no permanent cache or chunk pin.
+        for old_key, old_job in tuple(jobs.items()):
+            if (old_key != key and old_job["future"].done()
+                    and server.server_ticks - old_job["last_used"] > 200):
+                jobs.pop(old_key, None)
+    job["last_used"] = server.server_ticks
+    if not job["future"].done():
+        return None
+    try:
+        result = job["future"].result()
+    except Exception:
+        logging.exception("Portal destination preparation failed")
+        jobs.pop(key, None)
+        return None
+    x, y = result
+    if not any(getattr(world.get_block(math.floor(x), int(y), z), "block_id", None)
+               == "nether_portal" for z in (0, 1)):
+        jobs.pop(key, None)
+        return None
+    return result
+
+
 def find_or_create_portal(world, target_x, target_y):
+    from src.server import save_manager
+
     target_x = max(-29999872, min(29999872, float(target_x)))
     target_y = max(1, min(118 if world.attribute.ENVIRONMENT == -1 else 248, int(target_y)))
     left, right = math.floor(target_x - 128), math.floor(target_x + 128)
+    # Existing portals can only be in loaded or saved chunks. Generating the
+    # entire 256-block search radius creates wilderness that cannot contain
+    # one; only generate the small area needed for a new frame's site search.
+    site_left, site_right = math.floor(target_x - 20) // 16, math.floor(target_x + 20) // 16
     for rx in range(left // 16, right // 16 + 1):
-        if not world.is_chunk_loaded(rx):
+        if not world.is_chunk_loaded(rx) and (
+                site_left <= rx <= site_right
+                or save_manager.chunk_exists(getattr(world.server, "save_id", None), world.id_name, rx)):
             world.generate_chunk(rx)
     candidates = []
     for rx in range(left // 16, right // 16 + 1):
-        chunk = world.regions[rx]
+        chunk = world.regions.get(rx)
+        if chunk is None:
+            continue
         for lx in range(16):
             x = rx * 16 + lx
             if not left <= x <= right:

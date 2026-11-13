@@ -138,6 +138,13 @@ class MAGMA_CREAM(Material):
 
 
 @register_material
+class STRING(Material):
+    name_id = "string"
+    name = "item.string.name"
+    _texture_path = "items.string"
+
+
+@register_material
 class GUNPOWDER(Material):
     name_id = "gunpowder"
     name = "item.sulphur.name"
