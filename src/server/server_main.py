@@ -3,6 +3,7 @@ import heapq
 import itertools
 import logging
 import math
+from pathlib import Path
 import random
 import socket
 import struct
@@ -38,10 +39,11 @@ from src.server.text import Text
 from src.server.utils import recv_exact, set_client, set_server
 from src.server.world_class import Weather, World, WorldAttribute
 from src.protocol import SERVERBOUND, decode_payload
+from src.mods.network import ModMismatch
 
 
 class Server:
-    def __init__(self, integrated=False, client=None, save_id: str | None = None):
+    def __init__(self, integrated=False, client=None, save_id: str | None = None, mod_manager=None):
         self.running = True
         self.main_world_id = "overworld"
         self.worlds: dict[str, World] = {}
@@ -94,6 +96,12 @@ class Server:
         if client is not None:
             set_client(client)
         set_server(self)
+        from src.mods.manager import ModManager
+
+        self.mod_manager = mod_manager or ModManager(Path.cwd(), "server", self)
+        self.mod_manager.app = self
+        if mod_manager is None:
+            self.mod_manager.startup()
 
     def check_input(self):
         if self.integrated:
@@ -129,6 +137,7 @@ class Server:
             self.connections: dict[Player, tuple[socket.socket, Any]] = {}
             self.send_locks: dict[Player, threading.Lock] = {}
             self.packet_senders: dict[Player, PacketSender] = {}
+            self.client_threads: dict[Player, threading.Thread] = {}
             self.thread = threading.Thread(target=self.run, name="SocketServerThread")
             self.thread.daemon = True
             self.thread.start()
@@ -161,7 +170,12 @@ class Server:
                     continue
 
                 try:
-                    player_uuid, player_name = self.receive_client_hello(client_sock)
+                    player_uuid, player_name = self.receive_client_hello(
+                        client_sock, getattr(self.server, "mod_manager", None)
+                    )
+                except ModMismatch as exc:
+                    self.server.reject_connection(client_sock, "mods.networkMismatch: " + str(exc))
+                    continue
                 except (ConnectionError, OSError, TypeError, ValueError) as exc:
                     logging.warning(
                         "Invalid client identity from %s: %s", client_addr, exc
@@ -248,10 +262,11 @@ class Server:
                     name="SocketClientThread",
                 )
                 client_thread.daemon = True
+                self.client_threads[player] = client_thread
                 client_thread.start()
 
         @staticmethod
-        def receive_client_hello(client_sock) -> tuple[UUID, str]:
+        def receive_client_hello(client_sock, mod_manager=None) -> tuple[UUID, str]:
             previous_timeout = client_sock.gettimeout()
             client_sock.settimeout(5.0)
             try:
@@ -259,7 +274,7 @@ class Server:
                 if not raw_len or len(raw_len) != 4:
                     raise ConnectionError("Missing ClientHello length")
                 msg_len = struct.unpack(">I", raw_len)[0]
-                if not 0 < msg_len <= 4096:
+                if not 0 < msg_len <= 65536:
                     raise ValueError("Invalid ClientHello length")
                 raw_packet = recv_exact(client_sock, msg_len)
                 if not raw_packet or len(raw_packet) != msg_len:
@@ -271,6 +286,8 @@ class Server:
             packet = decode_payload(packet, SERVERBOUND)
             if packet.name != "ClientHello":
                 raise ValueError("Expected ClientHello")
+            from src.mods.network import validate_client_mods
+            validate_client_mods(mod_manager, packet.get("mods", []))
             raw_name = str(packet.get("name", ""))
             player_name = "".join(
                 character for character in raw_name if character.isprintable()
@@ -365,6 +382,11 @@ class Server:
         last_overload_warning = -float("inf")
 
         while self.running:
+            host = getattr(self, "mod_host", None)
+            if host:
+                host.pump()
+                if not self.running:
+                    break
             interval = 1.0 / self.rate
 
             tick_started = time.perf_counter()
@@ -536,6 +558,10 @@ class Server:
         self.worlds["nether"].queue_saved_entities(nether_meta.get("entities", ()))
         self.worlds["nether"].disable_mob_generation = bool(nether_meta.get("disable_mob_generation", False))
         self.initialized = True
+        self.mod_manager.in_game = True
+        host = getattr(self, "mod_host", None)
+        if host:
+            host.started()
         self.ready.set()  # 通知 socket 线程服务器已就绪
         elapsed = time.perf_counter() - t_start
         logging.info(f"Server startup completed in {elapsed:.2f}s")
@@ -1256,17 +1282,39 @@ class Server:
                 self.send_client_socket(player, other, "EntitySpawn")
 
     def close_server(self):
+        if getattr(self, "_closing", False):
+            return
+        self._closing = True
         self.running = False
         self.socket_server.running = False
+        self.ready.set()
         for sender in tuple(getattr(self.socket_server, "packet_senders", {}).values()):
             sender.close()
         getattr(self.socket_server, "packet_senders", {}).clear()
         try:
+            self.socket_server.server_sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
             self.socket_server.server_sock.close()
         except Exception:
             pass
+        for player in tuple(self.socket_server.connections):
+            self._close_player_connection(player)
+        current = threading.current_thread()
+        threads = [self.socket_server.thread, *getattr(self.socket_server, "client_threads", {}).values()]
+        for thread in threads:
+            if thread is not current and thread.is_alive():
+                thread.join(timeout=2)
         self.chunk_gen_pool.shutdown(wait=True)
         self.save_all(force=True)
+        if any(thread is not current and thread.is_alive() for thread in threads):
+            self.mod_manager.broken = True
+            raise RuntimeError("Server threads did not stop; restart required before changing Mods")
+        if not getattr(self, "mod_host", None):
+            manager = getattr(self, "mod_manager", None)
+            if manager:
+                manager.close()
         logging.info("Server closed")
 
     def check_player_connection(self, client_sock, client_addr) -> Text | str | None:

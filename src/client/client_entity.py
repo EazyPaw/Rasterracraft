@@ -385,47 +385,61 @@ class ClientEntity:
     def _ensure_skeleton(self):
         if self.skeleton is not None:
             return
-        if self.entity_id == "player":
+        from src.server.entity_registry import get_entity_type
+        entity_type = get_entity_type(self.entity_id)
+        renderer = getattr(entity_type, "client_renderer", None)
+        if renderer is not None:
+            self.skeleton = renderer(self)
+            return
+        render_id = self.entity_id
+        if entity_type is not None and ":" in render_id:
+            # A Mod subclass of an existing mob can reuse its builtin renderer.
+            for base in entity_type.__mro__[1:]:
+                inherited_id = vars(base).get("entity_id")
+                if isinstance(inherited_id, str) and inherited_id and ":" not in inherited_id:
+                    render_id = inherited_id
+                    break
+        if render_id == "player":
             self.skeleton = PlayerSkeleton(self, pinned=False)
-        elif self.entity_id == "falling_block":
+        elif render_id == "falling_block":
             self.skeleton = FallingBlockSkeleton(self)
-        elif self.entity_id == "item":
+        elif render_id == "item":
             self.skeleton = ItemEntityRenderer(self)
-        elif self.entity_id == "experience_orb":
+        elif render_id == "experience_orb":
             self.skeleton = ExperienceOrbRenderer(self)
-        elif self.entity_id == "zombie":
+        elif render_id == "zombie":
             self.skeleton = ZombieSkeleton(self)
-        elif self.entity_id == "creeper":
+        elif render_id == "creeper":
             self.skeleton = CreeperSkeleton(self)
-        elif self.entity_id == "spider":
+        elif render_id == "spider":
             self.skeleton = SpiderSkeleton(self)
-        elif self.entity_id == "enderman":
+        elif render_id == "enderman":
             self.skeleton = EndermanSkeleton(self)
-        elif self.entity_id == "endermite":
+        elif render_id == "endermite":
             self.skeleton = EndermiteSkeleton(self)
-        elif self.entity_id == "zombie_pigman":
+        elif render_id == "zombie_pigman":
             self.skeleton = PigmanSkeleton(self)
-        elif self.entity_id == "wither_skeleton":
+        elif render_id == "wither_skeleton":
             self.skeleton = NetherSkeleton(self)
-        elif self.entity_id == "skeleton":
+        elif render_id == "skeleton":
             self.skeleton = RegularSkeleton(self)
-        elif self.entity_id in {"ghast", "blaze", "magma_cube", "fireball", "small_fireball"}:
+        elif render_id in {"ghast", "blaze", "magma_cube", "fireball", "small_fireball"}:
             self.skeleton = NetherMobSkeleton(self)
-        elif self.entity_id == "chicken":
+        elif render_id == "chicken":
             self.skeleton = ChickenSkeleton(self)
-        elif self.entity_id == "cow":
+        elif render_id == "cow":
             self.skeleton = CowSkeleton(self)
-        elif self.entity_id == "pig":
+        elif render_id == "pig":
             self.skeleton = PigSkeleton(self)
-        elif self.entity_id == "sheep":
+        elif render_id == "sheep":
             self.skeleton = SheepSkeleton(self)
-        elif self.entity_id == "primed_tnt":
+        elif render_id == "primed_tnt":
             self.skeleton = PrimedTNTSkeleton(self)
-        elif self.entity_id == "snowball":
+        elif render_id == "snowball":
             self.skeleton = SnowBallSkeleton(self)
-        elif self.entity_id == "egg":
+        elif render_id == "egg":
             self.skeleton = EggSkeleton(self)
-        elif self.entity_id == "ender_pearl":
+        elif render_id == "ender_pearl":
             self.skeleton = EnderPearlSkeleton(self)
-        elif self.entity_id == "arrow":
+        elif render_id == "arrow":
             self.skeleton = ArrowSkeleton(self)

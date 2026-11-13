@@ -30,6 +30,7 @@ class MainMenu(GUI):
         # 添加默认的“单人游戏”按钮
         self.add_button(transkey("menu.singleplayer"), self.start_singleplayer)
         self.add_button(transkey("menu.multiplayer"), self.open_multiplayer)
+        self.add_button(transkey("mods.title"), self.open_mods)
         self.add_button(transkey("menu.quit"), client.shutdown)
 
     def add_button(
@@ -68,6 +69,13 @@ class MainMenu(GUI):
         self.render.close_gui(self)
         self.render.client.multiplayer_menu = MultiplayerMenu(self.render, self)
         self.render.show_gui(self.render.client.multiplayer_menu)
+
+    def open_mods(self):
+        if self.starting_world or self.client.game_started:
+            return
+        from src.client.GUI.mods_menu import ModsMenu
+        self.render.close_gui(self)
+        self.render.show_gui(ModsMenu(self.render, self))
 
     def draw(self):
         """绘制主菜单：布局按钮、背景、Logo 和页脚"""

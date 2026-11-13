@@ -26,7 +26,7 @@ from src.server.inventory import Inventory
 _BLOCK_REGISTRY: dict[str, type[Block]] = {}
 
 
-def register_block(cls=None, /):
+def register_block(cls=None, /, *, key=None, namespace=None):
     """Register a block class by its ``block_id``.
 
     Used as ``@register_block`` in the same way materials and entities are
@@ -34,16 +34,26 @@ def register_block(cls=None, /):
     of silently replacing a class in a lazy subclass scan.
     """
     if cls is None:
-        return lambda block_cls: register_block(block_cls)
+        return lambda block_cls: register_block(block_cls, key=key, namespace=namespace)
 
-    block_id = getattr(cls, "block_id", None)
+    from src.mods.effects import register_value, registration_context
+
+    ctx = registration_context(cls)
+    block_id = key if key is not None else getattr(cls, "block_id", None)
     if block_id is None:
         raise ValueError(f"{cls.__name__} must define block_id")
     block_id = str(block_id)
-    existing = _BLOCK_REGISTRY.get(block_id)
-    if existing is not None and existing is not cls:
-        raise ValueError(f"Duplicate block registration: {block_id}")
-    _BLOCK_REGISTRY[block_id] = cls
+    namespace = namespace or (ctx.namespace if ctx else "minecraft")
+    if ":" in block_id:
+        namespace, block_id = block_id.split(":", 1)
+    if ctx and namespace != ctx.namespace:
+        raise ValueError("Mods must register blocks in their own namespace")
+    block_id = block_id if namespace == "minecraft" else f"{namespace}:{block_id}"
+    if ctx:
+        ctx.set_attr(cls, "block_id", block_id)
+    else:
+        cls.block_id = block_id
+    register_value(_BLOCK_REGISTRY, block_id, cls, cls)
     return cls
 
 

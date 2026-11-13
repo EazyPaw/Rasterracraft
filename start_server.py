@@ -18,6 +18,9 @@ from src.server.server_main import Server
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PyCraft2D Server")
     parser.add_argument(
+        "--mod-host", action="store_true", help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--integrated",
         action="store_true",
         help="Run as integrated server (disable stdin input)",
@@ -77,5 +80,14 @@ if __name__ == "__main__":
         )
 
     # 子进程模式下传入 integrated=True（禁用 stdin 输入）和 client=None（无耦合对象）
-    server = Server(integrated=args.integrated, save_id=args.save_id)
-    server.init()
+    if args.mod_host:
+        from src.mods.host import run_host
+        run_host()
+    else:
+        from pathlib import Path
+        from src.mods.manager import ModManager
+
+        manager = ModManager(Path.cwd(), "server")
+        manager.startup()
+        server = Server(integrated=args.integrated, save_id=args.save_id, mod_manager=manager)
+        server.init()

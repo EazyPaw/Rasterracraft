@@ -371,6 +371,9 @@ class GameManager:
         next_time = time.perf_counter()
 
         while self.running:
+            service = getattr(self.client, "mod_service", None)
+            if service:
+                service.poll()
             interval = 1.0 / self.client.rate
 
             if self.client.in_game:

@@ -33,6 +33,8 @@ from src.protocol import SERVERBOUND, encode_payload, make_packet
 from src.server.server_main import Server
 from src.server.text import Text
 from src.server.utils import recv_exact, set_client
+from src.version import VERSION_LABEL
+from src.mods.client_service import ClientModService
 
 
 class Client:
@@ -45,7 +47,7 @@ class Client:
         self.is_shutting_down = False
         self._shutdown_lock = threading.Lock()
         self._shutdown_started = False
-        self.version = "0.0.1 SNAPSHOT - Minecraft 1.8.9"
+        self.version = VERSION_LABEL
 
         self.language = "zh_cn"
         self.fore_place_switch_mode = "hold"
@@ -115,6 +117,7 @@ class Client:
         self.integrated_session = False
         self.saves_menu: SavesMenu | None = None
         self.multiplayer_menu = None
+        self.mod_service = ClientModService(self, os.getcwd())
         self.main_menu = MainMenu(self.render)
         self.render.show_gui(self.main_menu)
         self.game_thread.start()
@@ -232,7 +235,9 @@ class Client:
                 break
 
     def _send_client_hello(self) -> None:
-        packet = encode_payload(make_packet("ClientHello", name=self.player_name), SERVERBOUND)
+        service = getattr(self, "mod_service", None)
+        packet = encode_payload(make_packet("ClientHello", name=self.player_name,
+                                            mods=service.network_mods() if service else []), SERVERBOUND)
         payload = msgpack.packb(
             packet,
             use_bin_type=True,
@@ -308,6 +313,13 @@ class Client:
     def start_game(self, save_id: str | None = None):
         if self.game_started:
             return
+        try:
+            self.mod_service.rpc("status")
+        except Exception as error:
+            self.show_disconnect("connect.failed", str(error))
+            return
+        if self.mod_service.network_mods():
+            self.server_mode = "subprocess"
 
         if save_id is None:
             save_id = save_manager.create_save(
@@ -335,6 +347,11 @@ class Client:
     def start_multiplayer(self, server_address: str):
         """连接玩家输入的远程服务器，不启动本地集成服务端。"""
         if self.game_started:
+            return
+        try:
+            self.mod_service.rpc("status")
+        except Exception as error:
+            self.show_disconnect("connect.failed", str(error))
             return
         self.connection_target = self.parse_server_address(server_address)
         self.integrated_session = False
@@ -379,6 +396,7 @@ class Client:
         self.death_screen = None
         self.save_complete_event.clear()
         self.game_started = True
+        self.mod_service.manager.in_game = True
         self.in_game = False
         self.world_loading = True
         self.loaded_chunk_regions.clear()
@@ -588,6 +606,7 @@ class Client:
         self.server_process = None
         self.game_started = False
         self.render.drawing_GUIs.clear()
+        self.mod_service.manager.in_game = False
         self.main_menu = MainMenu(self.render)
         self.render.show_gui(self.main_menu)
         self.render.request_text_input(False)
@@ -641,43 +660,8 @@ class Client:
 
     def _start_server_subprocess(self):
         """以子进程方式启动服务端，绕过 GIL，客户端不受服务端运算影响。"""
-        logging.info("Server is running on subprocess mode.")
-        try:
-            # 1. 获取正确的脚本路径（兼容打包）
-            server_script = self._get_resource_path("start_server.py")
-
-            # 2. 构建启动参数
-            # 开发环境：sys.executable 是 Python 解释器，可直接运行脚本
-            # 打包后：sys.executable 是主程序 .exe，无法直接运行 .py 文件。
-            # 因此，你需要额外处理（见下方注意事项）。
-            args = [sys.executable, server_script, "--integrated"]
-            if self.current_save_id:
-                args.extend(["--save-id", self.current_save_id])
-
-            # 3. 启动子进程（建议传递干净的环境副本，避免 Nuitka 注入变量干扰）
-            clean_env = os.environ.copy()
-            # 移除可能引起冲突的环境变量（可选）
-            keys_to_remove = [
-                "PYTHONPATH",
-                "PYTHONHOME",
-                "NUITKA_ONEFILE_PARENT",
-                "NUITKA_RESUME_FILENAME",
-                "TCL_LIBRARY",
-                "TK_LIBRARY",
-            ]
-            for key in keys_to_remove:
-                clean_env.pop(key, None)
-
-            self.server_process = subprocess.Popen(
-                args,
-                env=clean_env,
-            )
-            logging.info(f"Server subprocess started (PID: {self.server_process.pid})")
-        except FileNotFoundError:
-            logging.error(f"Server script not found: {server_script}")
-        except Exception as e:
-            logging.error(f"Failed to start server subprocess: {e}")
-            logging.info("Trying to connect to an existing server...")
+        self.mod_service.start_server(self.current_save_id)
+        self.server_process = self.mod_service.process
 
     def _start_server_thread(self):
         """以线程方式启动服务端（同一进程，受 GIL 影响）。"""
@@ -755,6 +739,8 @@ class Client:
         # 关闭区块加载线程池
         self.chunk_load_pool.shutdown(wait=True)
 
+        self.mod_service.close()
+
         # 清理音频设备
         if hasattr(self, "audio_device"):
             try:
@@ -765,20 +751,8 @@ class Client:
         logging.info("Client Closed.")
 
     def _shutdown_server_subprocess(self):
-        """终止服务端子进程。"""
-        if not self.server_process:
-            return
-        try:
-            self.server_process.terminate()
-            self.server_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            logging.warning(
-                "Server subprocess did not terminate in time, force killing"
-            )
-            self.server_process.kill()
-            self.server_process.wait()
-        except Exception:
-            pass
+        """关闭当前世界，保留主菜单使用的 Mod 运行进程。"""
+        self.mod_service.stop_server()
         self.server_process = None
 
     def _shutdown_server_thread(self):

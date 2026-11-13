@@ -222,7 +222,7 @@ class PacketDispatcher(Generic[ContextT]):
 
 # The wire schema lives in one place.  Fields document the supported contract;
 # optional extra fields remain accepted during the migration for compatibility.
-packet_spec("ClientHello", SERVERBOUND, fields=("name",), required=("name",))
+packet_spec("ClientHello", SERVERBOUND, fields=("name", "mods"), required=("name",))
 packet_spec("DisconnectAck", SERVERBOUND)
 packet_spec("PlayerMove", SERVERBOUND, fields=("sneaking", "sprinting", "facing", "flying", "look_angle", "move_axis", "jumping", "descending", "sequence", "mouse_active", "turn_tap"), required=("sequence", "move_axis", "jumping"))
 packet_spec("TeleportConfirm", SERVERBOUND, fields=("teleport_id",))

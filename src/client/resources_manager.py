@@ -41,6 +41,7 @@ class ResourcesManager:
     def __init__(self, client):
         self.client = client
         self.textures = {}
+        self.mod_roots = {}
         self.sounds = {}  # 存储解析后的音效信息
         self.sound_objects = {}  # 缓存已加载的 pygame.mixer.Sound 对象
         self._audio_lock = threading.RLock()
@@ -84,6 +85,22 @@ class ResourcesManager:
                         )
         except FileNotFoundError:
             logging.warning(f"Language file not found: '{lang_path}'")
+
+        # Project UI strings live independently of the original Minecraft assets.
+        extra_path = f"assets/rasterracraft/lang/{lang.lower()}.lang"
+        try:
+            with open(extra_path, "r", encoding="utf-8") as extra:
+                for line in extra:
+                    if line.strip() and not line.lstrip().startswith("#") and "=" in line:
+                        key, value = line.rstrip("\r\n").split("=", 1)
+                        target[key.strip()] = value
+        except FileNotFoundError:
+            pass
+
+    def clear_mod_cache(self, namespace):
+        for key in tuple(self.textures):
+            if key[0].startswith(namespace + ":"):
+                self.textures.pop(key, None)
 
     def get_translation_key(self, key: str, *args):
         if key in self._lang_map:
@@ -183,11 +200,22 @@ class ResourcesManager:
 
         # 解析路径
         parts = key.split(".")
-        if len(parts) < 2:
+        if len(parts) < 2 and ":" not in key:
             logging.warning(f"Invalid texture key format: '{key}'")
             return self.missing_texture
 
-        if parts[0] == 'rasterracraft':
+        if ":" in key:
+            namespace, resource = key.split(":", 1)
+            root = self.mod_roots.get(namespace)
+            if root is None:
+                return self.missing_texture
+            from pathlib import Path
+            path = Path(resource.replace(".", "/") + ".png")
+            full_path = (root / "textures" / path).resolve()
+            if not full_path.is_relative_to(root.resolve()):
+                return self.missing_texture
+            meta_path = str(full_path) + ".mcmeta"
+        elif parts[0] == 'rasterracraft':
             file_path = "/".join(parts[1:])
             full_path = f"assets/rasterracraft/{file_path}.png"
             meta_path = f"assets/rasterracraft/{file_path}.png.mcmeta"

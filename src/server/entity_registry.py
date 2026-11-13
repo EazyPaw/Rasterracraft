@@ -55,6 +55,7 @@ def register_entity(
     name_spaced_key: str | None = None,
     summonable: bool = True,
     persistent: bool = True,
+    renderer: Callable | None = None,
 ):
 
     if cls is None:
@@ -66,38 +67,58 @@ def register_entity(
             name_spaced_key=name_spaced_key,
             summonable=summonable,
             persistent=persistent,
+            renderer=renderer,
         )
 
+    from src.mods.effects import register_value, registration_context
+
+    ctx = registration_context(cls)
+    if renderer is not None and not callable(renderer):
+        raise TypeError("Entity renderer must be callable")
+    if ctx and namespace == "minecraft" and name_spaced_key is None:
+        namespace = ctx.namespace
     if name_spaced_key is not None:
         namespace = str(name_spaced_key)
     raw_key = key if key is not None else getattr(cls, "entity_id", None)
     if raw_key is None:
         raise ValueError(f"{cls.__name__} must define entity_id or provide key=")
     namespaced_key = NamespacedKey.parse(raw_key, default_namespace=namespace)
+    if ctx and namespaced_key.namespace != ctx.namespace:
+        raise ValueError("Mods must register entities in their own namespace")
     existing = _entity_registry.get(namespaced_key)
     if existing is not None and existing is not cls:
         raise ValueError(f"Duplicate entity registration: {namespaced_key}")
+    alias_target = _entity_aliases.get(namespaced_key)
+    if alias_target is not None and alias_target != namespaced_key:
+        raise ValueError(f"Entity key conflicts with an alias: {namespaced_key}")
 
-    cls.registry_key = namespaced_key
-    cls.entity_id = (
+    entity_id = (
         namespaced_key.key
         if namespaced_key.namespace == "minecraft"
         else str(namespaced_key)
     )
-    cls.summonable = bool(summonable)
-    cls.persistent = bool(persistent)
-    _entity_registry[namespaced_key] = cls
-    for alias in aliases:
-        alias_key = NamespacedKey.parse(
-            alias, default_namespace=namespaced_key.namespace
-        )
+    alias_keys = [NamespacedKey.parse(alias, default_namespace=namespaced_key.namespace)
+                  for alias in aliases]
+    for alias_key in alias_keys:
+        if ctx and alias_key.namespace != ctx.namespace:
+            raise ValueError("Mods must register aliases in their own namespace")
         alias_owner = _entity_registry.get(alias_key)
-        if alias_owner is not None and alias_owner is not cls:
-            raise ValueError(f"Entity alias conflicts with primary key: {alias_key}")
         alias_target = _entity_aliases.get(alias_key)
-        if alias_target is not None and alias_target != namespaced_key:
+        if (alias_owner is not None and alias_owner is not cls) or (
+                alias_target is not None and alias_target != namespaced_key):
             raise ValueError(f"Duplicate entity alias: {alias_key}")
-        _entity_aliases[alias_key] = namespaced_key
+    attributes = dict(registry_key=namespaced_key, entity_id=entity_id,
+                      summonable=bool(summonable), persistent=bool(persistent))
+    if renderer is not None:
+        attributes["client_renderer"] = renderer
+    for name, value in attributes.items():
+        if ctx:
+            ctx.set_attr(cls, name, value)
+        else:
+            setattr(cls, name, value)
+    register_value(_entity_registry, namespaced_key, cls, cls)
+    for alias_key in alias_keys:
+        register_value(_entity_aliases, alias_key, namespaced_key, cls)
     return cls
 
 

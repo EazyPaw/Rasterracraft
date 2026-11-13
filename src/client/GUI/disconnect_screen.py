@@ -76,7 +76,13 @@ class DisconnectScreen(GUI):
                 events.remove(event)
 
     def _return_to_main_menu(self):
-        self.render.client.return_to_main_menu()
+        client = self.render.client
+        if client.game_started:
+            client.return_to_main_menu()
+        else:
+            self.render.close_gui(self)
+            client.disconnect_screen = None
+            self.render.show_gui(client.main_menu)
 
     def _draw_background(self, width: int, height: int):
         cache_key = (width, height)

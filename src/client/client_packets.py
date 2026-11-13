@@ -115,6 +115,8 @@ def decode_packet(packet: dict, client: "Client") -> None:
 @CLIENT_PACKET_DISPATCHER.handler("Disconnect")
 def _handle_disconnect(packet: dict, client: "Client") -> None:
     reason = packet.get("reason", "")
+    if isinstance(reason, str) and reason.startswith("mods.networkMismatch: "):
+        reason = client.resources_manager.get_translation_key("mods.networkMismatch", reason.split(": ", 1)[1])
     if packet.get("reason_is_translation_key") and isinstance(reason, str):
         reason = client.resources_manager.get_translation_key(reason)
     elif isinstance(reason, dict):

@@ -12,16 +12,41 @@ _material_registry: dict[str, dict[str, type[Material]]] = {}
 
 
 def register_material(
-    cls=None, /, *, aliases: tuple[str, ...] = (), name_spaced_key="minecraft"
+    cls=None, /, *, aliases: tuple[str, ...] = (), name_spaced_key=None
 ):
     if cls is None:
         return lambda c: register_material(
             c, aliases=aliases, name_spaced_key=name_spaced_key
         )
-    namespace = _material_registry.setdefault(name_spaced_key, {})
-    namespace[cls.name_id] = cls
-    for alias in aliases:
-        namespace[alias] = cls
+    from src.mods.effects import register_value, registration_context
+
+    ctx = registration_context(cls)
+    name_spaced_key = name_spaced_key or (ctx.namespace if ctx else "minecraft")
+    if ctx and name_spaced_key != ctx.namespace:
+        raise ValueError("Mods must register materials in their own namespace")
+    namespace = _material_registry.get(name_spaced_key)
+    if namespace is None:
+        namespace = {}
+        if ctx:
+            ctx.set_item(_material_registry, name_spaced_key, namespace)
+        else:
+            _material_registry[name_spaced_key] = namespace
+    if ctx:
+        ctx.set_attr(cls, "name_space_key", name_spaced_key)
+    else:
+        cls.name_space_key = name_spaced_key
+    item_id = str(cls.name_id)
+    if ":" in item_id:
+        item_namespace, item_id = item_id.split(":", 1)
+        if item_namespace != name_spaced_key:
+            raise ValueError("Material ID and namespace disagree")
+    keys = (item_id, *aliases)
+    if any(key in namespace and namespace[key] is not cls for key in keys):
+        raise ValueError(f"Duplicate material registration: {name_spaced_key}:{cls.name_id}")
+    for key in keys:
+        register_value(namespace, key, cls, cls)
+    if ctx:
+        ctx.set_attr(cls, "name_id", f"{name_spaced_key}:{item_id}")
     return cls
 
 
@@ -2440,8 +2465,12 @@ class ENDER_PEARL(ThrowableMaterial):
 
 def get_block_item(block):
     """Return only an explicitly registered item form for ``block``."""
-    block_id = getattr(block, "block_id", "air")
-    material_type = _material_registry.get("minecraft", {}).get(block_id)
+    block_id = str(getattr(block, "block_id", "air") or "air")
+    if ":" in block_id:
+        namespace, block_id = block_id.split(":", 1)
+    else:
+        namespace = "minecraft"
+    material_type = _material_registry.get(namespace, {}).get(block_id)
     if material_type is None or not issubclass(material_type, BlockItem):
         return AIR()
     return material_type()
