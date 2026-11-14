@@ -1610,6 +1610,11 @@ class Entity:
 
     def set_seconds_on_fire(self, seconds: float) -> None:
         try:
+            armor = getattr(self, "equipment", {})
+            protection = max((stack.get_enchantment_level("fire_protection") for slot, stack in armor.items()
+                              if slot in {"head", "chest", "legs", "feet"}), default=0)
+            if protection:
+                seconds = float(seconds) * (1 - .15 * protection)
             ticks = max(
                 0,
                 int(
@@ -1806,6 +1811,20 @@ class Entity:
                 minecraft_18_base=not already_hurt,
             )
         self.on_damage_applied(actual_damage, raw_damage, damage_type, source)
+        from src.server.damange_type import THORNS
+        if source is not None and damage_type is not THORNS:
+            armor = getattr(self, "equipment", {})
+            enchanted = [stack for slot, stack in armor.items()
+                         if slot in {"head", "chest", "legs", "feet"}
+                         and stack.get_enchantment_level("thorns") > 0]
+            if enchanted:
+                level = max(stack.get_enchantment_level("thorns") for stack in enchanted)
+                selected = random.choice(enchanted)
+                if random.random() < .15 * level:
+                    source.apply_damage(random.randint(1, 4), THORNS, source=self)
+                    selected.hurt_and_break(3, self)
+                else:
+                    selected.hurt_and_break(1, self)
         return actual_damage
 
     def on_damage_applied(
@@ -1984,7 +2003,39 @@ class Entity:
         return dropped
 
     def spawn_drops(self) -> None:
-        for stack in self.get_drops():
+        drops = self.get_drops()
+        source = self.last_damage_source
+        looting = 0
+        if getattr(source, "entity_id", None) == "player":
+            looting = source.inventory[source.selected_slot].get_enchantment_level("looting")
+        if looting:
+            # Common drops receive an independent [0, Looting] bonus in 1.8.
+            # Include zero-count base drops, which get_drops normally omits.
+            eligible = {
+                "zombie": ("rotten_flesh",), "zombie_pigman": ("rotten_flesh", "gold_nugget"),
+                "skeleton": ("bone", "arrow"), "wither_skeleton": ("bone", "coal"),
+                "spider": ("string",), "cave_spider": ("string",),
+                "creeper": ("gunpowder",), "enderman": ("ender_pearl",),
+                "ghast": ("ghast_tear", "gunpowder"), "blaze": ("blaze_rod",),
+                "magma_cube": ("magma_cream",),
+                "cow": ("leather", "cooked_beef" if self.fire_ticks > 0 else "raw_beef"),
+                "pig": ("cooked_porkchop" if self.fire_ticks > 0 else "raw_porkchop",),
+                "chicken": ("feather", "cooked_chicken" if self.fire_ticks > 0 else "raw_chicken"),
+            }.get(self.entity_id, ())
+            if getattr(self, "is_baby", False) or (self.entity_id == "magma_cube" and getattr(self, "size", 1) <= 1):
+                eligible = ()
+            from src.server.item_class import ItemStack
+            from src.server.materials import get_material_by_id
+            for name in eligible:
+                bonus = random.randrange(looting + 1)
+                if not bonus:
+                    continue
+                found = next((stack for stack in drops if stack.material.name_id == name), None)
+                if found is not None:
+                    found.amount += bonus
+                else:
+                    drops.append(ItemStack(get_material_by_id(name), bonus))
+        for stack in drops:
             if stack is None or stack.is_empty() or stack.amount <= 0:
                 continue
             self.drop_item_stack(stack, speed=0.1, pickup_delay=10)

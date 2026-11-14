@@ -814,6 +814,12 @@ class Server:
             for slot in player.equipment:
                 player.equipment[slot] = payload_to_stack(saved_equipment.get(slot, {}))
         player.cursor_stack = payload_to_stack(data.get("cursor", {}))
+        player.enchantment_seed = int(data.get("enchantment_seed", player.enchantment_seed))
+        for payload in data.get("workstation_items", []):
+            stack = payload_to_stack(payload)
+            player.inventory.insert_stack(stack)
+            if not stack.is_empty():
+                player.drop_item_stack(stack, pickup_delay=0)
         try:
             player.selected_slot = max(0, min(8, int(data.get("selected_slot", 0))))
         except (TypeError, ValueError):
@@ -956,6 +962,13 @@ class Server:
             "experience": int(getattr(player, "experience", 0)),
             "experience_level": int(getattr(player, "experience_level", 0)),
             "experience_total": int(getattr(player, "experience_total", 0)),
+            "enchantment_seed": int(player.enchantment_seed),
+            "workstation_items": [
+                stack_to_payload(container[index])
+                for container in player.open_inventory_containers.values()
+                if hasattr(container, "kind") and hasattr(container, "owner_block")
+                for index in range(2)
+            ],
             "score": int(getattr(player, "score", 0)),
             "gamemode": player.gamemode.name_id
             if hasattr(player.gamemode, "name_id")
@@ -1425,6 +1438,10 @@ class Server:
         player.clear_breaking()
         player.clear_eating()
         player.stop_sleeping(reposition=True, sync=False)
+        for container in tuple(player.open_inventory_containers.values()):
+            owner = getattr(container, "owner_block", getattr(container, "furnace", None))
+            if owner is not None:
+                owner.close_for(player)
         self.save_all(player, force=True)
         # 广播离开消息（黄色，排除已离开的玩家）
         self.broadcast_chat(

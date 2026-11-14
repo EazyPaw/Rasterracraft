@@ -103,6 +103,7 @@ class ClientModService:
     def refresh(self):
         self.assert_menu()
         self.manager.scan()
+        self.desired = {self.manager.resolve_key(key) for key in self.desired}
         # Browsing local graphics mods must not start an integrated server.
         if self.connection is not None or any(
             info.server_required for key, info in self.manager.catalog.items() if key in self.desired
@@ -130,6 +131,7 @@ class ClientModService:
         self.assert_menu()
         if self.busy:
             raise ModError("A Mod operation is already pending")
+        namespace = self.manager.resolve_key(namespace)
         if namespace not in self.manager.catalog:
             raise ModError(f"Unknown Mod: {namespace}")
         self.busy = True

@@ -131,6 +131,8 @@ class ModManager:
         self.side, self.app = side, app
         self.directory = self.root / "mods"
         self.catalog = {}
+        # Browsing and selection identify sources independently of runtime namespaces.
+        self.candidates = {}
         self.diagnostics = []
         self.loaded = []
         self.pending = None
@@ -142,7 +144,7 @@ class ModManager:
     def scan(self):
         if self.pending or self.in_game:
             raise ModError("Mods can only be scanned at the main menu")
-        catalog, diagnostics, duplicates = {}, [], set()
+        catalog, candidates, diagnostics = {}, {}, []
         self.log(logging.INFO, "scanning: directory=%s", self.directory)
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
@@ -150,6 +152,7 @@ class ModManager:
         except OSError as error:
             self.log(logging.ERROR, "scan failed: directory=%s", self.directory, exc_info=True)
             self.catalog, self.diagnostics = {}, [f"mods/: {error}"]
+            self.candidates = {}
             return self.diagnostics
         for path in paths:
             if not ((path.is_dir() and (path / "mod.json").is_file())
@@ -157,22 +160,44 @@ class ModManager:
                 continue
             try:
                 info = ModInfo.read(path)
-                if info.namespace in duplicates:
-                    raise ValueError(f"Duplicate namespace: {info.namespace}")
-                if info.namespace in catalog:
-                    other = catalog.pop(info.namespace)
-                    duplicates.add(info.namespace)
-                    diagnostics.append(f"{other.path.name}: duplicate namespace {info.namespace}")
-                    raise ValueError(f"Duplicate namespace: {info.namespace}")
-                catalog[info.namespace] = info
+                candidates[info.path] = info
                 self.log(logging.DEBUG, "discovered: mod=%s version=%s priority=%s source=%s",
                          info.namespace, info.version, info.priority, info.path)
             except Exception as error:
                 self.log(logging.WARNING, "candidate rejected: source=%s reason=%s: %s", path, type(error).__name__, error)
                 diagnostics.append(f"{path.name}: {type(error).__name__}: {error}")
+        groups = {}
+        for info in candidates.values():
+            groups.setdefault(info.namespace, []).append(info)
+        for namespace, entries in groups.items():
+            for info in entries:
+                key = namespace if len(entries) == 1 else self.source_key(info)
+                catalog[key] = info
         self.catalog, self.diagnostics = catalog, diagnostics
-        self.log(logging.INFO, "scan complete: valid=%d diagnostics=%s", len(catalog), diagnostics)
+        self.candidates = candidates
+        self.log(logging.INFO, "scan complete: discovered=%d loadable=%d diagnostics=%s",
+                 len(candidates), len(catalog), diagnostics)
         return diagnostics
+
+    @staticmethod
+    def source_key(info):
+        return info.namespace + "@" + info.path.name
+
+    def key_for(self, info):
+        key = self.source_key(info)
+        return key if key in self.catalog else info.namespace
+
+    def resolve_key(self, key):
+        if key in self.catalog:
+            return key
+        for info in self.catalog.values():
+            if self.source_key(info) == key:
+                return self.key_for(info)
+        # A scan may discover extra versions while a previously unique Mod is loaded.
+        for record in self.loaded:
+            if record.ctx.namespace == key and record.ctx.info.path in self.candidates:
+                return self.key_for(self.candidates[record.ctx.info.path])
+        return key
 
     def read_enabled(self):
         path = self.directory / "enabled.json"
@@ -182,25 +207,34 @@ class ModManager:
         enabled = data.get("enabled") if isinstance(data, dict) else None
         if not isinstance(enabled, list) or any(not isinstance(item, str) for item in enabled):
             raise ModError("Invalid mods/enabled.json")
-        return set(enabled)
+        return {self.resolve_key(key) for key in enabled}
 
     def write_enabled(self, enabled):
         path = self.directory / "enabled.json"
+        sources = []
+        for key in enabled:
+            info = self.catalog.get(self.resolve_key(key))
+            sources.append(self.source_key(info) if info else key)
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.directory,
                                          suffix=".tmp", delete=False) as stream:
             temporary = Path(stream.name)
-            json.dump({"enabled": sorted(enabled)}, stream, indent=2, ensure_ascii=False)
+            json.dump({"enabled": sorted(sources)}, stream, indent=2, ensure_ascii=False)
         try:
             temporary.replace(path)
         finally:
             temporary.unlink(missing_ok=True)
 
     def ordered(self, enabled):
+        enabled = {self.resolve_key(key) for key in enabled}
         missing = set(enabled) - self.catalog.keys()
         if missing:
             raise ModError("Missing/invalid Mods: " + ", ".join(sorted(missing)))
         ordered = sorted((self.catalog[key] for key in enabled), key=lambda m: (m.priority, m.namespace))
-        positions = {info.namespace: index for index, info in enumerate(ordered)}
+        positions = {}
+        for index, info in enumerate(ordered):
+            if info.namespace in positions:
+                raise ModError(f"Multiple versions selected for {info.namespace}; disable the current version first")
+            positions[info.namespace] = index
         for info in ordered:
             for dependency in info.dependencies:
                 if dependency not in positions:
@@ -364,7 +398,7 @@ class ModManager:
     def startup(self, enabled=None):
         """Isolate a broken Mod without preventing independent Mods from loading."""
         try:
-            enabled = self.read_enabled() if enabled is None else set(enabled)
+            enabled = self.read_enabled() if enabled is None else {self.resolve_key(key) for key in enabled}
             missing = enabled - self.catalog.keys()
             if missing:
                 self.diagnostics.append("Missing/invalid Mods: " + ", ".join(sorted(missing)))
@@ -377,9 +411,9 @@ class ModManager:
         accepted = set()
         for info in target:
             try:
-                change = self.prepare(accepted | {info.namespace}, startup=True)
+                change = self.prepare(accepted | {self.key_for(info)}, startup=True)
                 change.commit()
-                accepted.add(info.namespace)
+                accepted.add(self.key_for(info))
             except Exception as error:
                 self.diagnostics.append(f"{info.namespace}: {error}")
                 self.log(logging.ERROR, "startup skipped failed Mod: mod=%s", info.namespace, exc_info=True)

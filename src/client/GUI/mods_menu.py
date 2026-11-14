@@ -62,18 +62,32 @@ class ModsMenu(GUI):
             logging.exception("Failed to refresh Mod menu")
             self.error = str(error)
         entries = self.entries()
-        if self.selected not in {info.namespace for info in entries}:
-            self.selected = entries[0].namespace if entries else None
+        if self.selected not in {info.path for info in entries}:
+            self.selected = entries[0].path if entries else None
         self.detail_scroll = 0
 
     def entries(self):
-        return sorted(self.service.manager.catalog.values(), key=lambda info: (info.priority, info.namespace))
+        return sorted(self.service.manager.candidates.values(),
+                      key=lambda info: (info.priority, info.namespace, info.path.name.casefold(), info.path.name))
+
+    def selected_info(self):
+        return self.service.manager.candidates.get(self.selected)
+
+    def config_factory(self):
+        info = self.selected_info()
+        if info and any(record.ctx.info == info for record in self.service.manager.loaded):
+            return self.service.manager.config_menus.get(info.namespace)
+        return None
 
     def toggle(self):
         if self.in_world or not self.selected or self.service.busy:
             return
+        info = self.selected_info()
+        if info is None:
+            return
         try:
-            result = self.service.set_enabled(self.selected, self.selected not in self.service.desired)
+            key = self.service.manager.key_for(info)
+            result = self.service.set_enabled(key, key not in self.service.desired)
             self.message = transkey("mods.result." + result)
             self.error = ""
         except Exception as error:
@@ -99,7 +113,7 @@ class ModsMenu(GUI):
             self.error = str(error)
 
     def configure(self):
-        factory = self.service.manager.config_menus.get(self.selected)
+        factory = self.config_factory()
         if factory is None or self.service.busy:
             return
         try:
@@ -131,9 +145,12 @@ class ModsMenu(GUI):
             button.set_rect(margin + (index % columns) * (button_width + 8),
                             height - footer_height + (index // columns) * 42, button_width, 36)
             button.enabled = not self.service.busy
-        self.toggle_button.enabled = bool(self.selected) and not self.service.busy and not self.in_world
-        self.toggle_button.text = transkey("mods.disable" if self.selected in self.service.desired else "mods.enable")
-        self.config_button.enabled = not self.service.busy and self.selected in self.service.manager.config_menus
+        info = self.selected_info()
+        self.toggle_button.enabled = (info is not None
+                                      and not self.service.busy and not self.in_world)
+        self.toggle_button.text = transkey("mods.disable" if info and self.service.manager.key_for(info) in self.service.desired
+                                          else "mods.enable")
+        self.config_button.enabled = not self.service.busy and self.config_factory() is not None
 
     def status(self, info):
         local = {record.ctx.namespace: record.ctx.info for record in self.service.manager.loaded}
@@ -142,7 +159,9 @@ class ModsMenu(GUI):
         actual = ((not info.client_required or info.namespace in local)
                   and (not info.server_required or info.namespace in server))
         present = info.namespace in local or info.namespace in server
-        desired = info.namespace in self.service.desired
+        desired = self.service.manager.key_for(info) in self.service.desired
+        if not desired and (info.namespace not in local or local[info.namespace] != info):
+            return transkey("mods.disabled")
         if ((info.namespace in local and local[info.namespace] != info)
                 or (info.namespace in server_info and server_info[info.namespace]["version"] != info.version)):
             return transkey("mods.pendingRestart")
@@ -214,8 +233,8 @@ class ModsMenu(GUI):
                                    self.list_rect.width, self.row_height)
                 if not rect.colliderect(self.list_rect):
                     continue
-                self.rows.append((rect, info.namespace))
-                if self.selected == info.namespace:
+                self.rows.append((rect, info.path))
+                if self.selected == info.path:
                     self.render.draw_rect((90, 90, 90), rect, 2)
                 icon = self.get_icon(info)
                 if icon:
@@ -258,7 +277,7 @@ class ModsMenu(GUI):
         return lines
 
     def draw_details(self):
-        info = self.service.manager.catalog.get(self.selected)
+        info = self.selected_info()
         sections = []
         normal, warning, error = (230, 230, 230), (255, 205, 110), (255, 140, 140)
         if self.error:
@@ -322,9 +341,9 @@ class ModsMenu(GUI):
                     self.detail_scroll -= event.y * 40
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self.list_rect.collidepoint(event.pos):
-                    for rect, namespace in self.rows:
+                    for rect, path in self.rows:
                         if rect.collidepoint(event.pos):
-                            self.selected, self.detail_scroll = namespace, 0
+                            self.selected, self.detail_scroll = path, 0
                 for button in self.buttons:
                     button.handle_event(event)
             elif event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONUP):

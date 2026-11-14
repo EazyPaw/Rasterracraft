@@ -498,6 +498,30 @@ def _close_block_container_guis(client: "Client") -> None:
             client.render.close_gui(gui)
 
 
+@CLIENT_PACKET_DISPATCHER.handler("WorkstationOpen")
+def _handle_workstation_open(packet: dict, client: "Client") -> None:
+    from src.client.GUI.inventory.workstation import Workstation
+    _close_block_container_guis(client)
+    client.render.show_gui(Workstation(client.render, packet))
+
+
+@CLIENT_PACKET_DISPATCHER.handler("WorkstationUpdate")
+def _handle_workstation_update(packet: dict, client: "Client") -> None:
+    from src.client.GUI.inventory.workstation import Workstation
+    for gui in list(client.render.drawing_GUIs):
+        if isinstance(gui, Workstation) and gui.container_id == str(packet.get("container", "")):
+            gui.apply_update(packet)
+
+
+@CLIENT_PACKET_DISPATCHER.handler("WorkstationClosed")
+def _handle_workstation_closed(packet: dict, client: "Client") -> None:
+    from src.client.GUI.inventory.workstation import Workstation
+    for gui in list(client.render.drawing_GUIs):
+        if isinstance(gui, Workstation) and gui.container_id == str(packet.get("container", "")):
+            gui._server_closed = True
+            client.render.close_gui(gui)
+
+
 @CLIENT_PACKET_DISPATCHER.handler("FurnaceOpen")
 def _handle_furnace_open(packet: dict, client: "Client") -> None:
     furnace_type = _furnace_type()

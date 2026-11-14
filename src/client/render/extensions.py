@@ -12,7 +12,7 @@ from src.mods.effects import barrier
 
 class RenderExtensions:
     STAGES = frozenset({"events", "sky", "requirements", "background", "terrain", "world",
-                        "overlay", "composite", "capture", "display_reset", "world_transform", "block_section", "pre_terrain", "block_texture"})
+                        "overlay", "composite", "capture", "display_reset", "world_transform", "block_section", "pre_terrain", "block_texture", "precipitation"})
 
     def __init__(self):
         self._stages = {stage: () for stage in self.STAGES}
@@ -65,7 +65,7 @@ class RenderExtensions:
                     continue
                 try:
                     result = callback(render, *args)
-                    if stage in {"sky", "requirements", "composite", "capture", "world_transform", "block_section", "block_texture"} and result is not None and result is not False:
+                    if stage in {"sky", "requirements", "composite", "capture", "world_transform", "block_section", "block_texture", "precipitation"} and result is not None and result is not False:
                         return result
                 except Exception:
                     # A broken visual mod must not terminate the game or flood

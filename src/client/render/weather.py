@@ -301,6 +301,11 @@ class WeatherMixin:
                 continue
             self.screen.set_clip(clip)
 
+            # Per-column takeover retains vanilla snow, roof/biome clipping,
+            # impact particles and rain audio when a mod replaces rain only.
+            if self.extensions.run("precipitation", self, precipitation, world_x, clip):
+                continue
+
             # UV 滚动锚定在世界 Y 坐标上。
             # 相机垂直移动时，显示的是同一降水场的不同部分，
             # 而不是屏幕空间覆盖层的平移。

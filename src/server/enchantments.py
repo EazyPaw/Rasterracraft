@@ -277,3 +277,66 @@ INFINITY = register_enchantment(
     ),
     aliases=("arrow_infinite",),
 )
+
+
+def _slot(slot):
+    return lambda material: _is_armor(material) and material.equipment_slot == slot
+
+
+def _digger(material):
+    return getattr(material, "tool_type", None) in {"pickaxe", "axe", "shovel"}
+
+
+def _sword(material):
+    return getattr(material, "tool_type", None) == "sword"
+
+
+def _modifier(attribute, amount, slot="mainhand"):
+    return ({"type": "minecraft:" + attribute, "id": "minecraft:enchantment." + attribute,
+             "amount": amount, "operation": "add_value", "slot": slot},)
+
+
+def _special_protection(kind, multiplier):
+    def factor(level, damage):
+        name = getattr(damage, "message_id", "")
+        matches = {
+            "fire": _damage_type_has_tag(damage, DamageTag.IS_FIRE),
+            "fall": name == "fall", "explosion": "explosion" in name,
+            "projectile": name in {"arrow", "thrown", "fireball"},
+        }
+        return math.floor((6 + level * level) / 3 * multiplier) if matches[kind] else 0
+    return factor
+
+
+for _id, _key, _maximum, _supports, _attributes, _protection in (
+    ("fire_protection", "protect.fire", 4, _is_armor, None, _special_protection("fire", 1.25)),
+    ("feather_falling", "protect.fall", 4, _slot("feet"), None, _special_protection("fall", 2.5)),
+    ("blast_protection", "protect.explosion", 4, _is_armor, None, _special_protection("explosion", 1.5)),
+    ("projectile_protection", "protect.projectile", 4, _is_armor, None, _special_protection("projectile", 1.5)),
+    ("respiration", "oxygen", 3, _slot("head"), None, None),
+    ("aqua_affinity", "waterWorker", 1, _slot("head"), None, None),
+    ("thorns", "thorns", 3, _is_armor, None, None),
+    ("depth_strider", "waterWalker", 3, _slot("feet"),
+     lambda level: _modifier("water_movement_efficiency", level / 3, "feet"), None),
+    ("smite", "damage.undead", 5, _is_melee_weapon, None, None),
+    ("bane_of_arthropods", "damage.arthropods", 5, _is_melee_weapon, None, None),
+    ("knockback", "knockback", 2, _sword,
+     lambda level: _modifier("attack_knockback", level), None),
+    ("fire_aspect", "fire", 2, _sword, None, None),
+    ("looting", "lootBonus", 3, _sword, None, None),
+    ("efficiency", "digging", 5,
+     lambda material: _digger(material) or material.name_id == "shears",
+     lambda level: _modifier("mining_efficiency", level * level + 1), None),
+    ("silk_touch", "untouching", 1, _digger, None, None),
+    ("fortune", "lootBonusDigger", 3, _digger, None, None),
+    ("luck_of_the_sea", "lootBonusFishing", 3,
+     lambda material: material.name_id == "fishing_rod", None, None),
+    ("lure", "fishingSpeed", 3,
+     lambda material: material.name_id == "fishing_rod", None, None),
+):
+    _kwargs = {}
+    if _attributes is not None:
+        _kwargs["attribute_factory"] = _attributes
+    if _protection is not None:
+        _kwargs["damage_protection_factory"] = _protection
+    register_enchantment(Enchantment(_id, "enchantment." + _key, _maximum, _supports, **_kwargs))

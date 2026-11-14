@@ -641,6 +641,26 @@ def _handle_close_furnace(packet: dict, player: Player) -> None:
         furnace.close_for(player)
 
 
+@SERVER_PACKET_DISPATCHER.handler("WorkstationAction")
+def _handle_workstation_action(packet: dict, player: Player) -> None:
+    from src.server.workstations import WorkstationInventory
+
+    container_id = str(packet.get("container", ""))
+    container = player.get_inventory_container(container_id)
+    if not isinstance(container, WorkstationInventory):
+        return
+    action = packet.get("action")
+    if action == "close":
+        container.close()
+    elif action == "rename":
+        container.rename(packet.get("name"))
+    elif action == "enchant":
+        try:
+            container.enchant(int(packet.get("option", -1)))
+        except (TypeError, ValueError):
+            container.send()
+
+
 @SERVER_PACKET_DISPATCHER.handler("CloseChest")
 def _handle_close_chest(packet: dict, player: Player) -> None:
     container_id = str(packet.get("container", ""))

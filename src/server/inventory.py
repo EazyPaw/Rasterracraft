@@ -122,6 +122,9 @@ class Inventory:
     def can_place(self, slot: int, stack: ItemStack) -> bool:
         return True
 
+    def slot_limit(self, slot: int, stack: ItemStack) -> int:
+        return stack.max_stack_size
+
     @staticmethod
     def copy_stack(stack: ItemStack, amount: int | None = None) -> ItemStack:
         if amount is None:
@@ -134,10 +137,13 @@ class Inventory:
         capacity = 0
         for slot in self._normalize_slots(slots):
             target = self[slot]
+            if not self.can_place(slot, stack):
+                continue
+            limit = self.slot_limit(slot, stack)
             if target.is_empty():
-                capacity += stack.max_stack_size
+                capacity += limit
             elif target.is_stackable_with(stack, require_full_fit=False):
-                capacity += max(0, target.max_stack_size - target.amount)
+                capacity += max(0, limit - target.amount)
         return capacity
 
     def insert_stack(self, stack: ItemStack, slots=None) -> int:
@@ -156,7 +162,7 @@ class Inventory:
                 continue
             moved = min(
                 stack.amount,
-                max(0, target.max_stack_size - target.amount),
+                max(0, self.slot_limit(slot, target) - target.amount),
             )
             if moved <= 0:
                 continue
@@ -170,7 +176,7 @@ class Inventory:
                 continue
             if not self[slot].is_empty():
                 continue
-            moved = min(stack.amount, stack.max_stack_size)
+            moved = min(stack.amount, self.slot_limit(slot, stack))
             self[slot] = self.copy_stack(stack, moved)
             stack.amount -= moved
             if stack.amount <= 0:

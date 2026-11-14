@@ -80,6 +80,7 @@ class Player(Entity):
         self.experience = 0
         self.experience_level = 0
         self.experience_total = 0
+        self.enchantment_seed = _random.randrange(-(1 << 31), 1 << 31)
         self.score = 0
         self.take_xp_delay = 0
         self._last_level_up_sound_tick = -100
@@ -378,6 +379,8 @@ class Player(Entity):
         block = create_block()
         if block is None:
             return False
+        if getattr(block, "workstation_kind", None) == "anvil":
+            block.damage = max(0, min(2, int(stack.nbt.get("anvil_damage", block.damage))))
         place_location = block.get_placement_location(
             target,
             player=self,
@@ -758,10 +761,9 @@ class Player(Entity):
             )
             return False
 
-        tool = held_stack.material
         mined_block = block
         self.clear_breaking(notify=False)
-        world.break_block(x, y, z, tool=tool)
+        world.break_block(x, y, z, tool=held_stack)
         if self.apply_item_event(held_stack, "on_mined_block", mined_block):
             self._broadcast_action_state()
         self.add_exhaustion(0.005)
@@ -1346,6 +1348,9 @@ class Player(Entity):
             )
             if owner is None:
                 continue
+            tick_container = getattr(container, "tick", None)
+            if callable(tick_container):
+                tick_container()
             if self.get_inventory_container(container_id) is None:
                 server = getattr(self.world, "server", None)
                 if server is not None:
@@ -1486,6 +1491,13 @@ class Player(Entity):
         self._last_attribute_attack_tick = current_tick
         actual_damage = super().attack(target, damage_type, amount, knockback)
         if actual_damage > 0:
+            fire_aspect = self.inventory[self.selected_slot].get_enchantment_level("fire_aspect")
+            if fire_aspect:
+                target.set_seconds_on_fire(4 * fire_aspect)
+            bane = self.inventory[self.selected_slot].get_enchantment_level("bane_of_arthropods")
+            if bane and getattr(target, "entity_id", "") in {"spider", "cave_spider", "silverfish", "endermite"}:
+                from src.server.status_effects import StatusEffectInstance
+                target.add_status_effect(StatusEffectInstance("slowness", 20 + _random.randrange(10 * bane), 3))
             if was_sprinting:
                 self.motion.x *= 0.6
                 self.sprinting = False
@@ -1519,7 +1531,14 @@ class Player(Entity):
         )
 
     def get_attack_damage(self, target=None) -> float:
-        return super().get_attack_damage(target)
+        damage = super().get_attack_damage(target)
+        held = self.inventory[self.selected_slot]
+        target_id = getattr(target, "entity_id", "")
+        if target_id in {"zombie", "skeleton", "wither_skeleton", "zombie_pigman", "wither"}:
+            damage += held.get_enchantment_level("smite") * 2.5
+        if target_id in {"spider", "cave_spider", "silverfish", "endermite"}:
+            damage += held.get_enchantment_level("bane_of_arthropods") * 2.5
+        return damage
 
     def refresh_attribute_modifiers(self) -> None:
         super().refresh_attribute_modifiers()
@@ -1618,6 +1637,10 @@ class Player(Entity):
             "motion": {"x": self.motion.x, "y": self.motion.y},
         }
         if self.health <= 0:
+            for container in tuple(self.open_inventory_containers.values()):
+                close = getattr(container, "close", None)
+                if callable(close):
+                    close()
             death_score = max(0, int(self.score))
             if self.emit_death_effects():
                 self.drop_experience_on_death(sync=False)
@@ -1673,12 +1696,18 @@ class Player(Entity):
             )
         )
         if invalid_owner:
+            close = getattr(container, "close", None)
+            if callable(close):
+                close()
             self.open_inventory_containers.pop(container_id, None)
             for block in owners:
                 viewers = getattr(block, "_viewers", None)
                 if viewers is not None:
                     viewers.discard(self)
             return None
+        refresh = getattr(container, "refresh", None)
+        if callable(refresh):
+            refresh()
         return container
 
     def register_inventory_container(
@@ -1699,6 +1728,10 @@ class Player(Entity):
             return self._is_valid_equipment_stack(str(slot), stack)
         callback = getattr(container, "can_place", None)
         return not callable(callback) or bool(callback(int(slot), stack))
+
+    def _container_can_take(self, container, slot) -> bool:
+        callback = getattr(container, "can_take", None)
+        return not callable(callback) or bool(callback(int(slot), self))
 
     @staticmethod
     def _container_changed(container) -> None:
@@ -1772,6 +1805,9 @@ class Player(Entity):
             return
         source_key = source_slot if isinstance(source, dict) else int(source_slot)
         target_key = target_slot if isinstance(target, dict) else int(target_slot)
+        if not self._container_can_take(source, source_key):
+            self.sync_inventory()
+            return
         if source is target and source_key == target_key:
             self.sync_inventory()
             return
@@ -1781,6 +1817,15 @@ class Player(Entity):
             self.sync_inventory()
             return
         if not self._container_can_place(source, source_key, target_stack):
+            if target_stack.is_empty() and self._container_can_take(source, source_key):
+                self._container_set(source, source_key, EmptyItemStack())
+                self._container_set(target, target_key, source_stack)
+                self._container_taken(source, source_key, source_stack.amount)
+                self._container_changed(source)
+                self._container_changed(target)
+            self.sync_inventory()
+            return
+        if target_stack.amount > getattr(source, "slot_limit", lambda _slot, stack: stack.max_stack_size)(source_key, target_stack):
             self.sync_inventory()
             return
         self._container_set(source, source_key, target_stack)
@@ -1801,7 +1846,7 @@ class Player(Entity):
     ):
         if screen.startswith("container:"):
             external_id = screen.removeprefix("container:")
-            external = self.open_inventory_containers.get(external_id)
+            external = self.get_inventory_container(external_id)
             if source_container_id == "inventory" and external is not None:
                 return external, tuple(range(len(external)))
             if source_container_id == external_id and external is not None:
@@ -1865,6 +1910,10 @@ class Player(Entity):
         if not isinstance(source, Inventory) or not 0 <= source_slot < len(source):
             self.sync_inventory()
             return
+        if not self._container_can_take(source, source_slot):
+            self._container_changed(source)
+            self.sync_inventory()
+            return
         if source_container_id == "crafting" and source_slot >= crafting_size:
             self.sync_inventory()
             return
@@ -1914,6 +1963,8 @@ class Player(Entity):
                 )
             )
             for slot in source_slots:
+                if not self._container_can_take(source, slot):
+                    continue
                 stack = source[slot]
                 if stack.is_empty() or not stack.is_stackable_with(
                     reference, require_full_fit=False
@@ -1944,6 +1995,9 @@ class Player(Entity):
             slot = int(slot)
             if not 0 <= slot < len(container):
                 return
+        if not self._container_can_take(container, slot):
+            self._container_changed(container)
+            return
         target = container[slot]
         cursor = self.cursor_stack
         if cursor.is_empty():
@@ -1981,16 +2035,20 @@ class Player(Entity):
             return
         if target.is_empty():
             amount = cursor.amount if button == 1 else 1
+            limit = getattr(container, "slot_limit", lambda _slot, stack: stack.max_stack_size)(slot, cursor)
+            amount = min(amount, limit)
             container[slot] = ItemStack(cursor.material, amount, cursor.nbt)
             cursor.amount -= amount
         elif target.material == cursor.material and target.nbt == cursor.nbt:
             amount = min(
                 cursor.amount if button == 1 else 1,
-                target.max_stack_size - target.amount,
+                getattr(container, "slot_limit", lambda _slot, stack: stack.max_stack_size)(slot, target) - target.amount,
             )
             target.amount += max(0, amount)
             cursor.amount -= max(0, amount)
         else:
+            if cursor.amount > getattr(container, "slot_limit", lambda _slot, stack: stack.max_stack_size)(slot, cursor):
+                return
             container[slot], self.cursor_stack = cursor, target
             self._container_changed(container)
             return
@@ -2111,9 +2169,10 @@ class Player(Entity):
         if not self._container_can_place(container, slot, self.cursor_stack):
             return
         target = container[slot]
+        limit = container.slot_limit(slot, self.cursor_stack)
         if target.is_empty():
             moved = min(
-                amount, self.cursor_stack.amount, self.cursor_stack.max_stack_size
+                amount, self.cursor_stack.amount, limit
             )
             container[slot] = ItemStack(
                 self.cursor_stack.material, moved, self.cursor_stack.nbt
@@ -2123,7 +2182,7 @@ class Player(Entity):
             and target.nbt == self.cursor_stack.nbt
         ):
             moved = min(
-                amount, self.cursor_stack.amount, target.max_stack_size - target.amount
+                amount, self.cursor_stack.amount, limit - target.amount
             )
             target.amount += max(0, moved)
         else:
@@ -2148,6 +2207,10 @@ class Player(Entity):
         if cursor:
             stack = self.cursor_stack
         elif self._container_slot_valid(container, slot):
+            if not self._container_can_take(container, slot):
+                self._container_changed(container)
+                self.sync_inventory()
+                return
             stack = self._container_get(container, slot)
         else:
             self.sync_inventory()

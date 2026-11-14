@@ -1257,11 +1257,34 @@ class World:
             self.spawn_particle(BlockBreakParticleEffect(block, location, count=18))
         block.on_break()
 
+        tool_stack = tool if hasattr(tool, "get_enchantment_level") else None
+        if tool_stack is not None:
+            tool = tool_stack.material
+
         drops = (
             block.get_drops(tool)
             if explosion_power is None
             else block.get_explosion_drops()
         )
+        silk = False
+        if tool_stack is not None and explosion_power is None and block.can_harvest(tool):
+            silk = tool_stack.get_enchantment_level("silk_touch") > 0 and (
+                block.block_id in {"stone", "grass_block", "mycelium", "bookshelf", "glass", "ice", "glowstone"}
+                or block.block_id.endswith(("_ore", "_leaves"))
+            )
+            if silk:
+                from src.server.item_class import ItemStack
+                from src.server.materials import get_block_item
+                drops = [ItemStack(get_block_item(block))]
+            else:
+                fortune = tool_stack.get_enchantment_level("fortune")
+                if fortune > 0 and block.block_id in {"coal_ore", "diamond_ore", "emerald_ore", "lapis_ore", "nether_quartz_ore"}:
+                    multiplier = max(1, random.randrange(fortune + 2))
+                    for stack in drops:
+                        stack.amount *= multiplier
+                elif fortune > 0 and block.block_id == "glowstone":
+                    for stack in drops:
+                        stack.amount = min(4, stack.amount + random.randrange(fortune + 1))
         drop_chance = (
             1.0
             if explosion_power is None
@@ -1282,7 +1305,7 @@ class World:
                 from src.server.entities.item import Item
 
                 self.spawn_entity(Item(x + 0.5, y + 0.45, self, stack, z))
-        experience = block.get_experience(tool)
+        experience = 0 if silk else block.get_experience(tool)
         if experience > 0 and spawn_experience:
             self.spawn_experience(x + 0.5, y + 0.5, z, experience)
         if notify_clients and not batching_explosion:

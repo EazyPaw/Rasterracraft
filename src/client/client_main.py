@@ -547,26 +547,35 @@ class Client:
         if self.client_player is not None:
             self.client_player.game_mode.update_gui()
 
-    def capture_save_icon(self):
-        if not self.current_save_id or self.render.screen is None:
+    def capture_save_icon(self, *, wait=False):
+        if not self.current_save_id or self.render.screen is None or not self.in_game:
             return
+        save_id = self.current_save_id
+        self.render.queue_world_capture(
+            lambda surface: self._write_save_icon(save_id, surface), wait=wait
+        )
+
+    def _write_save_icon(self, save_id, screen):
         try:
-            capture = getattr(self.render, "capture_frame_surface", None)
-            screen = capture() if callable(capture) else self.render.screen.copy()
             width, height = screen.get_size()
             side = min(width, height)
             crop = pygame.Rect((width - side) // 2, (height - side) // 2, side, side)
             icon = screen.subsurface(crop).copy()
             icon = pygame.transform.smoothscale(icon, (64, 64))
-            path = save_manager.icon_path(self.current_save_id)
+            path = save_manager.icon_path(save_id)
             path.parent.mkdir(parents=True, exist_ok=True)
-            pygame.image.save(icon, str(path))
+            temporary = path.with_name("icon.tmp.png")
+            pygame.image.save(icon, str(temporary))
+            temporary.replace(path)
         except Exception as e:
             logging.warning(f"Failed to save world icon: {e}")
 
     def return_to_main_menu(self):
         if not self.game_started:
             return
+        # Wait on the simulation thread, not the render thread, before
+        # clearing the player/world or disabling client-only compositors.
+        self.capture_save_icon(wait=True)
         self.in_game = False
         self._request_server_save(timeout=8.0)
         self._close_current_game_transport()

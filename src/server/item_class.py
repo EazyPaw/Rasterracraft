@@ -50,6 +50,9 @@ class ItemStack:
         self.name = None
 
     def get_name(self):
+        custom = self.nbt.get("display", {}).get("Name")
+        if isinstance(custom, str) and custom:
+            return custom
         if self.name is None:
             return self.material.get_name()
         return self.name
@@ -160,6 +163,9 @@ class ItemStack:
     def get_enchantment_level(self, enchantment_id: str) -> int:
         from src.server.enchantments import normalize_enchantment_id
 
+        # Books store enchantments for anvil transfer, without activating them.
+        if self.material.name_id == "enchanted_book":
+            return 0
         try:
             wanted = normalize_enchantment_id(enchantment_id)
         except ValueError:
@@ -178,7 +184,7 @@ class ItemStack:
         if enchantment is None:
             raise ValueError(f"unknown enchantment: {enchantment_id}")
         level = enchantment.validate_level(level)
-        if not enchantment.supports(self):
+        if self.material.name_id != "enchanted_book" and not enchantment.supports(self):
             raise ValueError(f"{enchantment.id} cannot be applied to this item")
 
         levels = self.get_enchantments()
@@ -234,10 +240,11 @@ class ItemStack:
             return False
 
         unbreaking = self._get_enchantment_level("unbreaking")
+        armor = isinstance(self.material, materials.Armor)
         applied = sum(
             1
             for _ in range(amount)
-            if unbreaking <= 0 or random.randrange(unbreaking + 1) == 0
+            if unbreaking <= 0 or (armor and random.random() < .6) or random.randrange(unbreaking + 1) == 0
         )
         if applied <= 0:
             return False
@@ -348,6 +355,8 @@ class ItemStack:
 
         from src.server.enchantments import get_enchantment
 
+        if self.material.name_id == "enchanted_book":
+            return tuple(result)
         for enchantment_id, level in self.get_enchantments().items():
             enchantment = get_enchantment(enchantment_id)
             if enchantment is None:

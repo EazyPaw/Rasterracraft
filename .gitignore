@@ -233,6 +233,7 @@ __marimo__/
 /mods/enabled.json
 !/tests/test_mods.py
 
+
 # Keep the village generation regression suite; other local tests stay ignored.
 !/tests/
 /tests/*
@@ -261,3 +262,10 @@ __marimo__/
 !/tests/test_lumen.py
 
 !/tests/test_mods.py
+
+# Enchanting/anvil regression coverage and reproducible GUI previews.
+!/tests/test_enchanting_anvil.py
+!/validation/render_workstations.py
+!/assets/rasterracraft/sounds/
+/assets/rasterracraft/sounds/*
+!/assets/rasterracraft/sounds/enchanting/

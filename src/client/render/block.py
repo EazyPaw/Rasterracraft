@@ -340,10 +340,10 @@ class BlockRenderMixin:
         for x in range(x0, x0 + section_w):
             for y in range(y0, y0 + section_h):
                 for z in (0, 1):
-                    offset_x, offset_y = getattr(
-                        get_block(x, y, z), "render_offset_blocks", (0.0, 0.0)
-                    )
-                    max_offset = max(max_offset, abs(offset_x), abs(offset_y))
+                    block = get_block(x, y, z)
+                    offset_x, offset_y = getattr(block, "render_offset_blocks", (0.0, 0.0))
+                    max_offset = max(max_offset, abs(offset_x), abs(offset_y),
+                                     getattr(block, "render_padding_blocks", 0.0))
 
         padding = _math.ceil(max_offset * bs)
         cache[probe_key] = padding
@@ -361,7 +361,7 @@ class BlockRenderMixin:
         cache = self.block_section_animation_cache
         if probe_key in cache:
             cache.move_to_end(probe_key)
-            texture_paths = cache[probe_key]
+            texture_paths, animation_intervals = cache[probe_key]
         else:
             section_w = self.BLOCK_SECTION_WIDTH
             section_h = self.BLOCK_SECTION_HEIGHT
@@ -371,27 +371,34 @@ class BlockRenderMixin:
             y1 = y0 + section_h - 1
             get_block = self.client_world.get_block
             paths: set[str] = set()
+            intervals: set[int] = set()
+
+            def record_animation(block):
+                path = self._animated_texture_path(block)
+                if path is not None:
+                    paths.add(path)
+                interval = getattr(block, "render_animation_interval_ms", 0)
+                if interval > 0:
+                    intervals.add(interval)
+
             for x in range(x0, x1 + 1):
                 for y in range(y0, y1 + 1):
                     b0 = get_block(x, y, 0)
-                    path = self._animated_texture_path(b0)
-                    if path is not None:
-                        paths.add(path)
+                    record_animation(b0)
                     b1 = get_block(x, y, 1)
                     if b0 is not None and b0.has_transparent_pixels:
-                        path = self._animated_texture_path(b1)
-                        if path is not None:
-                            paths.add(path)
+                        record_animation(b1)
 
             texture_paths = tuple(sorted(paths))
-            cache[probe_key] = texture_paths
+            animation_intervals = tuple(sorted(intervals))
+            cache[probe_key] = (texture_paths, animation_intervals)
             if len(cache) > self.MAX_BLOCK_SECTION_ANIMATION_CACHE:
                 cache.popitem(last=False)
 
-        if not texture_paths:
+        if not texture_paths and not animation_intervals:
             return 0
 
-        frame_keys = []
+        frame_keys = [(interval, pygame.time.get_ticks() // interval) for interval in animation_intervals]
         get_animation_key = self.client.resources_manager.get_texture_animation_key
         for texture_path in texture_paths:
             frame_key = get_animation_key(texture_path)
@@ -1474,6 +1481,7 @@ class BlockRenderMixin:
             # bits here aliases dim gradients and introduces visible seams.
             grad_key = (
                 bs,
+                tex_h,
                 color_tl,
                 color_tr,
                 color_bl,
@@ -1485,6 +1493,14 @@ class BlockRenderMixin:
                 grad_cache.move_to_end(grad_key)
             else:
                 grad = self._make_corner_gradient(bs,bs,color_tl,color_tr,color_bl,color_br)
+                if tex_h > bs:
+                    # Overhanging models retain the block's gradient at their
+                    # base, with top-edge lighting continued up to the book.
+                    full_grad = pygame.Surface((bs, tex_h), pygame.SRCALPHA)
+                    full_grad.blit(pygame.transform.scale(grad.subsurface((0, 0, bs, 1)),
+                                                         (bs, tex_h - bs)), (0, 0))
+                    full_grad.blit(grad, (0, tex_h - bs))
+                    grad = full_grad
                 grad_cache[grad_key] = grad
                 self._trim_surface_cache(
                     grad_cache,

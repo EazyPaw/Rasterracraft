@@ -17,6 +17,10 @@ from src.server.utils import client_method
 
 
 BUILTIN_SOUND_FALLBACKS = {
+    "block.enchantment_table.use": {
+        "category": "block",
+        "sounds": [f"rasterracraft:enchanting/enchant{index}" for index in range(1, 4)],
+    },
     "item.hoe.till": {
         "category": "block",
         "sounds": [
@@ -581,6 +585,8 @@ class ResourcesManager:
             return
 
         full_path = f"assets/minecraft/sounds/{sound_path}.ogg"
+        if sound_path.startswith("rasterracraft:"):
+            full_path = f"assets/rasterracraft/sounds/{sound_path.split(':', 1)[1]}.ogg"
 
         if not os.path.exists(full_path):
             print(f"Sound file not found: {full_path}")

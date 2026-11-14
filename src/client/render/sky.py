@@ -146,7 +146,7 @@ class SkyMixin:
 
     # ---------- 天空状态计算 ----------
 
-    def get_sky_state(self) -> dict[str, Any]:
+    def get_sky_state(self, *, weather_intensity=None) -> dict[str, Any]:
         """根据当前时间计算完整天空状态。
 
                 包括：天空上下层颜色、黄昏霞光、日光/月光强度、天空光照权重。
@@ -164,7 +164,9 @@ class SkyMixin:
         upper = cyclic_lerp_color(self.SKY_UPPER_KEYFRAMES, time_value)
         lower = cyclic_lerp_color(self.SKY_LOWER_KEYFRAMES, time_value)
 
-        weather = self.weather_intensity
+        # Presentation-only override lets client atmosphere mods distinguish
+        # dry/rain/snow climates without mutating global weather state.
+        weather = self.weather_intensity if weather_intensity is None else weather_intensity
         base_light = 0.25 + 0.75 * self.get_sky_light_weight(clear_only=True)
         rainy_upper = tuple(int(channel * base_light) for channel in (96, 101, 110))
         rainy_lower = tuple(int(channel * base_light) for channel in (126, 130, 137))

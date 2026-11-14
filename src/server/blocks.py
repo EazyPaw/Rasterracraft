@@ -21,6 +21,7 @@ from src.server.materials import (
 from src.server.tags import BlockTag
 from src.server.utils import client_method
 from src.server.inventory import Inventory
+from src.server.workstations import WorkstationBlockMixin
 
 
 _BLOCK_REGISTRY: dict[str, type[Block]] = {}
@@ -2500,6 +2501,12 @@ class LAPIS_ORE(Block):
     requires_correct_tool = True
     required_tool_tier = "stone"
 
+    def get_drops(self, material):
+        if not self.can_harvest(material):
+            return []
+        from src.server.item_class import ItemStack
+        return [ItemStack(materials.LAPIS_LAZULI(), random.randint(4, 8))]
+
 
 @register_block
 class REDSTONE_ORE(Block):
@@ -3291,8 +3298,104 @@ class BOOKSHELF(Block):
     block_id = "bookshelf"
     name = "tile.bookshelf.name"
     _texture_path = "blocks.bookshelf"
+    preferred_tool = "axe"
+    requires_correct_tool = False
+    drops = (BlockDrop(materials.BOOK, 3),)
+
+
+@register_block
+class ENCHANTING_TABLE(WorkstationBlockMixin, Block):
+    block_id = "enchanting_table"
+    name = "tile.enchantmentTable.name"
+    _texture_path = "blocks.enchanting_table_side"
+    hardness = 5.0
+    blast_resistance = 1200.0
     preferred_tool = "pickaxe"
     requires_correct_tool = True
+    light_source = 7
+    has_transparent_pixels = True
+    light_attenuation = 0
+    suffocating = False
+    redstone_conducting = False
+    render_padding_blocks = .5
+    render_animation_interval_ms = 80
+    collision_box = BlockCollisionBox((CollisionBox(0, 0, 1, .75),))
+
+    @client_method
+    def get_texture(self, size, client=None):
+        from src.client.workstation_art import render_enchanting_table
+        frame = pygame.time.get_ticks() // self.render_animation_interval_ms
+        return render_enchanting_table(client.resources_manager, size, frame)
+
+
+@register_block
+class IRON_BLOCK(Block):
+    block_id = "iron_block"
+    name = "tile.blockIron.name"
+    _texture_path = "blocks.iron_block"
+    hardness = 5.0
+    blast_resistance = 6.0
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    required_tool_tier = "stone"
+
+
+@register_block
+class ANVIL(WorkstationBlockMixin, GravityBlock):
+    block_id = "anvil"
+    workstation_kind = "anvil"
+    name = "tile.anvil.name"
+    _texture_path = "blocks.anvil_base"
+    hardness = 5.0
+    blast_resistance = 1200.0
+    preferred_tool = "pickaxe"
+    requires_correct_tool = True
+    place_sound = "random.anvil_land"
+    has_transparent_pixels = True
+    light_attenuation = 0
+    suffocating = False
+    redstone_conducting = False
+    # Exact orthographic profile: the narrow stem leaves walkable empty
+    # space at either side; only the 6px-high head spans the full block.
+    collision_box = BlockCollisionBox((
+        CollisionBox(2/16, 0, 14/16, 4/16),
+        CollisionBox(3/16, 4/16, 13/16, 5/16),
+        CollisionBox(4/16, 5/16, 12/16, 10/16),
+        CollisionBox(0, 10/16, 1, 1),
+    ))
+
+    def get_texture_path(self):
+        return "blocks.anvil_base"
+
+    def get_name(self):
+        return transkey(("tile.anvil.intact.name", "tile.anvil.slightlyDamaged.name",
+                         "tile.anvil.veryDamaged.name")[min(2, self.damage)])
+
+    @client_method
+    def get_texture(self, size, client=None):
+        from src.client.workstation_art import render_anvil
+        return render_anvil(client.resources_manager, self.damage, size)
+
+    def get_drops(self, material):
+        if not self.can_harvest(material):
+            return []
+        from src.server.item_class import ItemStack
+        item = (materials.ANVIL, materials.CHIPPED_ANVIL, materials.DAMAGED_ANVIL)[min(2, self.damage)]
+        return [ItemStack(item())]
+
+
+@register_block
+class CHIPPED_ANVIL(ANVIL):
+    block_id = "chipped_anvil"
+    initial_damage = 1
+    name = "tile.anvil.slightlyDamaged.name"
+
+
+@register_block
+class DAMAGED_ANVIL(ANVIL):
+    block_id = "damaged_anvil"
+    initial_damage = 2
+    name = "tile.anvil.veryDamaged.name"
 
 
 @register_block

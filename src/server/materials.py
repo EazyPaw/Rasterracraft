@@ -2463,6 +2463,85 @@ class ENDER_PEARL(ThrowableMaterial):
     max_stack_size = 16
 
 
+@register_material
+class ENCHANTING_TABLE(BlockItem):
+    name_id = target_block_id = "enchanting_table"
+    name = "tile.enchantmentTable.name"
+
+    @classmethod
+    @client_method
+    def get_texture(cls, size, client=None):
+        side = client.resources_manager.get_texture_img("blocks.enchanting_table_side")
+        pixels = max(1, round(16 * size))
+        return pygame.transform.scale(side, (pixels, pixels))
+
+
+@register_material
+class IRON_BLOCK(BlockItem):
+    name_id = target_block_id = "iron_block"
+    name = "tile.blockIron.name"
+
+
+@register_material
+class ANVIL(BlockItem):
+    name_id = target_block_id = "anvil"
+    name = "tile.anvil.name"
+
+    @classmethod
+    def get_texture_variant_key(cls, stack):
+        return max(0, min(2, int(stack.nbt.get("anvil_damage", getattr(cls, "initial_damage", 0)))))
+
+    @classmethod
+    @client_method
+    def get_stack_texture(cls, stack, size, client=None):
+        from src.client.workstation_art import render_anvil
+        return render_anvil(client.resources_manager, cls.get_texture_variant_key(stack), round(16 * size))
+
+
+@register_material
+class CHIPPED_ANVIL(ANVIL):
+    name_id = target_block_id = "chipped_anvil"
+    initial_damage = 1
+    name = "tile.anvil.slightlyDamaged.name"
+
+
+@register_material
+class DAMAGED_ANVIL(ANVIL):
+    name_id = target_block_id = "damaged_anvil"
+    initial_damage = 2
+    name = "tile.anvil.veryDamaged.name"
+
+
+@register_material
+class BOOK(Material):
+    name_id = "book"
+    name = "item.book.name"
+    _texture_path = "items.book_normal"
+
+
+@register_material
+class ENCHANTED_BOOK(Material):
+    name_id = "enchanted_book"
+    name = "item.enchantedBook.name"
+    _texture_path = "items.book_enchanted"
+    max_stack_size = 1
+    enchantment_glint = True
+
+
+@register_material
+class LAPIS_LAZULI(Material):
+    name_id = "lapis_lazuli"
+    name = "item.dyePowder.blue.name"
+    _texture_path = "items.dye_powder_blue"
+
+
+@register_material
+class PAPER(Material):
+    name_id = "paper"
+    name = "item.paper.name"
+    _texture_path = "items.paper"
+
+
 def get_block_item(block):
     """Return only an explicitly registered item form for ``block``."""
     block_id = str(getattr(block, "block_id", "air") or "air")

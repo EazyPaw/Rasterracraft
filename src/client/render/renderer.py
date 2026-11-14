@@ -13,6 +13,8 @@ import logging
 import math as _math
 import os
 import time
+import threading
+from queue import SimpleQueue
 from collections import OrderedDict
 from weakref import WeakKeyDictionary
 from typing import TYPE_CHECKING
@@ -82,6 +84,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.client = client
         self.client_world = client.client_world
         self.extensions = RenderExtensions()
+        self._render_thread_id = threading.get_ident()
+        self._world_capture_requests = SimpleQueue()
 
         # ---- 屏幕与窗口 ----
         self.SCREEN_WIDTH: int = 800
@@ -219,7 +223,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         ] = {}
         self.MAX_BLOCK_SECTION_SURFACE_POOL: int = 16
         self.MAX_BLOCK_SECTION_SURFACE_POOL_BYTES: int = 8 * 1024 * 1024
-        self.block_section_animation_cache: OrderedDict[tuple, tuple[str, ...]] = (
+        self.block_section_animation_cache: OrderedDict[tuple, tuple[tuple[str, ...], tuple[int, ...]]] = (
             OrderedDict()
         )
         self.MAX_BLOCK_SECTION_ANIMATION_CACHE: int = 256
@@ -462,8 +466,40 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         else:
             self._begin_world_layer()
 
-    def capture_frame_surface(self) -> pygame.Surface:
-        captured = self.extensions.run("capture", self)
+    def queue_world_capture(self, callback, *, wait=False):
+        """Read back on the SDL/GL owner, while the old world is still alive."""
+        completed = threading.Event()
+        self._world_capture_requests.put((self.client_world, callback, completed))
+        if threading.get_ident() == self._render_thread_id:
+            self._process_world_capture_requests()
+        elif wait:
+            if not completed.wait(2.0):
+                logging.warning("Timed out waiting for world thumbnail capture")
+        return completed
+
+    def _process_world_capture_requests(self):
+        frame = None
+        while not self._world_capture_requests.empty():
+            world, callback, completed = self._world_capture_requests.get_nowait()
+            try:
+                # Never stamp a new world's frame into an old save's icon.
+                if world is not self.client_world or not self.client.in_game:
+                    continue
+                if frame is None:
+                    frame = self.capture_frame_surface(include_gui=False)
+                callback(frame)
+            except Exception:
+                logging.exception("World thumbnail capture failed")
+            finally:
+                completed.set()
+
+    def capture_frame_surface(self, *, include_gui=True) -> pygame.Surface:
+        previous = getattr(self, "_capture_include_gui", True)
+        self._capture_include_gui = include_gui
+        try:
+            captured = self.extensions.run("capture", self)
+        finally:
+            self._capture_include_gui = previous
         if captured is not None:
             return captured
         shader = self._status_effect_shader
@@ -481,7 +517,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             blindness,
             night_vision,
         )
-        return shader.capture_surface(include_gui=self._frame_uses_gui_layer)
+        return shader.capture_surface(include_gui=include_gui and self._frame_uses_gui_layer)
 
     # ===================== 世界渲染缩放 =====================
 
@@ -1011,6 +1047,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self._apply_bow_view_zoom()
                     self.draw_portal_effect()
                     self.draw_sleep_overlay()
+                    # Escape/menu events originate on InGameThread. Defer
+                    # native readback until this complete world frame, before
+                    # pause/death screens or other GUI layers are painted.
+                    self._process_world_capture_requests()
                     offscreen_effect_frame = (
                         self._shader_is_offscreen
                         and self.shader_effects_enabled
