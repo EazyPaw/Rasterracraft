@@ -136,6 +136,7 @@ class ModManager:
         self.pending = None
         self.broken = False
         self.in_game = False
+        self.config_menus = {}
         self.scan()
 
     def scan(self):

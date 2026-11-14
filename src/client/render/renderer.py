@@ -14,6 +14,7 @@ import math as _math
 import os
 import time
 from collections import OrderedDict
+from weakref import WeakKeyDictionary
 from typing import TYPE_CHECKING
 
 import pygame
@@ -42,6 +43,9 @@ from .render_utils import (
 )
 from .sky import SkyMixin
 from .weather import WeatherMixin
+from .extensions import RenderExtensions
+from .surface_cache import SurfaceCache
+from src.mods.bootstrap import preferred_shader_mode
 
 if TYPE_CHECKING:
     from src.client.client_main import Client
@@ -77,6 +81,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         # ---- 核心引用 ----
         self.client = client
         self.client_world = client.client_world
+        self.extensions = RenderExtensions()
 
         # ---- 屏幕与窗口 ----
         self.SCREEN_WIDTH: int = 800
@@ -89,7 +94,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self._portal_effect_shader: StatusEffectShader | None = None
         self._shader_is_offscreen = False
         self._frame_uses_gui_layer = False
-        shader_mode = os.environ.get("PYCRAFT_SHADER_MODE", "auto").strip().lower()
+        shader_mode = os.environ.get("PYCRAFT_SHADER_MODE")
+        if shader_mode is None:
+            shader_mode = preferred_shader_mode(os.getcwd())
+        shader_mode = shader_mode.strip().lower()
         if os.environ.get("PYCRAFT_DISABLE_SHADERS") == "1":
             shader_mode = "off"
         if shader_mode not in {"auto", "always", "off"}:
@@ -176,10 +184,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.ig_gui_layer.fill((0, 0, 0, 128))
 
         # ---- 渲染缓存（LRU 淘汰策略） ----
-        self.gradient_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
+        self.gradient_cache: OrderedDict[tuple, pygame.Surface] = SurfaceCache()
         self.MAX_GRADIENT_CACHE: int = 256
         self.MAX_GRADIENT_CACHE_BYTES: int = 8 * 1024 * 1024
-        self.lit_tex_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
+        self.lit_tex_cache: OrderedDict[tuple, pygame.Surface] = SurfaceCache()
         self.MAX_LIT_CACHE: int = 768
         self.MAX_LIT_CACHE_BYTES: int = 24 * 1024 * 1024
         self.corner_color_cache: OrderedDict[tuple, tuple[int, int, int]] = (
@@ -199,10 +207,11 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.blit = self.screen.blit
         self.debug = False
         self.show_entity_hitboxes = False
-        self.tinted_surface_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
+        self.tinted_surface_cache: OrderedDict[tuple, pygame.Surface] = SurfaceCache()
         self.MAX_TINTED_SURFACE_CACHE: int = 768
         self.MAX_TINTED_SURFACE_CACHE_BYTES: int = 12 * 1024 * 1024
         self.block_section_cache: OrderedDict[tuple, pygame.Surface] = OrderedDict()
+        self.block_section_bounds = WeakKeyDictionary()
         self.MAX_BLOCK_SECTION_CACHE: int = 192
         self.MAX_BLOCK_SECTION_CACHE_BYTES: int = 32 * 1024 * 1024
         self.block_section_surface_pool: dict[
@@ -239,6 +248,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         use_shader = use_shader and not self._shader_failed
 
         old_shader = self._status_effect_shader
+        self.extensions.run("display_reset", self)
         old_portal_shader = self._portal_effect_shader
         if old_portal_shader is not None:
             old_portal_shader.release()
@@ -432,6 +442,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
     def _present_shader_frame(
         self, strengths: tuple[float, float, float] | None = None
     ) -> None:
+        if self.extensions.run("composite", self, strengths or self._status_effect_strengths()):
+            self._begin_world_layer()
+            return
         shader = self._status_effect_shader
         if shader is None:
             return
@@ -450,6 +463,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             self._begin_world_layer()
 
     def capture_frame_surface(self) -> pygame.Surface:
+        captured = self.extensions.run("capture", self)
+        if captured is not None:
+            return captured
         shader = self._status_effect_shader
         if shader is None:
             return self.screen.copy()
@@ -598,6 +614,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
 
     def _apply_bow_view_zoom(self) -> None:
         """Scale the completed world around the player's eye, before GUI."""
+        if self.extensions.run("world_transform", self):
+            return
         scale = self._update_bow_view_zoom()
         if scale <= 1.0005:
             return
@@ -649,6 +667,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             "tinted_surface_cache",
             "partial_alpha_surface_cache",
             "block_section_cache",
+            "block_section_bounds",
             "block_section_surface_pool",
             "block_section_padding_cache",
             "_weather_texture_cache",
@@ -881,6 +900,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
 
     # ===================== 主循环 =====================
 
+    def draw_sky(self):
+        if not self.extensions.run("sky", self):
+            super().draw_sky()
+
     def start(self) -> None:
         """启动渲染主循环。
 
@@ -895,8 +918,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         clock = pygame.time.Clock()
 
         while self.running:
+            self.extensions.drain()
             # ---- 事件处理 ----
             self.events = pygame.event.get()
+            self.extensions.run("events", self, self.events)
             for event in self.events:
                 if event.type == pygame.QUIT:
                     self.running = False
@@ -955,17 +980,21 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 effects_required = any(
                     value > 0.001 for value in self._frame_effect_strengths
                 ) or self._portal_effect_strength()[0] > 0.001
+                effects_required = effects_required or bool(self.extensions.run("requirements", self))
                 self._begin_world_layer(effects_required)
                 if self.client.in_game and self.client.client_player is not None:
                     # ---- 游戏内渲染流程 ----
                     self.draw_sky()  # 天空背景（来自 SkyMixin）
                     self.camera.update()
+                    self.extensions.run("background", self)
                     background_entities, foreground_entities = (
                         self._collect_visible_entities()
                     )
                     self.draw_structure_build_overlay()
                     self.draw_entities(z_filter=1, entities=background_entities)
+                    self.extensions.run("pre_terrain", self, background_entities)
                     self.draw_block()  # 方块绘制（来自 BlockRenderMixin）
+                    self.extensions.run("terrain", self)
                     self.draw_structure_build_outline()
                     if self.debug:
                         self.draw_biome_debug_overlay()
@@ -978,6 +1007,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.draw_destroy_progress()
                     self.client.client_player.skeleton.update()
                     self.draw_player()
+                    self.extensions.run("world", self)
                     self._apply_bow_view_zoom()
                     self.draw_portal_effect()
                     self.draw_sleep_overlay()
@@ -1004,6 +1034,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     elif not offscreen_effect_frame:
                         self.draw_status_effect_overlay()
                     self.draw_gui()
+                    self.extensions.run("overlay", self)
 
                     # 帧率统计（每秒更新一次）
                     current_ticks = pygame.time.get_ticks()
@@ -1016,9 +1047,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                             self._fps_display_text = f"avg. {int(avg_fps)} max. {int(max_fps)} min. {int(min_fps)}"
                         self._fps_samples.clear()
                         self._last_fps_update = current_ticks
-                    self.render_text(
-                        self._fps_display_text, (10, 10), (255, 255, 255), 36, True
-                    )
+                    if not any(gui.priority >= 90 for gui in self.drawing_GUIs):
+                        self.render_text(
+                            self._fps_display_text, (10, 10), (255, 255, 255), 36, True
+                        )
                 else:
                     # ---- 非游戏状态：黑屏 + GUI ----
                     self.stop_weather_audio()
@@ -1040,6 +1072,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         # 退出按钮会在后台继续完成存档和线程清理。pygame
         # 由创建并驱动窗口的渲染主线程关闭，避免跨线程退出死锁。
         if self.client.is_shutting_down:
+            self.extensions.drain()
             pygame.quit()
 
     # ===================== GUI 管理 =====================

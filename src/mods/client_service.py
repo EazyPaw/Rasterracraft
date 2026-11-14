@@ -103,7 +103,28 @@ class ClientModService:
     def refresh(self):
         self.assert_menu()
         self.manager.scan()
-        self.rpc("scan")
+        # Browsing local graphics mods must not start an integrated server.
+        if self.connection is not None or any(
+            info.server_required for key, info in self.manager.catalog.items() if key in self.desired
+        ):
+            self.rpc("scan")
+
+    def _set_client_only(self, desired):
+        """Keep local-only changes independent of the server control channel."""
+        try:
+            self.manager.check_change(desired)
+        except RestartRequired:
+            self.manager.write_enabled(desired)
+            self.desired = desired
+            return "restart"
+        change = self.manager.prepare(desired)
+        try:
+            self.manager.write_enabled(desired)
+        except BaseException:
+            change.rollback()
+            raise
+        change.commit()
+        self.desired = desired
 
     def set_enabled(self, namespace, enabled):
         self.assert_menu()
@@ -122,6 +143,10 @@ class ClientModService:
         saved = False
         try:
             self.manager.ordered(desired)
+            changed = old_desired ^ desired
+            if changed and all(not self.manager.catalog[key].server_required for key in changed):
+                result = self._set_client_only(desired)
+                return result or ("enabled" if enabled else "disabled")
             # Initialize the server against the CURRENT settings before saving
             # any deferred change. Both runtimes must share the same snapshot.
             self.rpc("status")

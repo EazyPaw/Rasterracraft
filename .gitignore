@@ -254,5 +254,10 @@ __marimo__/
 !/validation/
 /validation/*
 !/validation/ender_entities_preview.py
+!/validation/lumen_benchmark.py
+!/validation/lumen_smoke.py
+!/validation/lumen_saved_scene.py
+!/validation/lumen_visual_contract.py
+!/tests/test_lumen.py
 
 !/tests/test_mods.py

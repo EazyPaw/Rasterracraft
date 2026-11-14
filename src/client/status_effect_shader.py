@@ -34,37 +34,21 @@ class StatusEffectShader:
         self.gui_surface = gui_surface
         self.offscreen = bool(offscreen)
         self._pygame_shader = None
-        self._owns_context = context is None
-        if self.offscreen:
-            self.ctx = context or moderngl.create_standalone_context(require=330)
-            self.program = pygame_shaders.Shader.create_vertfrag_shader(
-                self.ctx,
-                pygame_shaders.DEFAULT_VERTEX_SHADER,
-                str(fragment_path),
-            )
-            self.render_rect = ScreenRect(
-                world_surface.get_size(),
-                world_surface.get_size(),
-                (0, 0),
-                self.ctx,
-                self.program,
-            )
-            self.screen_texture = Texture(world_surface, self.ctx)
-            self.framebuffer = self.ctx.simple_framebuffer(
-                size=world_surface.get_size(), components=4
-            )
-        else:
-            backend = pygame_shaders.Shader(
-                pygame_shaders.DEFAULT_VERTEX_SHADER,
-                str(fragment_path),
-                world_surface,
-            )
-            self._pygame_shader = backend
-            self.ctx = backend.ctx
-            self.program = backend.shader
-            self.render_rect = backend.render_rect
-            self.screen_texture = backend.screen_texture
-            self.framebuffer = backend.framebuffer
+        # A detected native context belongs to SDL. Releasing it during a
+        # resize can detach WGL while SDL reuses the same window/context.
+        self._owns_context = self.offscreen and context is None
+        self.ctx = context or (
+            moderngl.create_standalone_context(require=330) if self.offscreen
+            else moderngl.create_context(require=330)
+        )
+        self.program = pygame_shaders.Shader.create_vertfrag_shader(
+            self.ctx, pygame_shaders.DEFAULT_VERTEX_SHADER, str(fragment_path),
+        )
+        self.render_rect = ScreenRect(
+            world_surface.get_size(), world_surface.get_size(), (0, 0), self.ctx, self.program,
+        )
+        self.screen_texture = Texture(world_surface, self.ctx)
+        self.framebuffer = self.ctx.simple_framebuffer(size=world_surface.get_size(), components=4)
 
         self.gui_texture = Texture(gui_surface, self.ctx)
         # pygame's 32-bit surfaces are BGRA in memory on the supported desktop

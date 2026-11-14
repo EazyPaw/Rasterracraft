@@ -1,7 +1,10 @@
-"""Main-menu-only Mod browser, with independent list/detail scrolling."""
+"""Mod browser and configuration launcher, usable from the pause menu."""
 
 import io
 import logging
+import os
+import subprocess
+import sys
 
 import pygame
 
@@ -26,17 +29,33 @@ class ModsMenu(GUI):
         self.icons = {}
         self.rows = []
         self._panel_cache = {}
+        self._shade_cache = None
         self.toggle_button = Button("", self.toggle)
+        self.config_button = Button(transkey("mods.configure"), self.configure)
         self.buttons = [self.toggle_button,
                         Button(transkey("mods.refresh"), self.refresh),
+                        Button(transkey("mods.openFolder"), self.open_folder),
+                        self.config_button,
                         Button(transkey("gui.done"), self.back)]
 
     def on_open(self):
+        if self.in_world:
+            self.render.client.game_manager.acquire_game_input()
+            self.render.request_text_input(False)
         self.refresh()
+
+    def on_close(self):
+        if self.in_world:
+            self.render.client.game_manager.release_game_input()
+
+    @property
+    def in_world(self):
+        return bool(self.render.client.in_game or self.render.client.game_started)
 
     def refresh(self):
         try:
-            self.service.refresh()
+            if not self.in_world:
+                self.service.refresh()
             self.icons.clear()
             self.error = ""
         except Exception as error:
@@ -51,7 +70,7 @@ class ModsMenu(GUI):
         return sorted(self.service.manager.catalog.values(), key=lambda info: (info.priority, info.namespace))
 
     def toggle(self):
-        if not self.selected or self.service.busy:
+        if self.in_world or not self.selected or self.service.busy:
             return
         try:
             result = self.service.set_enabled(self.selected, self.selected not in self.service.desired)
@@ -68,6 +87,32 @@ class ModsMenu(GUI):
         self.render.close_gui(self)
         self.render.show_gui(self.parent)
 
+    def open_folder(self):
+        try:
+            path = self.service.manager.directory
+            path.mkdir(parents=True, exist_ok=True)
+            if sys.platform == "win32":
+                os.startfile(str(path))
+            else:
+                subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
+        except OSError as error:
+            self.error = str(error)
+
+    def configure(self):
+        factory = self.service.manager.config_menus.get(self.selected)
+        if factory is None or self.service.busy:
+            return
+        try:
+            gui = factory(self.render, self)
+            if not isinstance(gui, GUI):
+                raise TypeError("Mod config factory must return a GUI")
+            self.render.close_gui(self)
+            self.render.show_gui(gui)
+        except Exception as error:
+            logging.exception("Failed to open Mod configuration: %s", self.selected)
+            self.render.show_gui(self)
+            self.error = str(error)
+
     def layout(self):
         width, height = self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT
         margin = max(10, min(28, width // 40))
@@ -77,12 +122,18 @@ class ModsMenu(GUI):
         self.detail_rect = pygame.Rect(self.list_rect.right + 12, 64,
                                       max(80, width - self.list_rect.right - margin - 12), self.list_rect.height)
         self.row_height = 80
-        button_width = max(60, (width - margin * 2 - 16) // 3)
+        columns = 5 if width >= 760 else 3
+        rows = (len(self.buttons) + columns - 1) // columns
+        footer_height = 52 + (rows - 1) * 42
+        self.list_rect.height = self.detail_rect.height = max(60, height - 100 - footer_height)
+        button_width = max(1, (width - margin * 2 - (columns - 1) * 8) // columns)
         for index, button in enumerate(self.buttons):
-            button.set_rect(margin + index * (button_width + 8), height - 52, button_width, 36)
+            button.set_rect(margin + (index % columns) * (button_width + 8),
+                            height - footer_height + (index // columns) * 42, button_width, 36)
             button.enabled = not self.service.busy
-        self.toggle_button.enabled = bool(self.selected) and not self.service.busy
+        self.toggle_button.enabled = bool(self.selected) and not self.service.busy and not self.in_world
         self.toggle_button.text = transkey("mods.disable" if self.selected in self.service.desired else "mods.enable")
+        self.config_button.enabled = not self.service.busy and self.selected in self.service.manager.config_menus
 
     def status(self, info):
         local = {record.ctx.namespace: record.ctx.info for record in self.service.manager.loaded}
@@ -106,7 +157,7 @@ class ModsMenu(GUI):
 
     def draw(self):
         self.layout()
-        self.parent._draw_background()
+        self.draw_background()
         title = transkey("mods.title")
         self.render.render_text(title, (self.list_rect.x, 18), (255, 255, 255), 30, True)
         self.render.render_text(transkey("mods.currentVersion", GAME_VERSION),
@@ -115,7 +166,7 @@ class ModsMenu(GUI):
         self.draw_panel(self.detail_rect)
         self.draw_list()
         self.draw_details()
-        hint = self.message or transkey("mods.menuOnly")
+        hint = self.message or transkey("mods.inGameHint" if self.in_world else "mods.menuOnly")
         color = (255, 170, 130) if self.error else (190, 220, 190)
         if self.error:
             hint = transkey("mods.operationFailed")
@@ -137,6 +188,16 @@ class ModsMenu(GUI):
                                  if key in current_sizes}
             self._panel_cache[size] = panel
         self.render.blit(self._panel_cache[size], rect.topleft)
+
+    def draw_background(self):
+        if not self.in_world:
+            self.parent._draw_background()
+            return
+        size = self.render.screen.get_size()
+        if self._shade_cache is None or self._shade_cache.get_size() != size:
+            self._shade_cache = pygame.Surface(size, pygame.SRCALPHA)
+            self._shade_cache.fill((9, 16, 24, 170))
+        self.render.blit(self._shade_cache, (0, 0))
 
     def draw_list(self):
         entries = self.entries()

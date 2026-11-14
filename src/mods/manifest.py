@@ -74,6 +74,7 @@ class ModInfo:
     entrypoints: dict
     dependencies: tuple[str, ...]
     compatible: bool
+    render_backend: str = "software"
 
     @classmethod
     def read(cls, path):
@@ -140,11 +141,14 @@ class ModInfo:
                 or not re.fullmatch(r"[a-z][a-z0-9_.-]*", item) for item in dependencies)):
             raise ValueError("dependencies must be a list of namespaces")
         versions = data.get("game_versions")
+        backend = data.get("render_backend", "software")
+        if backend not in ("software", "opengl"):
+            raise ValueError("render_backend must be software or opengl")
         compatible = matches_versions(versions)
         return cls(path.resolve(), prefix, namespace, data["name"], tuple(authors),
                    data["version"], data["description"], versions, data["hot_load"],
                    data["hot_unload"], data["server_required"], data["client_required"],
-                   data["priority"], entries, tuple(dependencies), compatible)
+                   data["priority"], entries, tuple(dependencies), compatible, backend)
 
     def read_file(self, name):
         if self.path.is_dir():

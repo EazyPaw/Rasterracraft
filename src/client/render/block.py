@@ -11,6 +11,7 @@ import os
 from typing import TYPE_CHECKING, Optional
 
 import pygame
+import numpy as np
 
 from .constants import (
     BLOCK_LIGHT_LEVELS,
@@ -45,6 +46,20 @@ class BlockRenderMixin:
     """
 
     @staticmethod
+    def _make_corner_gradient(width, height, tl, tr, bl, br):
+        """Sample shared vertex light at pixel centers, avoiding tile-edge jumps."""
+        x = ((np.arange(width,dtype=np.float32)+.5)/width)[:,None]
+        y = ((np.arange(height,dtype=np.float32)+.5)/height)[None,:,None]
+        tl, tr, bl, br = (np.asarray(c,dtype=np.float32) for c in (tl,tr,bl,br))
+        top, bottom = tl+(tr-tl)*x, bl+(br-bl)*x
+        surface = pygame.Surface((width,height),pygame.SRCALPHA,32)
+        surface.fill((0,0,0,255))
+        pixels = pygame.surfarray.pixels3d(surface)
+        pixels[:] = np.rint(top[:,None,:]*(1-y)+bottom[:,None,:]*y).astype(np.uint8)
+        del pixels
+        return surface
+
+    @staticmethod
     def _surface_memory_bytes(surface: pygame.Surface) -> int:
         """返回 Surface 像素缓冲区的近似内存占用。"""
         width, height = surface.get_size()
@@ -64,7 +79,9 @@ class BlockRenderMixin:
             cache.popitem(last=False)
         if max_bytes is None or entry_bytes is not None:
             return
-        total = sum(self._surface_memory_bytes(surface) for surface in cache.values())
+        total = getattr(cache, "byte_size", None)
+        if total is None:
+            total = sum(self._surface_memory_bytes(surface) for surface in cache.values())
         while cache and total > max_bytes:
             _, surface = cache.popitem(last=False)
             total -= self._surface_memory_bytes(surface)
@@ -175,7 +192,8 @@ class BlockRenderMixin:
         first_rx = (x0 - 1) // 16
         last_rx = (x1 + 1) // 16
         versions = getattr(self.client_world, "_render_chunk_versions", {})
-        return tuple((rx, versions.get(rx, 0)) for rx in range(first_rx, last_rx + 1))
+        revision = getattr(getattr(self, "extensions", None), "material_revision", 0)
+        return tuple((rx, versions.get(rx, 0)) for rx in range(first_rx, last_rx + 1)) + (("materials", revision),)
 
     def _texture_path_can_animate(self, texture_path: str | None) -> bool:
         if not texture_path:
@@ -242,6 +260,20 @@ class BlockRenderMixin:
             return False
         return self._surface_has_partial_alpha(block.get_texture(self.block_size))
 
+    def _can_precompose_materials(self, front, back, size, x, y):
+        if not front.can_precompose_with(back):
+            return False
+        extensions = getattr(self, "extensions", None)
+        if extensions is not None and extensions._stages["block_texture"]:
+            for z, block in ((0, front), (1, back)):
+                texture = block.get_texture(size)
+                material = extensions.run("block_texture", self, block, texture, x, y, z)
+                if material is not None and material is not texture:
+                    # Draw both layers independently so a raw precomposition
+                    # cannot bypass a position-dependent material replacement.
+                    return False
+        return True
+
     def _block_section_requires_direct_draw(
         self,
         section_x: int,
@@ -274,7 +306,7 @@ class BlockRenderMixin:
                 if self._block_has_partial_alpha(b0) and self._block_has_partial_alpha(
                     b1
                 ):
-                    if b0.can_precompose_with(b1):
+                    if self._can_precompose_materials(b0, b1, self.block_size, x, y):
                         continue
                     requires_direct = True
                     break
@@ -483,6 +515,13 @@ class BlockRenderMixin:
             first_tex = (
                 first_block.get_texture(block_size) if can_tile_section else None
             )
+            extensions = getattr(self, "extensions", None)
+            if can_tile_section and first_tex is not None and extensions is not None:
+                # A material hook may depend on each block's world position.
+                # Probe with None coordinates before repeating a single tile.
+                material = extensions.run("block_texture", self, first_block, first_tex, None, None, 0)
+                if material is not None and material is not first_tex:
+                    can_tile_section = False
             if (
                 first_tex is None
                 or first_tex.get_width() != block_size
@@ -583,7 +622,7 @@ class BlockRenderMixin:
                     and b0 is not None
                     and b0.has_transparent_pixels
                 ):
-                    if b0.can_precompose_with(b1):
+                    if self._can_precompose_materials(b0, b1, block_size, x, y):
                         precomposed_texture = b0.get_precomposed_texture(block_size, b1)
                     if precomposed_texture is None:
                         self._draw_block_optimized(
@@ -731,6 +770,9 @@ class BlockRenderMixin:
         )
 
         cache[key] = surface
+        bounds = getattr(self, "block_section_bounds", None)
+        if bounds is not None:
+            bounds[surface] = surface.get_bounding_rect()
         return surface
 
     def _trim_distant_animated_sections(
@@ -919,7 +961,20 @@ class BlockRenderMixin:
                 padding = self._get_block_section_render_padding(
                     section_x, section_y, version_key
                 )
-                screen.blit(section, (dest_x - padding, dest_y - padding))
+                bounds_cache = getattr(self, "block_section_bounds", None)
+                bounds = bounds_cache.get(section) if bounds_cache is not None else None
+                extensions = getattr(self, "extensions", None)
+                section_key = (id(self.client_world), section_x, section_y, block_size, lighting_key, tick_key, version_key)
+                if extensions is not None and extensions.run("block_section", self, section, (dest_x - padding, dest_y - padding), bounds, section_key):
+                    continue
+                if bounds is None:
+                    screen.blit(section, (dest_x - padding, dest_y - padding))
+                elif bounds:
+                    # Empty sky sections and transparent margins need no pixel
+                    # blending. Retain fractional camera rounding from the
+                    # original full-section destination (not round-to-nearest).
+                    screen.blit(section, (int(dest_x - padding) + bounds.x,
+                                          int(dest_y - padding) + bounds.y), bounds)
 
         self._trim_distant_animated_sections(sx_start, sx_end, sy_start, sy_end)
         self._prefetch_block_sections(
@@ -1095,7 +1150,7 @@ class BlockRenderMixin:
                     and b1.block_id != "air"
                     and b0.has_transparent_pixels
                 ):
-                    if b0.can_precompose_with(b1):
+                    if self._can_precompose_materials(b0, b1, block_size, x, y):
                         precomposed_texture = b0.get_precomposed_texture(block_size, b1)
                     if precomposed_texture is None:
                         self._draw_block_optimized(
@@ -1357,6 +1412,12 @@ class BlockRenderMixin:
         if tex is None:
             return
 
+        extensions = getattr(self, "extensions", None)
+        if extensions is not None:
+            material = extensions.run("block_texture", self, block, tex, x, y, z)
+            if material is not None:
+                tex = material
+
         tex_h = tex.get_height()
 
         # ---- 7. 光照纹理缓存 ----
@@ -1394,12 +1455,7 @@ class BlockRenderMixin:
             color_tl_p = lerp_color(color_bl, color_tl, ratio)
             color_tr_p = lerp_color(color_br, color_tr, ratio)
 
-            small = pygame.Surface((2, 2), pygame.SRCALPHA)
-            small.fill(color_tl_p, (0, 0, 1, 1))
-            small.fill(color_tr_p, (1, 0, 1, 1))
-            small.fill(color_bl, (0, 1, 1, 1))
-            small.fill(color_br, (1, 1, 1, 1))
-            grad = pygame.transform.smoothscale(small, (bs, tex_h)).convert_alpha()
+            grad = self._make_corner_gradient(bs,tex_h,color_tl_p,color_tr_p,color_bl,color_br)
 
             lit_tex = tex.copy()
             lit_tex.blit(grad, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
@@ -1428,13 +1484,7 @@ class BlockRenderMixin:
                 grad = grad_cache[grad_key]
                 grad_cache.move_to_end(grad_key)
             else:
-                # 从 2×2 颜色角平滑放大到目标尺寸
-                small = pygame.Surface((2, 2), pygame.SRCALPHA)
-                small.fill(color_tl, (0, 0, 1, 1))
-                small.fill(color_tr, (1, 0, 1, 1))
-                small.fill(color_bl, (0, 1, 1, 1))
-                small.fill(color_br, (1, 1, 1, 1))
-                grad = pygame.transform.smoothscale(small, (bs, bs)).convert_alpha()
+                grad = self._make_corner_gradient(bs,bs,color_tl,color_tr,color_bl,color_br)
                 grad_cache[grad_key] = grad
                 self._trim_surface_cache(
                     grad_cache,

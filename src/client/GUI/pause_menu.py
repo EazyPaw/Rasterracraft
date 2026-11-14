@@ -12,6 +12,7 @@ class PauseMenu(GUI):
         self.priority = 90
         self.buttons = [
             Button(transkey("menu.returnToGame"), self.resume_game),
+            Button(transkey("mods.title"), self.open_mods),
             Button(transkey("menu.returnToMenu"), self.return_to_menu),
         ]
 
@@ -45,6 +46,11 @@ class PauseMenu(GUI):
 
     def resume_game(self):
         self.render.close_gui(self)
+
+    def open_mods(self):
+        from src.client.GUI.mods_menu import ModsMenu
+        self.render.close_gui(self)
+        self.render.show_gui(ModsMenu(self.render, self))
 
     def return_to_menu(self):
         self.render.close_gui(self)

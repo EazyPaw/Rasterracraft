@@ -25,8 +25,9 @@ BLOCK_LIGHT_TINT: tuple[int, int, int] = (255, 200, 120)
 # 天空色调离散化步长（减少缓存键数量，提高命中率）
 BLOCK_TINT_COLOR_STEP: int = 8
 
-# 亮度离散化级别数（0-63 共 64 级）
-BLOCK_LIGHT_LEVELS: int = 63
+# Keep dark corner light at full 8-bit precision; coarse bins form visible
+# terraces around zero during dawn. Surface caches retain their byte limits.
+BLOCK_LIGHT_LEVELS: int = 255
 
 # 天空/方块光源比例离散化级别数（0-15 共 16 级）
 BLOCK_RATIO_LEVELS: int = 15

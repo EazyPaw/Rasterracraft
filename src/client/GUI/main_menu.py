@@ -85,6 +85,11 @@ class MainMenu(GUI):
         for button in self.buttons:
             button.draw(self.render)
         self._draw_footer()
+        service = getattr(self.render.client, "mod_service", None)
+        if service is not None:
+            active = {record.ctx.namespace for record in service.manager.loaded}
+            active.update(service.server_status.get("loaded", []))
+            self.render.render_text(transkey("mods.enabledCount", len(active)), (8, 8), (210, 220, 210), 20, True)
 
     def handle_events(self, events: list[pygame.event.Event]):
         """

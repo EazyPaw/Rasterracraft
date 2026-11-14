@@ -252,5 +252,27 @@ class ModContext:
 
         self.action(lambda: setattr(owner, name, value), undo)
 
+    def render_hook(self, stage, callback):
+        """Register a reversible client render stage without patching the loop.
+
+        Callback signature is ``callback(render)``; ``events`` additionally
+        receives the mutable event list before gameplay receives it. Resources
+        should be created lazily in callbacks, on the rendering thread.
+        """
+        if self.side != "client" or self.app is None:
+            raise RuntimeError("Render hooks require the client runtime")
+        extensions = self.app.render.extensions
+        key = (self.namespace, len(self.effects))
+        self.action(
+            lambda: extensions.add(stage, key, callback, self.info.priority),
+            lambda: extensions.remove(stage, key),
+        )
+
     def forget(self):
         _contexts.pop(self.package, None)
+
+    def config_menu(self, factory):
+        """Expose ``factory(render, parent) -> GUI`` while this mod is loaded."""
+        if self.side != "client" or not callable(factory):
+            raise TypeError("Configuration menus require a client GUI factory")
+        self.set_item(self.manager.config_menus, self.namespace, factory)

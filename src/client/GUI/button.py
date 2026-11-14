@@ -90,6 +90,10 @@ class Button:
         font_size = max(18, int(self.rect.height * 0.55))
         font = render.get_font(font_size)
         text_w, text_h = font.size(self.text)
+        if text_w > self.rect.width - 12:
+            font_size = max(12, int(font_size * max(1, self.rect.width - 12) / max(1, text_w)))
+            font = render.get_font(font_size)
+            text_w, text_h = font.size(self.text)
         text_pos = (
             self.rect.centerx - text_w / 2,
             self.rect.centery - text_h / 2,
