@@ -341,7 +341,7 @@ class Enderman(Entity):
             self._daylight_teleport_cooldown -= 1
         if not self.world.is_position_loaded(math.floor(self.x), math.floor(self.y), self.z):
             return
-        rainy = (getattr(getattr(self.world, "weather", None), "value", "clear") == "rain"
+        rainy = (getattr(getattr(self.world, "weather", None), "value", "clear") in ("rain", "thunder")
                  and self.exposed_to_sky()
                  and get_precipitation_type(self.world.get_biome(
                      math.floor(self.x), math.floor(self.y)), self.y) == "rain")

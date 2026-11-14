@@ -251,6 +251,7 @@ __marimo__/
 !/tests/test_biped_movement.py
 !/tests/test_gameplay_regressions.py
 !/tests/test_gameplay_followup.py
+!/tests/test_thunder_weather.py
 
 !/validation/
 /validation/*

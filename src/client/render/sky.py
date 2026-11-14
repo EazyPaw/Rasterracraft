@@ -99,6 +99,8 @@ class SkyMixin:
             self.SCREEN_HEIGHT,
             int(self.day_time // SKY_CACHE_TICK_STEP),
             int(self.weather_intensity * 4),
+            int(self.thunder_intensity * 4),
+            self.lightning_active(),
         )
         if cache_key != self.sky_cache_key or self.sky_layer is None:
             self.sky_layer = self.get_sky_layer(
@@ -172,6 +174,11 @@ class SkyMixin:
         rainy_lower = tuple(int(channel * base_light) for channel in (126, 130, 137))
         upper = lerp_color(upper, rainy_upper, weather)
         lower = lerp_color(lower, rainy_lower, weather)
+        upper = lerp_color(upper, (35, 38, 48), self.thunder_intensity * 0.65)
+        lower = lerp_color(lower, (52, 55, 65), self.thunder_intensity * 0.65)
+        if self.lightning_active():
+            upper = lerp_color(upper, (204, 204, 255), 0.45)
+            lower = lerp_color(lower, (204, 204, 255), 0.45)
 
         # 太阳高度
         sun_lift = self.get_body_lift(time_value, self.SUN_RISE_TICK)
@@ -621,7 +628,10 @@ class SkyMixin:
             return clear_weight
 
         rain_cap = lerp(1.0, 12.0 / 15.0, self.weather_intensity)
-        return min(clear_weight, rain_cap)
+        thunder_cap = lerp(1.0, 10.0 / 15.0, self.thunder_intensity)
+        if self.lightning_active():
+            return max(14.0 / 15.0, clear_weight)
+        return min(clear_weight, rain_cap, thunder_cap)
 
     # ---------- 星星 ----------
 

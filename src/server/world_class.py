@@ -7,8 +7,11 @@ import time
 import traceback
 import zlib
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from typing import cast
+
+if TYPE_CHECKING:
+    from src.server.server_main import Server
 from enum import Enum
 
 import numpy as np
@@ -212,10 +215,12 @@ class WorldAttribute:
 class Weather(Enum):
     CLEAR = "clear"
     RAIN = "rain"
+    THUNDER = "thunder"
 
 
 class World:
-    def __init__(self, server, id_name, generator, attribute: WorldAttribute, seed, *, generate_structures=True):
+    def __init__(self, server: "Server", id_name: str, generator: type[Generator],
+                 attribute: WorldAttribute, seed: int, *, generate_structures: bool = True) -> None:
         self.server = server
         self.id_name = id_name
         self.generator: Generator = generator(seed)
@@ -263,6 +268,8 @@ class World:
         self.random_tick_speed = 3
         self.weather: Weather = Weather.CLEAR
         self.weather_tick = self._random_weather_duration(self.weather)
+        self.thundering = False
+        self.thunder_tick = random.randrange(12000, 180000)
         self.spawn_point = 0
         for i in range(self.spawn_point - self.server.view_distance, self.spawn_point + self.server.view_distance):
             self.generate_chunk(i)
@@ -270,9 +277,9 @@ class World:
     @staticmethod
     def _random_weather_duration(weather: Weather) -> int:
 
-        if weather is Weather.RAIN:
-            return random.randint(12000, 24000)
-        return random.randint(12000, 180000)
+        if weather is not Weather.CLEAR:
+            return random.randrange(12000, 24000)
+        return random.randrange(12000, 180000)
 
     def get_weather_packet(self) -> dict:
         return {
@@ -294,6 +301,11 @@ class World:
             if duration_ticks is not None
             else self._random_weather_duration(weather)
         )
+        self.thundering = weather is Weather.THUNDER
+        self.thunder_tick = self.weather_tick
+        self._broadcast_weather()
+
+    def _broadcast_weather(self) -> None:
         packet = self.get_weather_packet()
         for player in list(self.server.players):
             if player.world is self:
@@ -302,12 +314,68 @@ class World:
     def tick_weather(self) -> None:
         if not self.attribute.HAS_SKY:
             return
+        previous = self.weather
+        raining = previous is not Weather.CLEAR
         self.weather_tick -= 1
         if self.weather_tick <= 0:
-            next_weather = (
-                Weather.RAIN if self.weather is Weather.CLEAR else Weather.CLEAR
-            )
-            self.set_weather(next_weather)
+            raining = not raining
+            self.weather_tick = self._random_weather_duration(
+                Weather.RAIN if raining else Weather.CLEAR)
+        self.thunder_tick = getattr(self, "thunder_tick", 1) - 1
+        if self.thunder_tick <= 0:
+            self.thundering = not getattr(self, "thundering", False)
+            self.thunder_tick = (random.randrange(3600, 15600) if self.thundering
+                                 else random.randrange(12000, 180000))
+        self.weather = (Weather.THUNDER if self.thundering else Weather.RAIN
+                        ) if raining else Weather.CLEAR
+        if self.weather is not previous:
+            self._broadcast_weather()
+        if self.weather is Weather.THUNDER and not self.structure_build_mode:
+            self.tick_lightning()
+
+    def get_precipitation_height(self, x: int, z: int = 0) -> int | None:
+        chunk = self.regions.get(x // 16)
+        if chunk is None or not 0 <= z < chunk.region_array.shape[2]:
+            return None
+        for y in range(chunk.region_array.shape[1] - 1, -1, -1):
+            block = chunk.region_array[x % 16, y, z]
+            if block.solid or getattr(block, "is_fluid", False):
+                return y + 1
+        return 0
+
+    def is_raining_at(self, x: int, y: int, z: int = 0) -> bool:
+        if not self.attribute.HAS_SKY or self.weather is Weather.CLEAR:
+            return False
+        height = self.get_precipitation_height(x, z)
+        return (height is not None and height <= y < self.attribute.MAX_BUILD_HEIGHT
+                and biome.get_precipitation_type(self.get_biome(x, y), y) == "rain")
+
+    def tick_lightning(self) -> None:
+        """1.8.9 WorldServer: one 1/100000 attempt per active chunk/tick."""
+        from src.server.entities.lightning_bolt import LightningBolt
+
+        players = [p for p in self.server.players if p.world is self and p.health > 0]
+        for rx, chunk in tuple(self.regions.items()):
+            if not any(abs(math.floor(p.x) // 16 - rx) <= 7 for p in players):
+                continue
+            if random.randrange(100000) != 0:
+                continue
+            x = rx * 16 + random.randrange(16)
+            z = random.randrange(min(2, chunk.region_array.shape[2]))
+            y = self.get_precipitation_height(x, z)
+            if y is None:
+                continue
+            candidates = [e for e in (*tuple(self.entities.values()), *players)
+                          if e.health > 0 and not e.removed and e.attackable
+                          and abs(e.x - x) <= 3 and abs(getattr(e, "z", 0) - z) <= 3
+                          and e.y >= y - 3
+                          and (self.get_precipitation_height(math.floor(e.x), e.z)
+                               or 0) <= math.floor(e.y)]
+            if candidates:
+                target = random.choice(candidates)
+                x, y, z = math.floor(target.x), math.floor(target.y), target.z
+            if self.is_raining_at(x, y, z):
+                self.spawn_entity(LightningBolt(x, y, self, z))
 
     def tick_random_blocks(self) -> None:
         if self.structure_build_mode:
@@ -328,7 +396,7 @@ class World:
                         continue
                     block = self.get_block(x, y, z)
                     block.on_random_tick()
-                    if self.weather is Weather.RAIN and block.solid:
+                    if self.weather is not Weather.CLEAR and block.solid:
                         self._try_accumulate_snow(x, y, z)
 
     def register_ticking_block(self, block: Block) -> None:

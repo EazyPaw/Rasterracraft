@@ -4,7 +4,10 @@ import math
 import threading
 import time
 import zlib
-from typing import Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
+
+if TYPE_CHECKING:
+    from src.client.client_main import Client
 
 import msgpack
 import numpy as np
@@ -21,7 +24,7 @@ class ClientWorld:
     SOUND_FULL_VOLUME_DISTANCE = 1.5
     SOUND_PAN_STRENGTH = 0.85
 
-    def __init__(self, client):
+    def __init__(self, client: "Client") -> None:
         self.id_name = "null"
         self.environment = 0
         self._regions: dict[int, np.ndarray[Any, np.dtype[Block]]] = {}
@@ -659,6 +662,16 @@ class ClientWorld:
         dx = x - px
         dy = y - py
         dz = z - pz
+        if sound_id == "ambient.weather.thunder":
+            # Vanilla thunder has a very large sound radius. Its volume is
+            # a range multiplier, not mixer gain; retain stereo direction.
+            distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+            attenuation = max(0.0, 1.0 - distance / max(16.0, 16.0 * volume))
+            _, left_gain, right_gain = self.calculate_spatial_audio(
+                max(-8.0, min(8.0, dx)), 0.0, 0.0)
+            self.client.resources_manager.play_sound(
+                sound_id, volume=attenuation, stereo_balance=(left_gain, right_gain))
+            return
         attenuation, left_gain, right_gain = self.calculate_spatial_audio(
             dx, dy, dz
         )

@@ -11,6 +11,7 @@ import pygame
 from src.client.GUI.button import Button
 from src.client.GUI.gui import GUI
 from src.client.resources_manager import transkey
+from src.server.text import Text, TextColor
 from src.version import GAME_VERSION
 
 
@@ -152,26 +153,38 @@ class ModsMenu(GUI):
                                           else "mods.enable")
         self.config_button.enabled = not self.service.busy and self.config_factory() is not None
 
-    def status(self, info):
+    def status(self, info, text=False) -> str | Text:
         local = {record.ctx.namespace: record.ctx.info for record in self.service.manager.loaded}
         server = set(self.service.server_status.get("loaded", []))
         server_info = {entry["namespace"]: entry for entry in self.service.server_status.get("mods", [])}
-        actual = ((not info.client_required or info.namespace in local)
-                  and (not info.server_required or info.namespace in server))
+        actual = ((not info.supports("client") or info.namespace in local)
+                  and (not info.supports("server") or info.namespace in server))
         present = info.namespace in local or info.namespace in server
         desired = self.service.manager.key_for(info) in self.service.desired
         if not desired and (info.namespace not in local or local[info.namespace] != info):
+            if text:
+                return Text(transkey("mods.disabled"), TextColor.GRAY)
             return transkey("mods.disabled")
         if ((info.namespace in local and local[info.namespace] != info)
                 or (info.namespace in server_info and server_info[info.namespace]["version"] != info.version)):
+            if text:
+                return Text(transkey("mods.pendingRestart"), TextColor.YELLOW)
             return transkey("mods.pendingRestart")
         if desired and actual:
+            if text:
+                return Text(transkey("mods.enabled"), (190, 220, 170))
             return transkey("mods.enabled")
         if not desired and not present:
+            if text:
+                return Text(transkey("mods.disabled"), TextColor.GRAY)
             return transkey("mods.disabled")
         if desired and not present and (self.error or self.service.errors
                                        or self.service.server_status.get("diagnostics")):
+            if text:
+                return Text(transkey("mods.failedOrPending"), TextColor.RED)
             return transkey("mods.failedOrPending")
+        if text:
+            return Text(transkey("mods.pendingRestart"), TextColor.YELLOW)
         return transkey("mods.pendingRestart")
 
     def draw(self):
@@ -245,7 +258,7 @@ class ModsMenu(GUI):
                                         clip_rect=text_clip)
                 self.render.render_text(info.version, (x, rect.y + 31), (180, 180, 180), self.font_size - 2,
                                         clip_rect=text_clip)
-                self.render.render_text(self.status(info), (x, rect.y + 53), (190, 220, 170), self.font_size - 2,
+                self.render.render_text(self.status(info, True), (x, rect.y + 53), font_size=self.font_size - 2,
                                         clip_rect=text_clip)
         finally:
             self.render.screen.set_clip(clip)
@@ -291,8 +304,8 @@ class ModsMenu(GUI):
                 (transkey("mods.version", info.version), normal),
                 (transkey("mods.gameVersions", str(info.game_versions)), normal),
                 (transkey("mods.priority", info.priority), normal),
-                (transkey("mods.serverRequired", yes if info.server_required else no), normal),
-                (transkey("mods.clientRequired", yes if info.client_required else no), normal),
+                (transkey("mods.clientSupport", transkey("mods.support." + info.client)), normal),
+                (transkey("mods.serverSupport", transkey("mods.support." + info.server)), normal),
                 (transkey("mods.hotLoad", yes if info.hot_load else no), normal),
                 (transkey("mods.hotUnload", yes if info.hot_unload else no), normal),
             ])

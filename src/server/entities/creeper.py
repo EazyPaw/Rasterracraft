@@ -88,6 +88,10 @@ class Creeper(Entity):
     def ignite(self):
         self.ignited = True
 
+    def on_struck_by_lightning(self, lightning):
+        super().on_struck_by_lightning(lightning)
+        self.powered = True
+
     def cause_fall_damage(self, fall_distance, damage_multiplier=1.0):
         damage = super().cause_fall_damage(fall_distance, damage_multiplier)
         self.fuse_ticks = min(max(0, self.fuse_time - 5),

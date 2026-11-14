@@ -20,9 +20,11 @@ from src.server.item_class import EmptyItemStack
 
 if TYPE_CHECKING:
     from src.client.client_main import Client
+    from src.client.client_world import ClientWorld
 
 
 class ClientPlayer(Entity):
+    world: "ClientWorld"
     HURT_FLASH_TICKS = 10
     _LOOK_HORIZONTAL_EPSILON = 1.0e-6
     _MOVEMENT_DIRECTION_EPSILON = 1.0e-3

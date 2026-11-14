@@ -1,23 +1,30 @@
 """Read metadata without importing any Mod code."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 import json
 from pathlib import Path, PurePosixPath
 import re
 import stat
 import zipfile
+from typing import Self
 
 from src.version import GAME_VERSION
+from .types import EntrySide, ModSide, RenderBackend, SideRequirement, VersionRequirement
 
 
-def _version(value):
+SIDE_REQUIREMENTS: tuple[SideRequirement, ...] = ("unsupported", "optional", "required")
+
+
+def _version(value: str) -> tuple[int, ...]:
     match = re.fullmatch(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+][\w.-]+)?", value)
     if not match:
         raise ValueError(f"Invalid game version: {value}")
     return tuple(int(part or 0) for part in match.groups())
 
 
-def matches_versions(requirement, current=GAME_VERSION):
+def matches_versions(requirement: VersionRequirement, current: str = GAME_VERSION) -> bool:
     """Lists and || are OR; comma-separated comparisons are AND."""
     if isinstance(requirement, list):
         if not requirement:
@@ -46,7 +53,7 @@ def matches_versions(requirement, current=GAME_VERSION):
     return any(results)
 
 
-def safe_member(info):
+def safe_member(info: zipfile.ZipInfo) -> PurePosixPath:
     name = info.filename
     path = PurePosixPath(name)
     if ("\\" in name or path.is_absolute() or ".." in path.parts
@@ -65,19 +72,30 @@ class ModInfo:
     authors: tuple[str, ...]
     version: str
     description: str
-    game_versions: str | list
+    game_versions: VersionRequirement
     hot_load: bool
     hot_unload: bool
-    server_required: bool
-    client_required: bool
+    server: SideRequirement
+    client: SideRequirement
     priority: int
-    entrypoints: dict
+    entrypoints: dict[EntrySide, str]
     dependencies: tuple[str, ...]
     compatible: bool
-    render_backend: str = "software"
+    render_backend: RenderBackend = "software"
+
+    def supports(self, side: ModSide) -> bool:
+        return getattr(self, side) != "unsupported"
+
+    def requires(self, side: ModSide) -> bool:
+        return getattr(self, side) == "required"
+
+    @property
+    def source_key(self) -> str:
+        """Persisted identity shared by early graphics setup and the loader."""
+        return self.namespace + "@" + self.path.name
 
     @classmethod
-    def read(cls, path):
+    def read(cls, path: Path) -> Self:
         prefix = ""
         if path.is_dir():
             raw = (path / "mod.json").read_text(encoding="utf-8-sig")
@@ -116,9 +134,12 @@ class ModInfo:
         if not isinstance(authors, list) or not authors or any(
                 not isinstance(author, str) or not author.strip() for author in authors):
             raise ValueError("authors must be a nonempty string/list")
-        for field in ("hot_load", "hot_unload", "server_required", "client_required"):
+        for field in ("hot_load", "hot_unload"):
             if type(data.get(field)) is not bool:
                 raise ValueError(f"{field} must be boolean")
+        for side in ("client", "server"):
+            if data.get(side) not in SIDE_REQUIREMENTS:
+                raise ValueError(f"{side} must be unsupported, optional or required")
         if type(data.get("priority")) is not int:
             raise ValueError("priority must be an integer")
         entries = data.get("entrypoints")
@@ -128,14 +149,14 @@ class ModInfo:
             if side not in ("common", "client", "server") or not isinstance(module, str) or not re.fullmatch(
                     r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", module):
                 raise ValueError(f"Invalid entrypoint: {side}={module}")
-        if not (data["server_required"] or data["client_required"]):
-            raise ValueError("At least one runtime must be required")
+        if all(data[side] == "unsupported" for side in ("client", "server")):
+            raise ValueError("At least one runtime must be supported")
         for side in ("server", "client"):
-            required = data[side + "_required"]
-            if required and side not in entries and "common" not in entries:
-                raise ValueError(f"{side}_required needs a {side}/common entrypoint")
-            if not required and side in entries:
-                raise ValueError(f"{side} entrypoint conflicts with {side}_required=false")
+            supported = data[side] != "unsupported"
+            if supported and side not in entries and "common" not in entries:
+                raise ValueError(f"{side} support needs a {side}/common entrypoint")
+            if not supported and side in entries:
+                raise ValueError(f"{side} entrypoint conflicts with {side}=unsupported")
         dependencies = data.get("dependencies", [])
         if (not isinstance(dependencies, list) or any(not isinstance(item, str)
                 or not re.fullmatch(r"[a-z][a-z0-9_.-]*", item) for item in dependencies)):
@@ -147,10 +168,10 @@ class ModInfo:
         compatible = matches_versions(versions)
         return cls(path.resolve(), prefix, namespace, data["name"], tuple(authors),
                    data["version"], data["description"], versions, data["hot_load"],
-                   data["hot_unload"], data["server_required"], data["client_required"],
+                   data["hot_unload"], data["server"], data["client"],
                    data["priority"], entries, tuple(dependencies), compatible, backend)
 
-    def read_file(self, name):
+    def read_file(self, name: str) -> bytes:
         if self.path.is_dir():
             return (self.path / name).read_bytes()
         with zipfile.ZipFile(self.path) as archive:

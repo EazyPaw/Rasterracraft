@@ -1,5 +1,8 @@
 """Transactional Mod loading. No renderer or gameplay imports at module level."""
 
+from __future__ import annotations
+
+from collections.abc import Iterable, Sequence
 import importlib
 import importlib.machinery
 import json
@@ -11,10 +14,17 @@ from time import perf_counter
 import types
 import uuid
 import zipfile
+from typing import TYPE_CHECKING, Any, cast
 
-from .effects import ModContext, barrier, current_context, clear_empty_patch_slots
+from .effects import (ClientModContext, Effect, ModContext, ServerModContext,
+                      barrier, current_context, clear_empty_patch_slots)
 from .manifest import ModInfo, safe_member
 from .importer import mod_sources, register_source
+from .types import ConfigMenuFactory, LifecycleModule, ModSide, NetworkMod
+
+if TYPE_CHECKING:
+    from src.client.client_main import Client
+    from src.server.server_main import Server
 
 
 class ModError(RuntimeError):
@@ -25,7 +35,7 @@ class RestartRequired(ModError):
     pass
 
 
-def _run_effects(effects, forward):
+def _run_effects(effects: Sequence[Effect], forward: bool) -> None:
     """Restore the pre-operation state if an individual inverse fails."""
     done = []
     try:
@@ -45,10 +55,11 @@ def _run_effects(effects, forward):
 
 
 class LoadedMod:
-    def __init__(self, ctx, modules, temporary):
+    def __init__(self, ctx: ModContext, modules: list[LifecycleModule],
+                 temporary: tempfile.TemporaryDirectory[str] | None) -> None:
         self.ctx, self.modules, self.temporary = ctx, modules, temporary
 
-    def dispose(self):
+    def dispose(self) -> None:
         prefix = self.ctx.package
         for name in tuple(sys.modules):
             if name == prefix or name.startswith(prefix + "."):
@@ -62,14 +73,14 @@ class LoadedMod:
 class Change:
     """Retains unloaded modules/effects until both client and server agree."""
 
-    def __init__(self, manager):
+    def __init__(self, manager: ModManager) -> None:
         self.manager = manager
         self.before = list(manager.loaded)
-        self.removed = []
-        self.added = []
+        self.removed: list[LoadedMod] = []
+        self.added: list[LoadedMod] = []
         self.finished = False
 
-    def rollback(self):
+    def rollback(self) -> None:
         if self.finished:
             return
         self.manager.log(logging.WARNING, "rollback started: remove=%s restore=%s",
@@ -101,7 +112,7 @@ class Change:
                 raise ModError("Rollback incomplete; restart required: " + "; ".join(errors))
             self.manager.log(logging.INFO, "rollback complete: loaded=%s", [r.ctx.namespace for r in self.before])
 
-    def commit(self):
+    def commit(self) -> None:
         if self.finished:
             return
         # Preparation already drained and detached the removed effects. This
@@ -123,25 +134,28 @@ class Change:
 
 
 class ModManager:
-    def log(self, level, message, *args, **kwargs):
+    app: Client | Server | None
+    side: ModSide
+
+    def log(self, level: int, message: str, *args: Any, **kwargs: Any) -> None:
         logging.log(level, "[Mods][%s] " + message, self.side, *args, **kwargs)
 
-    def __init__(self, root, side, app=None):
+    def __init__(self, root: str | Path, side: ModSide, app: Client | Server | None = None) -> None:
         self.root = Path(root).resolve()
         self.side, self.app = side, app
         self.directory = self.root / "mods"
-        self.catalog = {}
+        self.catalog: dict[str, ModInfo] = {}
         # Browsing and selection identify sources independently of runtime namespaces.
-        self.candidates = {}
-        self.diagnostics = []
-        self.loaded = []
-        self.pending = None
+        self.candidates: dict[Path, ModInfo] = {}
+        self.diagnostics: list[str] = []
+        self.loaded: list[LoadedMod] = []
+        self.pending: Change | None = None
         self.broken = False
         self.in_game = False
-        self.config_menus = {}
+        self.config_menus: dict[str, ConfigMenuFactory] = {}
         self.scan()
 
-    def scan(self):
+    def scan(self) -> list[str]:
         if self.pending or self.in_game:
             raise ModError("Mods can only be scanned at the main menu")
         catalog, candidates, diagnostics = {}, {}, []
@@ -180,14 +194,14 @@ class ModManager:
         return diagnostics
 
     @staticmethod
-    def source_key(info):
-        return info.namespace + "@" + info.path.name
+    def source_key(info: ModInfo) -> str:
+        return info.source_key
 
-    def key_for(self, info):
+    def key_for(self, info: ModInfo) -> str:
         key = self.source_key(info)
         return key if key in self.catalog else info.namespace
 
-    def resolve_key(self, key):
+    def resolve_key(self, key: str) -> str:
         if key in self.catalog:
             return key
         for info in self.catalog.values():
@@ -199,7 +213,7 @@ class ModManager:
                 return self.key_for(self.candidates[record.ctx.info.path])
         return key
 
-    def read_enabled(self):
+    def read_enabled(self) -> set[str]:
         path = self.directory / "enabled.json"
         if not path.exists():
             return set()
@@ -209,7 +223,7 @@ class ModManager:
             raise ModError("Invalid mods/enabled.json")
         return {self.resolve_key(key) for key in enabled}
 
-    def write_enabled(self, enabled):
+    def write_enabled(self, enabled: Iterable[str]) -> None:
         path = self.directory / "enabled.json"
         sources = []
         for key in enabled:
@@ -224,7 +238,7 @@ class ModManager:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def ordered(self, enabled):
+    def ordered(self, enabled: Iterable[str]) -> list[ModInfo]:
         enabled = {self.resolve_key(key) for key in enabled}
         missing = set(enabled) - self.catalog.keys()
         if missing:
@@ -243,16 +257,16 @@ class ModManager:
                     raise ModError(f"{dependency} must load before {info.namespace}; adjust priority")
         return ordered
 
-    def _entries(self, info):
-        if not getattr(info, self.side + "_required"):
+    def _entries(self, info: ModInfo) -> list[str]:
+        if not info.supports(self.side):
             return []
         return list(dict.fromkeys(info.entrypoints[side] for side in ("common", self.side)
                                   if side in info.entrypoints))
 
-    def target(self, enabled):
+    def target(self, enabled: Iterable[str]) -> list[ModInfo]:
         return [info for info in self.ordered(enabled) if self._entries(info)]
 
-    def check_change(self, enabled, startup=False):
+    def check_change(self, enabled: Iterable[str], startup: bool = False) -> tuple[list[ModInfo], int]:
         if self.broken:
             raise ModError("Mod state requires a restart")
         if self.in_game:
@@ -271,7 +285,7 @@ class ModManager:
                     raise RestartRequired(f"{info.namespace}: hot load unsupported; restart required")
         return target, prefix
 
-    def prepare(self, enabled, startup=False):
+    def prepare(self, enabled: Iterable[str], startup: bool = False) -> Change:
         if self.pending:
             raise ModError("A Mod operation is already pending")
         target, prefix = self.check_change(enabled, startup)
@@ -308,7 +322,7 @@ class ModManager:
                 raise ModError(f"{error}\n{recovery}") from error
             raise ModError(f"{type(error).__name__}: {error}") from error
 
-    def _load(self, info):
+    def _load(self, info: ModInfo) -> LoadedMod:
         started = perf_counter()
         self.log(logging.INFO, "load started: mod=%s name=%s version=%s priority=%s source=%s entries=%s",
                  info.namespace, info.name, info.version, info.priority, info.path, self._entries(info))
@@ -329,8 +343,9 @@ class ModManager:
                 archive.extractall(temporary.name)
             root = Path(temporary.name) / info.prefix
         package = "_pycraft_mod_" + uuid.uuid4().hex
-        ctx = ModContext(self, info, package, root)
-        modules = []
+        context_type = ClientModContext if self.side == "client" else ServerModContext
+        ctx = context_type(self, info, package, root)
+        modules: list[LifecycleModule] = []
         record = LoadedMod(ctx, modules, temporary)
         namespace = types.ModuleType(package)
         namespace.__path__ = [str(root)]
@@ -349,7 +364,7 @@ class ModManager:
             # Resolve every lifecycle contract before invoking load callbacks.
             for entry in self._entries(info):
                 self.log(logging.INFO, "importing entry: mod=%s entry=%s", info.namespace, entry)
-                module = importlib.import_module(package + "." + entry)
+                module = cast(LifecycleModule, importlib.import_module(package + "." + entry))
                 if not callable(getattr(module, "load", None)) or not callable(getattr(module, "unload", None)):
                     raise ModError(f"{info.namespace}:{entry} requires load(ctx) and unload(ctx)")
                 modules.append(module)
@@ -377,8 +392,8 @@ class ModManager:
         finally:
             current_context.reset(token)
 
-    def _mount_resources(self, ctx):
-        resources = self.app.resources_manager
+    def _mount_resources(self, ctx: ModContext) -> None:
+        resources = cast("Client", self.app).resources_manager
         root = ctx.root / "assets" / ctx.namespace
         if not root.is_dir():
             return
@@ -395,7 +410,7 @@ class ModManager:
                     key, value = line.split("=", 1)
                     ctx.set_item(target, key.strip(), value)
 
-    def startup(self, enabled=None):
+    def startup(self, enabled: Iterable[str] | None = None) -> None:
         """Isolate a broken Mod without preventing independent Mods from loading."""
         try:
             enabled = self.read_enabled() if enabled is None else {self.resolve_key(key) for key in enabled}
@@ -418,7 +433,7 @@ class ModManager:
                 self.diagnostics.append(f"{info.namespace}: {error}")
                 self.log(logging.ERROR, "startup skipped failed Mod: mod=%s", info.namespace, exc_info=True)
 
-    def close(self):
+    def close(self) -> None:
         self.in_game = False
         if self.pending:
             self.pending.rollback()
@@ -428,8 +443,7 @@ class ModManager:
             self.log(logging.ERROR, "shutdown unload failed: loaded=%s",
                      [r.ctx.namespace for r in self.loaded], exc_info=True)
 
-    def network_mods(self):
+    def network_mods(self) -> list[NetworkMod]:
         return [{"namespace": record.ctx.namespace, "version": record.ctx.info.version,
-                 "server_required": record.ctx.info.server_required,
-                 "client_required": record.ctx.info.client_required,
-                 "client_loaded": self.side == "client"} for record in self.loaded]
+                 "server": record.ctx.info.server,
+                 "client": record.ctx.info.client} for record in self.loaded]

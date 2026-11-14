@@ -486,7 +486,7 @@ class FARMLAND(Block):
         loc = self.location
         world = loc.world
         weather = getattr(getattr(world, "weather", None), "value", None)
-        if weather != "rain":
+        if weather not in ("rain", "thunder"):
             return False
         if (
             get_precipitation_type(
@@ -1474,7 +1474,8 @@ class BED(PairedBlock):
             server.send_chat_to_player(player, "Respawn point set.", (85, 255, 85))
 
         time_of_day = int(world.world_time) % 24000
-        if not 12542 <= time_of_day <= 23459:
+        if (not 12542 <= time_of_day <= 23459
+                and getattr(getattr(world, "weather", None), "value", "clear") != "thunder"):
             if server is not None:
                 server.send_chat_to_player(player, "You can only sleep at night.")
             return True

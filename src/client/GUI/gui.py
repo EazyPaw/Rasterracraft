@@ -1,19 +1,24 @@
 # Commented and arranged by ChatGPT
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 import pygame
+
+if TYPE_CHECKING:
+    from src.client.client_main import Client
+    from src.client.render.renderer import Render
 
 
 class GUI(ABC):
     _texture_cache = {}
     _texture_path = "gui.sprites.hud.hotbar"
 
-    def __init__(self, render: "Render"):
+    def __init__(self, render: "Render") -> None:
         self.render = render
         self.priority = 0.0
 
     @classmethod
-    def get_texture(cls, size: float, client, path=None):
+    def get_texture(cls, size: float, client: "Client", path: str | None = None) -> pygame.Surface | None:
         """
         获取缩放后的纹理（支持浮点倍率）
         :param path: 加载其它纹理
@@ -51,10 +56,10 @@ class GUI(ABC):
 
         return scaled_texture
 
-    def draw(self):
+    def draw(self) -> None:
         pass
 
-    def handle_events(self, events: list[pygame.event.Event]):
+    def handle_events(self, events: list[pygame.event.Event]) -> None:
         """
         此处传入 events，如果此 GUI 已经处理了这个事件，那么应该将该事件从 events 中移除，以防止其被二次执行
         :param events:
@@ -62,8 +67,8 @@ class GUI(ABC):
         """
         pass
 
-    def on_open(self):
+    def on_open(self) -> None:
         pass
 
-    def on_close(self):
+    def on_close(self) -> None:
         pass

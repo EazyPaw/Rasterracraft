@@ -420,7 +420,7 @@ def _handle_world_load_complete(packet: dict, client: "Client") -> None:
 @CLIENT_PACKET_DISPATCHER.handler("WeatherUpdate")
 def _handle_weather_update(packet: dict, client: "Client") -> None:
     weather = str(packet.get("weather", "clear")).lower()
-    client.client_world.weather = weather if weather in ("clear", "rain") else "clear"
+    client.client_world.weather = weather if weather in ("clear", "rain", "thunder") else "clear"
     client.client_world.weather_remaining_ticks = max(
         0, int(packet.get("remaining_ticks", 0))
     )

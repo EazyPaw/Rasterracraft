@@ -1,6 +1,8 @@
 """Main-menu coordinator: reversible changes in both local runtimes."""
 
-from concurrent.futures import ThreadPoolExecutor
+from __future__ import annotations
+
+from concurrent.futures import Future, ThreadPoolExecutor
 import logging
 import os
 from pathlib import Path
@@ -10,25 +12,30 @@ import subprocess
 import sys
 import threading
 from time import perf_counter
+from typing import TYPE_CHECKING, Literal
 
 from .host import receive_message, send_message
 from .manager import ModError, ModManager, RestartRequired
+from .types import HostStatus, NetworkMod
+
+if TYPE_CHECKING:
+    from src.client.client_main import Client
 
 
 class ClientModService:
-    def __init__(self, client, root):
+    def __init__(self, client: Client, root: str | Path) -> None:
         self.client = client
         self.manager = ModManager(root, "client", client)
         self.root = Path(root).resolve()
-        self.connection = None
-        self.process = None
+        self.connection: socket.socket | None = None
+        self.process: subprocess.Popen[bytes] | None = None
         self.lock = threading.RLock()
         self.busy = False
         self.uncertain = False
-        self.server_status = {"loaded": [], "diagnostics": []}
+        self.server_status: HostStatus = {"loaded": [], "diagnostics": []}
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ModHost")
-        self.start_future = None
-        self.errors = []
+        self.start_future: Future[HostStatus] | None = None
+        self.errors: list[str] = []
         try:
             self.desired = self.manager.read_enabled()
         except Exception as error:
@@ -37,7 +44,7 @@ class ClientModService:
         self.manager.startup(self.desired)
         self.errors.extend(self.manager.diagnostics)
 
-    def ensure_host(self):
+    def ensure_host(self) -> None:
         if self.connection is not None and self.process.poll() is None:
             return
         if self.process is not None and self.process.poll() is not None:
@@ -76,7 +83,7 @@ class ClientModService:
         finally:
             listener.close()
 
-    def rpc(self, op, **data):
+    def rpc(self, op: str, **data: object) -> HostStatus:
         with self.lock:
             self.ensure_host()
             try:
@@ -94,23 +101,23 @@ class ClientModService:
                 raise error_type(result.get("error", "Mod host operation failed"))
             return result
 
-    def assert_menu(self):
+    def assert_menu(self) -> None:
         if self.client.game_started or self.client.in_game or self.client.world_loading:
             raise ModError("Mods can only be changed at the main menu")
         if self.uncertain:
             raise ModError("Mod state requires a restart")
 
-    def refresh(self):
+    def refresh(self) -> None:
         self.assert_menu()
         self.manager.scan()
         self.desired = {self.manager.resolve_key(key) for key in self.desired}
         # Browsing local graphics mods must not start an integrated server.
         if self.connection is not None or any(
-            info.server_required for key, info in self.manager.catalog.items() if key in self.desired
+            info.supports("server") for key, info in self.manager.catalog.items() if key in self.desired
         ):
             self.rpc("scan")
 
-    def _set_client_only(self, desired):
+    def _set_client_only(self, desired: set[str]) -> Literal["restart"] | None:
         """Keep local-only changes independent of the server control channel."""
         try:
             self.manager.check_change(desired)
@@ -127,7 +134,7 @@ class ClientModService:
         change.commit()
         self.desired = desired
 
-    def set_enabled(self, namespace, enabled):
+    def set_enabled(self, namespace: str, enabled: bool) -> Literal["enabled", "disabled", "restart"]:
         self.assert_menu()
         if self.busy:
             raise ModError("A Mod operation is already pending")
@@ -146,7 +153,7 @@ class ClientModService:
         try:
             self.manager.ordered(desired)
             changed = old_desired ^ desired
-            if changed and all(not self.manager.catalog[key].server_required for key in changed):
+            if changed and all(not self.manager.catalog[key].supports("server") for key in changed):
                 result = self._set_client_only(desired)
                 return result or ("enabled" if enabled else "disabled")
             # Initialize the server against the CURRENT settings before saving
@@ -199,18 +206,17 @@ class ClientModService:
         finally:
             self.busy = False
 
-    def start_server(self, save_id):
+    def start_server(self, save_id: str | None) -> None:
         if self.busy or self.uncertain or self.manager.broken:
             raise ModError("Mod operation unfinished; restart required")
         self.start_future = self.executor.submit(self.rpc, "start", save_id=save_id)
 
-    def network_mods(self):
-        # Include installed server-only Mods without pretending client code exists.
-        entries = {entry["namespace"]: entry for entry in self.server_status.get("mods", [])}
-        entries.update({entry["namespace"]: entry for entry in self.manager.network_mods()})
-        return [entries[key] for key in sorted(entries)]
+    def network_mods(self) -> list[NetworkMod]:
+        # A remote server must see only code loaded on this client, never Mods
+        # that happen to be enabled in the local integrated server.
+        return self.manager.network_mods()
 
-    def poll(self):
+    def poll(self) -> None:
         if self.start_future and self.start_future.done():
             future, self.start_future = self.start_future, None
             try:
@@ -218,7 +224,7 @@ class ClientModService:
             except Exception as error:
                 self.client.show_disconnect("connect.failed", str(error))
 
-    def stop_server(self):
+    def stop_server(self) -> None:
         if self.process is None or self.process.poll() is not None:
             return
         try:
@@ -226,7 +232,7 @@ class ClientModService:
         except Exception:
             logging.exception("Failed to stop integrated Mod server")
 
-    def close(self):
+    def close(self) -> None:
         try:
             if self.process and self.process.poll() is None and not self.uncertain:
                 self.rpc("quit")

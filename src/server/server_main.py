@@ -1,4 +1,6 @@
 # Commented and arranged by ChatGPT
+from __future__ import annotations
+
 import heapq
 import itertools
 import logging
@@ -11,7 +13,7 @@ import threading
 import time
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 from uuid import UUID
 
 import msgpack
@@ -41,9 +43,18 @@ from src.server.world_class import Weather, World, WorldAttribute
 from src.protocol import SERVERBOUND, decode_payload
 from src.mods.network import ModMismatch
 
+if TYPE_CHECKING:
+    from src.client.client_main import Client
+    from src.mods.manager import ModManager
+    from src.mods.host import Host
+
 
 class Server:
-    def __init__(self, integrated=False, client=None, save_id: str | None = None, mod_manager=None):
+    mod_manager: ModManager
+    mod_host: Host
+
+    def __init__(self, integrated: bool = False, client: Client | None = None,
+                 save_id: str | None = None, mod_manager: ModManager | None = None) -> None:
         self.running = True
         self.main_world_id = "overworld"
         self.worlds: dict[str, World] = {}
@@ -540,6 +551,11 @@ class Server:
             self.worlds["overworld"].weather = Weather(weather_name)
         except ValueError:
             self.worlds["overworld"].weather = Weather.CLEAR
+        overworld = self.worlds["overworld"]
+        overworld.thundering = bool(world_meta.get(
+            "thundering", overworld.weather is Weather.THUNDER))
+        overworld.thunder_tick = max(1, int(world_meta.get(
+            "thunder_tick", overworld.thunder_tick)))
         if self.save_id:
             self.worlds["overworld"].weather_tick = max(
                 1,
@@ -901,6 +917,8 @@ class Server:
                 "max_build_height": int(world.attribute.MAX_BUILD_HEIGHT),
                 "weather": world.weather.value,
                 "weather_tick": int(world.weather_tick),
+                "thundering": bool(world.thundering),
+                "thunder_tick": int(world.thunder_tick),
                 "disable_mob_generation": bool(world.disable_mob_generation),
                 "generate_structures": bool(world.generate_structures),
             })

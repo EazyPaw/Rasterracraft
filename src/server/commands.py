@@ -523,8 +523,8 @@ class CommandExecutor:
             )
             return f"Weather is {world.weather.value} ({world.weather_tick} ticks remaining)"
         state = args[0].lower()
-        if state not in ("clear", "rain"):
-            raise ValueError("Usage: /weather <clear|rain> [seconds]")
+        if state not in ("clear", "rain", "thunder"):
+            raise ValueError("Usage: /weather <clear|rain|thunder> [seconds]")
         duration_ticks = None
         if len(args) > 1:
             try:

@@ -139,6 +139,7 @@ def _load_builtin_entities() -> None:
         experience_orb,
         falling_block,
         item,
+        lightning_bolt,
         pig,
         primed_tnt,
         sheep,

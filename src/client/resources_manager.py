@@ -1,6 +1,12 @@
 # Commented and arranged by ChatGPT
+from __future__ import annotations
+
 import logging
 import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.client.client_main import Client
 
 import pygame
 import json
@@ -42,7 +48,7 @@ SOUND_CATEGORY_PRIORITIES = {
 
 
 class ResourcesManager:
-    def __init__(self, client):
+    def __init__(self, client: Client) -> None:
         self.client = client
         self.textures = {}
         self.mod_roots = {}
@@ -106,7 +112,7 @@ class ResourcesManager:
             if key[0].startswith(namespace + ":"):
                 self.textures.pop(key, None)
 
-    def get_translation_key(self, key: str, *args):
+    def get_translation_key(self, key: str, *args: object) -> str:
         if key in self._lang_map:
             text = self._lang_map[key]
         elif key in self._fallback_lang_map:
@@ -723,5 +729,5 @@ class ResourcesManager:
 
 
 @client_method
-def transkey(key: str, *args, client=None):
+def transkey(key: str, *args: object, client: Client | None = None) -> str:
     return client.resources_manager.get_translation_key(key, *args)

@@ -85,6 +85,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         self.client_world = client.client_world
         self.extensions = RenderExtensions()
         self._render_thread_id = threading.get_ident()
+        # Session teardown must wait until the current world/GUI frame finishes.
+        self.session_lock = threading.RLock()
         self._world_capture_requests = SimpleQueue()
 
         # ---- 屏幕与窗口 ----
@@ -1006,6 +1008,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                 self.client.capture_save_icon()
                 break
 
+            self.session_lock.acquire()
             try:
                 shader_frame_presented = False
                 self._frame_effect_strengths = (
@@ -1043,6 +1046,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     self.draw_destroy_progress()
                     self.client.client_player.skeleton.update()
                     self.draw_player()
+                    self.draw_lightning()
                     self.extensions.run("world", self)
                     self._apply_bow_view_zoom()
                     self.draw_portal_effect()
@@ -1108,6 +1112,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             except pygame.error as e:
                 logging.debug(f"Pygame error during shutdown: {e}")
                 break
+            finally:
+                self.session_lock.release()
 
         # 退出按钮会在后台继续完成存档和线程清理。pygame
         # 由创建并驱动窗口的渲染主线程关闭，避免跨线程退出死锁。

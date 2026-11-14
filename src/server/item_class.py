@@ -1,7 +1,10 @@
 # Commented and arranged by ChatGPT
+from __future__ import annotations
+
 import colorsys
 import math
 import random
+from typing import Any
 
 import numpy as np
 import pygame
@@ -9,13 +12,14 @@ import pygame
 import src.server.materials as materials
 
 from src.server.attributes import AttributeModifier
-from src.server.material_class import BlockItem
+from src.server.material_class import BlockItem, Material
 from src.server.text import Text, TextColor
 
 from src.server.utils import client_method
 
 
 class ItemStack:
+    material: Material
     _durability_bar_cache = {}
     _glint_texture_cache = {}
     _glint_coordinate_cache = {}
@@ -40,7 +44,7 @@ class ItemStack:
     _glint_y_period_units = 30000
     _glint_frames_per_second = 60
 
-    def __init__(self, material, amount: int = 1, nbt=None):
+    def __init__(self, material: Material, amount: int = 1, nbt: dict[str, Any] | None = None) -> None:
         if nbt is None:
             nbt = {}
         self.nbt = nbt

@@ -1632,6 +1632,14 @@ class Entity:
         self.fire_ticks = ticks
         self._sync_fire_state()
 
+    def on_struck_by_lightning(self, lightning) -> None:
+        from src.server.damange_type import LIGHTNING_BOLT
+
+        # 1.8.9 lightning damage is separate from the subsequent burning.
+        self.apply_damage(5.0, LIGHTNING_BOLT, source=None)
+        if self.fire_ticks <= 0:
+            self.set_seconds_on_fire(8.0)
+
     def lava_hurt(self) -> float:
         if not self.can_ignite():
             return 0.0

@@ -1,6 +1,10 @@
 # Commented and arranged by ChatGPT
 import math
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.client.client_main import Client
 
 import pygame
 
@@ -162,7 +166,7 @@ class ExperienceOrbRenderer:
 
 
 class ClientEntity:
-    def __init__(self, client, packet: dict):
+    def __init__(self, client: "Client", packet: dict) -> None:
         self.client = client
         self.uuid = str(packet.get("uuid", ""))
         self.entity_id = packet.get("entity_id", "null")
@@ -231,6 +235,8 @@ class ClientEntity:
         self.apply_packet(packet, initial=True)
 
     def apply_packet(self, packet: dict, *, initial: bool = False):
+        self.lightning_state = int(packet.get("lightning_state", getattr(self, "lightning_state", -1)))
+        self.bolt_vertex = int(packet.get("bolt_vertex", getattr(self, "bolt_vertex", 0)))
         for key, default in (("swell_state", -1), ("fuse_ticks", 0), ("fuse_time", 30)):
             setattr(self, key, int(packet.get(key, getattr(self, key, default))))
         for key in ("powered", "climbing"):

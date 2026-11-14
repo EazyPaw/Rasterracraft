@@ -587,7 +587,8 @@ class Player(Entity):
             self.stop_sleeping(reposition=False)
             return
         time_of_day = int(self.world.world_time) % 24000
-        if not 12542 <= time_of_day <= 23459:
+        if (not 12542 <= time_of_day <= 23459
+                and getattr(getattr(self.world, "weather", None), "value", "clear") != "thunder"):
             self.stop_sleeping(reposition=True)
             return
         self.motion.x = 0.0

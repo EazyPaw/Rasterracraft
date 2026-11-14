@@ -41,6 +41,19 @@ class Pig(Animal):
         data["saddled"] = bool(self.saddled)
         return data
 
+    def on_struck_by_lightning(self, lightning):
+        if self.removed or self.health <= 0:
+            return
+        from src.server.entities.nether import ZombiePigman
+
+        pigman = ZombiePigman(self.x, self.y, self.world, self.z)
+        pigman.no_ai = self.no_ai
+        pigman.facing = self.facing
+        if hasattr(self, "name"):
+            pigman.name = self.name
+        self.world.spawn_entity(pigman)
+        self.world.remove_entity(self)
+
     def get_persistent_data(self) -> dict:
         data = super().get_persistent_data()
         data["saddled"] = bool(self.saddled)

@@ -73,17 +73,17 @@ class Inventory:
         for i in range(self.max_slots):
             self._items.append(EmptyItemStack())
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: int) -> ItemStack:
         if not (0 <= item < self.max_slots):
             raise IndexError("Inventory index out of range")
         return self._items[item]
 
-    def __setitem__(self, index, value):
+    def __setitem__(self, index: int, value: ItemStack) -> None:
         if not (0 <= index < self.max_slots):
             raise IndexError("Inventory index out of range")
         self._items[index] = value
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._items)
 
     def __iter__(self):

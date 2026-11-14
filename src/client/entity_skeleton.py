@@ -1706,9 +1706,13 @@ class PlayerSkeleton(EntitySkeleton):
         self._pose_part("body", (cx, neck_y), (4, 0), 0, flip_x=False)
         self._pose_part("head", (cx, neck_y), (4, 8), 0, flip_x=False)
         self._pose_part("head_overlay", (cx, neck_y), (4, 8), 0, flip_x=False)
-        right_shoulder = (cx - 5 / 16 * scale, neck_y - 2 / 16 * scale)
-        left_shoulder = (cx + 5 / 16 * scale, neck_y - 2 / 16 * scale)
-        self._pose_part("front_arm", right_shoulder, (3, 2), right_z, flip_x=False)
+        # ModelPlayer's slim right arm starts at -2 instead of -3; its
+        # shoulders sit half a skin pixel lower than the standard model.
+        slim = getattr(self, "skin_model", "default") == "slim"
+        shoulder_drop = 2.5 if slim else 2
+        right_shoulder = (cx - 5 / 16 * scale, neck_y - shoulder_drop / 16 * scale)
+        left_shoulder = (cx + 5 / 16 * scale, neck_y - shoulder_drop / 16 * scale)
+        self._pose_part("front_arm", right_shoulder, (2 if slim else 3, 2), right_z, flip_x=False)
         self._pose_part("back_arm", left_shoulder, (1, 2), left_z, flip_x=False)
         self._pose_part("front_leg", (cx - 1.9 / 16 * scale, hip_y), (2, 0), 0, flip_x=False)
         self._pose_part("back_leg", (cx + 1.9 / 16 * scale, hip_y), (2, 0), 0, flip_x=False)

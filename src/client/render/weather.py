@@ -44,7 +44,7 @@ class WeatherMixin:
     # 类常量
     # =========================================================================
 
-    WEATHER_FADE_SECONDS: float = 1.5
+    WEATHER_FADE_SECONDS: float = 5.0
     WEATHER_TINT_COLOR_STEP: int = 16
     MAX_WEATHER_LIT_CACHE: int = 96
     MAX_WEATHER_LIT_CACHE_BYTES: int = 8 * 1024 * 1024
@@ -134,6 +134,7 @@ class WeatherMixin:
         """
         # 天气强度：0.0（晴天）→ 1.0（完全下雨），带平滑过渡
         self._weather_intensity = 0.0
+        self._thunder_intensity = 0.0
         # 上次更新时的毫秒时间戳，用于计算 delta time
         self._weather_last_update = pygame.time.get_ticks()
         # 原始天气纹理缓存（缩放 + 翻转）
@@ -201,10 +202,13 @@ class WeatherMixin:
         # 计算帧间隔（秒），上限 0.25 防止跳变
         elapsed = max(0.0, min(0.25, (now - self._weather_last_update) / 1000.0))
         self._weather_last_update = now
+        self._lightning_frame_active = any(
+            e.entity_id == "lightning_bolt" and e.lightning_state >= 0
+            for e in self.client_world.iter_entities())
 
         # 根据服务端天气状态确定目标强度
         target = (
-            1.0 if getattr(self.client_world, "weather", "clear") == "rain" else 0.0
+            1.0 if getattr(self.client_world, "weather", "clear") in ("rain", "thunder") else 0.0
         )
 
         # 按过渡时间平滑逼近目标值
@@ -213,6 +217,45 @@ class WeatherMixin:
             self._weather_intensity = min(target, self._weather_intensity + step)
         else:
             self._weather_intensity = max(target, self._weather_intensity - step)
+        thunder_target = float(getattr(self.client_world, "weather", "clear") == "thunder")
+        thunder = getattr(self, "_thunder_intensity", 0.0)
+        self._thunder_intensity = (min(thunder_target, thunder + elapsed / 5.0)
+                                  if thunder < thunder_target
+                                  else max(thunder_target, thunder - elapsed / 5.0))
+
+    @property
+    def thunder_intensity(self) -> float:
+        return float(getattr(self, "_thunder_intensity", 0.0))
+
+    def lightning_active(self) -> bool:
+        return bool(getattr(self, "_lightning_frame_active", False))
+
+    def draw_lightning(self) -> None:
+        """Draw branching, full-bright bolts from the server's vertex seed."""
+        if getattr(self.client_world, "environment", 0) == -1:
+            return
+        for entity in self.client_world.iter_entities():
+            if entity.entity_id != "lightning_bolt" or entity.lightning_state < 0:
+                continue
+            rng = random.Random(entity.bolt_vertex)
+            x, y = entity.x, entity.y
+            points = [self.trans_world_location((x, y))]
+            for _ in range(8):
+                x += rng.uniform(-1.5, 1.5)
+                y += 16
+                points.append(self.trans_world_location((x, y)))
+            branches = [points]
+            for index in (2, 4):
+                sx, sy = points[index]
+                branches.append([(sx, sy), (sx + rng.uniform(-4, 4) * self.block_size,
+                                            sy + 7 * self.block_size),
+                                 (sx + rng.uniform(-7, 7) * self.block_size,
+                                  sy + 14 * self.block_size)])
+            for path in branches:
+                for color, width in (((160, 175, 245), 0.77), ((220, 230, 255), 0.42),
+                                     ((255, 255, 255), 0.16)):
+                    pygame.draw.lines(self.screen, color, False, path,
+                                      max(1, round(self.block_size * width)))
 
     # =========================================================================
     # 降水绘制
@@ -465,7 +508,7 @@ class WeatherMixin:
         # 仅在雨天且有一定强度时生效
         if (
             self.weather_intensity <= 0.05
-            or getattr(self.client_world, "weather", "clear") != "rain"
+            or getattr(self.client_world, "weather", "clear") not in ("rain", "thunder")
         ):
             return
         # 每 3 ticks 执行一次，且同 tick 不重复

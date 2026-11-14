@@ -1,4 +1,6 @@
 # Commented and arranged by ChatGPT
+from __future__ import annotations
+
 import logging
 import os
 import socket
@@ -38,7 +40,14 @@ from src.mods.client_service import ClientModService
 
 
 class Client:
-    def __init__(self):
+    render: render.Render
+    client_world: client_world.ClientWorld
+    resources_manager: ResourcesManager
+    game_manager: GameManager
+    mod_service: ClientModService
+    particle_manager: ParticleManager
+
+    def __init__(self) -> None:
         # 初始化剪贴板（Ctrl+V 粘贴用）
         try:
             pygame.scrap.init()
@@ -49,7 +58,7 @@ class Client:
         self._shutdown_started = False
         self.version = VERSION_LABEL
 
-        self.language = "zh_cn"
+        self.language = "en_us" # en_us zh_cn
         self.fore_place_switch_mode = "hold"
         self.under_dev = True
         if '--notdev' in sys.argv:
@@ -318,7 +327,7 @@ class Client:
         except Exception as error:
             self.show_disconnect("connect.failed", str(error))
             return
-        if self.mod_service.network_mods():
+        if self.mod_service.manager.loaded or self.mod_service.server_status.get("loaded"):
             self.server_mode = "subprocess"
 
         if save_id is None:
@@ -580,47 +589,50 @@ class Client:
         self._request_server_save(timeout=8.0)
         self._close_current_game_transport()
         self.chunk_load_pool.shutdown(wait=True)
-        self.chunk_load_pool = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="ChunkLoader"
-        )
-        self.client_world = client_world.ClientWorld(self)
-        self.render.client_world = self.client_world
-        self.client_player = None
-        self.world_loading = False
-        self.loading_screen = None
-        self.disconnect_screen = None
-        self.death_screen = None
-        self.loaded_chunk_regions.clear()
-        self.required_spawn_regions.clear()
-        self.pending_teleport_id = None
-        self.initial_sync_received = False
-        self.initial_load_started = False
-        self.server_player_uuid = None
-        self.chat_gui = None
-        self.chat_messages.clear()
-        self.particle_manager = ParticleManager(self)
-        self.hold_mouse_buttons = [False, False, False]
-        self.hold_key_map = {}
-        self.key_map = {}
-        self.game_manager.reset_game_input()
-        self.game_manager.last_pressed_time.clear()
-        self.current_save_id = None
-        self.current_game_mode = "survival"
-        self.structure_build_mode = False
-        self.structure_bounds = None
-        self.structure_void_cells.clear()
-        self.connection_target = ("127.0.0.1", 14525)
-        self.integrated_session = False
-        self.server = None
-        self.server_process = None
-        self.game_started = False
-        self.render.drawing_GUIs.clear()
-        self.mod_service.manager.in_game = False
-        self.main_menu = MainMenu(self.render)
-        self.render.show_gui(self.main_menu)
-        self.render.request_text_input(False)
-        self._prepare_socket_transport()
-        self._prepare_server_thread()
+        # Saving, socket joins and chunk loading finish before taking the lock.
+        # Clear the player, world and GUIs together between rendered frames.
+        with self.render.session_lock:
+            self.chunk_load_pool = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="ChunkLoader"
+            )
+            self.client_world = client_world.ClientWorld(self)
+            self.render.client_world = self.client_world
+            self.client_player = None
+            self.world_loading = False
+            self.loading_screen = None
+            self.disconnect_screen = None
+            self.death_screen = None
+            self.loaded_chunk_regions.clear()
+            self.required_spawn_regions.clear()
+            self.pending_teleport_id = None
+            self.initial_sync_received = False
+            self.initial_load_started = False
+            self.server_player_uuid = None
+            self.chat_gui = None
+            self.chat_messages.clear()
+            self.particle_manager = ParticleManager(self)
+            self.hold_mouse_buttons = [False, False, False]
+            self.hold_key_map = {}
+            self.key_map = {}
+            self.game_manager.reset_game_input()
+            self.game_manager.last_pressed_time.clear()
+            self.current_save_id = None
+            self.current_game_mode = "survival"
+            self.structure_build_mode = False
+            self.structure_bounds = None
+            self.structure_void_cells.clear()
+            self.connection_target = ("127.0.0.1", 14525)
+            self.integrated_session = False
+            self.server = None
+            self.server_process = None
+            self.game_started = False
+            self.render.drawing_GUIs.clear()
+            self.mod_service.manager.in_game = False
+            self.main_menu = MainMenu(self.render)
+            self.render.show_gui(self.main_menu)
+            self.render.request_text_input(False)
+            self._prepare_socket_transport()
+            self._prepare_server_thread()
 
     def _install_game_controls(self):
         if self.client_player is not None:
