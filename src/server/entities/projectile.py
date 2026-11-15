@@ -11,6 +11,7 @@ from typing import Literal
 from src.server.damange_type import THROWN
 from src.server.entity import Entity
 from src.server.location import Vector
+from src.server.dragon_geometry import damage_targets
 
 
 @dataclass(frozen=True, slots=True)
@@ -450,7 +451,7 @@ class Projectile(Entity, ABC):
         self, delta_x: float, delta_y: float
     ) -> tuple[float, ProjectileHitResult] | None:
         best = None
-        for target in self._iter_entity_candidates():
+        for target in (part for entity in self._iter_entity_candidates() for part in damage_targets(entity)):
             if not self.can_hit_entity(target):
                 continue
             hit = self._hit_against_bounds(

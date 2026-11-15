@@ -254,6 +254,10 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         use_shader = use_shader and not self._shader_failed
 
         old_shader = self._status_effect_shader
+        dragon_drawer = getattr(self, "_dragon_mesh_renderer", None)
+        if dragon_drawer is not None:
+            dragon_drawer.release()
+            self._dragon_mesh_renderer = None
         self.extensions.run("display_reset", self)
         old_portal_shader = self._portal_effect_shader
         if old_portal_shader is not None:
@@ -860,7 +864,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         )
         block_level = float(block_map[local_x, block_y]) / 15.0
         brightness = min(1.0, sky_level + block_level)
-        if brightness <= 0.0 and getattr(self.client_world, "environment", 0) != -1:
+        if brightness <= 0.0 and getattr(self.client_world, "environment", 0) not in (-1, 1):
             return (0, 0, 0)
 
         night_tint = (36, 48, 128)
@@ -1039,13 +1043,16 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                         self.draw_biome_debug_overlay()
                     self.draw_precipitation()
                     self.draw_entities(z_filter=0, entities=foreground_entities)
+                    self.extensions.run("occluders", self)
 
                     self.client.particle_manager.draw(self, z_filter=1)
                     self.client.particle_manager.draw(self, z_filter=0)
                     self.draw_hovered_block_outline()
                     self.draw_destroy_progress()
                     self.client.client_player.skeleton.update()
+                    self.extensions.run("player_occluder", self, True)
                     self.draw_player()
+                    self.extensions.run("player_occluder", self, False)
                     self.draw_lightning()
                     self.extensions.run("world", self)
                     self._apply_bow_view_zoom()
@@ -1078,6 +1085,8 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
                     elif not offscreen_effect_frame:
                         self.draw_status_effect_overlay()
                     self.draw_gui()
+                    from src.client.bossbar import draw_boss_bars
+                    draw_boss_bars(self)
                     self.extensions.run("overlay", self)
 
                     # 帧率统计（每秒更新一次）
@@ -1216,6 +1225,9 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
             and local_mode != "spectator"
         ):
             return False
+        if entity.entity_id == "ender_dragon":
+            # The skeleton culls its complete wings, tail and death rays.
+            return True
         block_size = self.block_size
         if block_size <= 0:
             return True
@@ -1959,7 +1971,7 @@ class Render(WeatherMixin, SkyMixin, BlockRenderMixin):
         old_clip = None
         if clip_rect is not None:
             old_clip = self.screen.get_clip()
-            self.screen.set_clip(clip_rect)
+            self.screen.set_clip(old_clip.clip(clip_rect))
 
         if isinstance(text, Text):
             segments = text.text

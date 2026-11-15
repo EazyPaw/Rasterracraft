@@ -573,6 +573,12 @@ class Server:
         self.worlds["nether"].world_time = int(nether_meta.get("world_time", world_time))
         self.worlds["nether"].queue_saved_entities(nether_meta.get("entities", ()))
         self.worlds["nether"].disable_mob_generation = bool(nether_meta.get("disable_mob_generation", False))
+        end_meta = (self.level_data or {}).get("worlds", {}).get("end", {})
+        self.worlds["end"] = World(self, "end", generator.End, WorldAttribute(environment=1), seed)
+        self.worlds["end"].world_time = int(end_meta.get("world_time", 0))
+        self.worlds["end"].queue_saved_entities(end_meta.get("entities", ()))
+        self.worlds["end"].end_fight.restore(end_meta.get("dragon_fight", {}))
+        self.worlds["end"].disable_mob_generation = bool(end_meta.get("disable_mob_generation", False))
         self.initialized = True
         self.mod_manager.in_game = True
         host = getattr(self, "mod_host", None)
@@ -623,6 +629,8 @@ class Server:
         finish_section("fluids")
         for world in self.worlds.values():
             world.update_entities()
+            if world.end_fight is not None:
+                world.end_fight.tick()
         finish_section("entities")
         for world in self.worlds.values():
             for (
@@ -926,6 +934,8 @@ class Server:
                 world_meta["structure_build_state"] = world.structure_build_state_data()
             else:
                 world_meta.pop("structure_build_state", None)
+            if world.end_fight is not None:
+                world_meta["dragon_fight"] = world.end_fight.to_dict()
             settings_writer = getattr(world.generator, "to_settings_dict", None)
             if callable(settings_writer):
                 world_meta["generator_options"] = settings_writer()
@@ -1043,6 +1053,10 @@ class Server:
         packet = {"__class__": "ChatMessage", "text": text, "color": list(color)}
         self.send_client_socket(player, packet, "Forward")
 
+    def enter_end(self, entity, portal_location=None) -> bool:
+        from src.server.end_fight import travel_end
+        return travel_end(self, entity, portal_location)
+
     def broadcast_sound(
         self,
         sound_id: str,
@@ -1051,6 +1065,7 @@ class Server:
         z: float = 0.0,
         *,
         volume: float = 1.0,
+        pitch: float = 1.0,
         positional: bool = True,
         world=None,
     ) -> None:
@@ -1064,6 +1079,8 @@ class Server:
             "volume": float(volume),
             "global": not positional,
         }
+        if pitch != 1.0:
+            packet["pitch"] = float(pitch)
         for player in tuple(self.players):
             if world is None or player.world is world:
                 self.send_client_socket(player, packet, "Forward")
@@ -1269,6 +1286,9 @@ class Server:
 
         for world in self.worlds.values():
             protected: set[int] = set()
+            if world.end_fight is not None and (world.end_fight._preparing or any(
+                    p.world is world for p in self.players)):
+                protected.update(world.end_fight.required_chunks())
             for player in self.players:
                 if player.world is world:
                     center_rx = int(player.x // 16)

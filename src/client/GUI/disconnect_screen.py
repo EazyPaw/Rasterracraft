@@ -1,3 +1,5 @@
+from src.client.GUI.menu_style import draw_dirt, gui_scale
+
 import pygame
 
 from src.client.GUI.button import Button
@@ -24,8 +26,8 @@ class DisconnectScreen(GUI):
 
         title = self.render.client.resources_manager.get_translation_key(self.title_key)
         title_text = Text(title, TextColor.GRAY)
-        title_size = max(24, min(40, height // 25))
-        reason_size = max(20, min(32, height // 30))
+        title_size = 8 * gui_scale(self.render)
+        reason_size = title_size
         title_width = self.render.get_font(title_size).size(title)[0]
         self.render.render_text(
             title_text,
@@ -48,7 +50,7 @@ class DisconnectScreen(GUI):
             )
 
         button_width = max(300, min(800, int(width * 0.43)))
-        button_height = max(38, min(58, int(height * 0.065)))
+        button_height = 20 * gui_scale(self.render)
         button_y = max(
             int(height * 0.58),
             reason_y + len(reason_lines) * line_height + max(18, height // 45),
@@ -85,21 +87,7 @@ class DisconnectScreen(GUI):
             self.render.show_gui(client.main_menu)
 
     def _draw_background(self, width: int, height: int):
-        cache_key = (width, height)
-        if self._background_cache is None or self._background_cache_key != cache_key:
-            surface = self.render.create_surface((width, height), convert=True)
-            dirt = self.render.client.resources_manager.get_texture_img("blocks.dirt")
-            tile_size = max(32, min(128, min(width, height) // 12))
-            tile = self.render.scale_surface(dirt, (tile_size, tile_size))
-            for x in range(0, width, tile_size):
-                for y in range(0, height, tile_size):
-                    self.render.blit_to(surface, tile, (x, y))
-            shade = self.render.create_surface((width, height), alpha=True)
-            self.render.fill_surface(shade, (0, 0, 0, 145))
-            self.render.blit_to(surface, shade, (0, 0))
-            self._background_cache = surface
-            self._background_cache_key = cache_key
-        self.render.blit(self._background_cache, (0, 0))
+        draw_dirt(self)
 
     def _measure_text(self, text: str | Text, font_size: int) -> int:
         if not isinstance(text, Text):

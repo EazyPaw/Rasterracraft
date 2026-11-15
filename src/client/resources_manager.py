@@ -540,6 +540,37 @@ class ResourcesManager:
             return None, None
         return selected, selected_id
 
+    def _sound_with_pitch(self, sound, pitch):
+        """Cache coarse resamples so wingbeat pitch does not cost a mix/frame."""
+        try:
+            value = float(pitch)
+            level = round(value * 20) / 20 if np.isfinite(value) else 1.0
+            level = max(.5, min(2.0, level))
+        except (TypeError, ValueError):
+            level = 1.0
+        if level == 1.0:
+            return sound
+        cache = getattr(self, "_pitched_sound_cache", None)
+        if cache is None:
+            self._pitched_sound_cache = cache = OrderedDict()
+            self._pitched_sound_bytes = 0
+        key = sound, level
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key][0]
+        samples = pygame.sndarray.array(sound)
+        indices = np.minimum(len(samples) - 1, (np.arange(max(1, int(len(samples) / level))) * level).astype(int))
+        resampled = np.ascontiguousarray(samples[indices])
+        result = pygame.sndarray.make_sound(resampled)
+        cost = resampled.nbytes
+        while cache and (len(cache) >= 32 or self._pitched_sound_bytes + cost > 8 * 1024 * 1024):
+            _, (_, old_cost) = cache.popitem(last=False)
+            self._pitched_sound_bytes -= old_cost
+        if cost <= 8 * 1024 * 1024:
+            cache[key] = result, cost
+            self._pitched_sound_bytes += cost
+        return result
+
     def play_sound(
         self,
         sound_id: str,
@@ -549,6 +580,7 @@ class ResourcesManager:
         fade_ms: int = 0,
         channel_id: int | None = None,
         priority: int | None = None,
+        pitch: float = 1.0,
     ):
         """
         播放音效。
@@ -611,6 +643,8 @@ class ResourcesManager:
                     if full_path not in self.sound_objects:
                         self.sound_objects[full_path] = pygame.mixer.Sound(full_path)
                     sound_obj = self.sound_objects[full_path]
+                    if pitch != 1.0:
+                        sound_obj = self._sound_with_pitch(sound_obj, pitch)
 
                     if stereo_balance is None:
                         left = right = max(0.0, min(1.0, base_volume))

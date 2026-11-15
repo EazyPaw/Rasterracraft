@@ -9,6 +9,7 @@ from collections.abc import Callable
 import pygame
 
 from src.client.GUI.clipboard import get_clipboard_text, sanitize_single_line
+from src.client.GUI.menu_style import gui_scale
 
 
 class InputBox:
@@ -108,7 +109,8 @@ class InputBox:
 
     def _eff_font_size(self) -> int:
         """有效的正文字体大小（用户指定值 > 0 时优先，否则根据高度自动计算）。"""
-        return self.font_size or max(12, min(48, int(self.rect.height * 0.55)))
+        return self.font_size or (8 * gui_scale(self._render) if self._render is not None
+                                  else max(8, int(self.rect.height * 0.4)))
 
     def _eff_placeholder_font_size(self) -> int:
         """有效的占位符字体大小（未指定时与正文相同）。"""
@@ -120,7 +122,7 @@ class InputBox:
 
     def _eff_padding(self) -> int:
         """有效的水平内边距（用户指定值 > 0 时优先，否则根据宽度自动计算）。"""
-        return self.padding or max(4, min(24, int(self.rect.width * 0.04)))
+        return self.padding or (4 * gui_scale(self._render) if self._render is not None else 4)
 
     # ===================== 布局 =====================
 
@@ -226,25 +228,13 @@ class InputBox:
         self._draw_cursor(render)
 
     def _draw_box(self, render):
-        """绘制输入框背景（聚焦或悬停时高亮）。"""
-        texture_key = (
-            self.HIGHLIGHTED_TEXTURE
-            if self.focused or self.hovered
-            else self.NORMAL_TEXTURE
-        )
-        texture = render.client.resources_manager.get_texture_img(texture_key)
-        if texture is not None:
-            texture = render.scale_surface(texture, self.rect.size)
-            render.blit(texture, self.rect.topleft)
-            return
-
-        # 无纹理时的回退绘制
+        """Vanilla text fields have a solid black fill and a one GUI-pixel border."""
         bg = (0, 0, 0)
         border = (255, 255, 255) if self.focused else (160, 160, 160)
         if not self.enabled:
             border = (90, 90, 90)
         render.draw_rect(bg, self.rect)
-        render.draw_rect(border, self.rect, 2)
+        render.draw_rect(border, self.rect, gui_scale(render))
 
     def _draw_text(self, render):
         """绘制文本内容或占位符（支持水平滚动）。"""

@@ -1,4 +1,6 @@
 # Commented and arranged by ChatGPT
+from src.client.GUI.menu_style import draw_dirt, gui_scale
+
 import pygame
 
 from src.client.GUI.button import Button
@@ -89,7 +91,7 @@ class MainMenu(GUI):
         if service is not None:
             active = {record.ctx.namespace for record in service.manager.loaded}
             active.update(service.server_status.get("loaded", []))
-            self.render.render_text(transkey("mods.enabledCount", len(active)), (8, 8), (210, 220, 210), 20, True)
+            self.render.render_text(transkey("mods.enabledCount", len(active)), (2 * gui_scale(self.render), 2 * gui_scale(self.render)), (255, 255, 255), 8 * gui_scale(self.render), True)
 
     def handle_events(self, events: list[pygame.event.Event]):
         """
@@ -121,131 +123,43 @@ class MainMenu(GUI):
                         break
 
     def _layout_buttons(self):
-        """
-        计算并设置每个按钮的位置和尺寸。
-        按钮宽度与窗口宽度成比例，高度与窗口高度成比例，并有上下限。
-        所有可见按钮在屏幕垂直方向 38%~68% 区域内垂直居中排列。
-        """
-        screen_w = self.render.SCREEN_WIDTH
-        screen_h = self.render.SCREEN_HEIGHT
-
-        # 按钮尺寸随窗口缩放，并限定合理范围
-        button_w = max(180, min(400, int(screen_w * 0.35)))
-        button_h = max(28, min(48, int(screen_h * 0.055)))
-        gap = max(4, int(button_h * 0.3))  # 按钮之间的间距
-
-        visible_buttons = [b for b in self.buttons if b.visible]
-        if not visible_buttons:
-            return
-
-        # 收集每个可见按钮的实际尺寸（若未自定义则使用默认尺寸）
-        button_sizes = [
-            (button_w, button_h)
-            if button.default_size == Button.DEFAULT_SIZE
-            else button.default_size
-            for button in visible_buttons
-        ]
-        # 计算所有按钮加上间距的总高度
-        total_h = sum(size[1] for size in button_sizes) + gap * (
-            len(visible_buttons) - 1
-        )
-
-        # 按钮垂直区间：屏幕 38%~68% 高度
-        button_zone_top = int(screen_h * 0.38)
-        button_zone_bottom = int(screen_h * 0.68)
-        button_zone_height = button_zone_bottom - button_zone_top
-        y = button_zone_top + (button_zone_height - total_h) // 2
-
-        # 防止按钮组超出屏幕底部（保留 5% 边距）
-        if y + total_h > screen_h - int(screen_h * 0.05):
-            y = screen_h - int(screen_h * 0.05) - total_h
-
-        # 逐个设置按钮的位置和尺寸
-        for button, (width, height) in zip(visible_buttons, button_sizes):
-            button.set_rect((screen_w - width) // 2, y, width, height)
+        scale = gui_scale(self.render)
+        w, h = self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT
+        buttons = [button for button in self.buttons if button.visible]
+        gap = 4 * scale
+        sizes = [(min(200 * scale, w - 24), 20 * scale)
+                 if button.default_size == Button.DEFAULT_SIZE else button.default_size
+                 for button in buttons]
+        total = sum(height for _, height in sizes) + gap * max(0, len(sizes) - 1)
+        y = min(h // 4 + 48 * scale, h - total - 24 * scale)
+        for button, (width, height) in zip(buttons, sizes):
+            button.set_rect((w - width) // 2, y, width, height)
             y += height + gap
 
     def _draw_background(self):
-        """
-        绘制背景（泥土纹理 + 半透明遮罩）。
-        采用缓存策略，仅当窗口尺寸变化时重新生成。
-        """
-        cache_key = (self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT)
-        if self._background_cache is None or self._background_cache_key != cache_key:
-            self._background_cache = self._build_background()
-            self._background_cache_key = cache_key
-        self.render.blit(self._background_cache, (0, 0))
+        draw_dirt(self)
 
     def _build_background(self):
-        """
-        构建背景表面：平铺泥土纹理，并覆盖半透明黑色遮罩。
-        瓦片大小根据窗口短边的 1/12 自适应，限制在 32~128 之间。
-        """
-        width = self.render.SCREEN_WIDTH
-        height = self.render.SCREEN_HEIGHT
-        surface = self.render.create_surface((width, height), convert=True)
-        dirt = self.render.client.resources_manager.get_texture_img("blocks.dirt")
-        tile_size = max(32, min(128, min(width, height) // 12))
-        tile = self.render.scale_surface(dirt, (tile_size, tile_size))
-
-        # 平铺泥土
-        for x in range(0, width, tile_size):
-            for y in range(0, height, tile_size):
-                self.render.blit_to(surface, tile, (x, y))
-
-        # 叠加半透明遮罩
-        shade = self.render.create_surface((width, height), alpha=True)
-        self.render.fill_surface(shade, (0, 0, 0, 115))
-        self.render.blit_to(surface, shade, (0, 0))
-        return surface
+        draw_dirt(self)
+        return self._dirt_style_surface
 
     def _draw_logo(self):
-        """
-        绘制游戏 Logo。
-        Logo 位于屏幕顶部 35% 区域，宽度不超过屏幕 50%，高度不超过该区域的 60%，
-        同时限制最大放大倍数为 2.5 倍以防止模糊。
-        """
-        screen_w = self.render.SCREEN_WIDTH
-        screen_h = self.render.SCREEN_HEIGHT
-        logo = self.render.client.resources_manager.get_texture_img(
-            "gui.title.minecraft", True
-        )
-
-        logo_zone_height = int(screen_h * 0.35)  # Logo 所在区域高度
-
-        # 计算缩放比例：宽度不超过屏幕 50%，高度不超过区域高度的 60%
-        max_w = int(screen_w * 0.50)
-        max_h = int(logo_zone_height * 0.60)
-        scale_w = max_w / logo.get_width()
-        scale_h = max_h / logo.get_height()
-        scale = min(scale_w, scale_h, 2.5)  # 最大放大 2.5 倍
-        logo_w = int(logo.get_width() * scale)
-        logo_h = int(logo.get_height() * scale)
-        logo_surface = self.render.scale_surface(logo, (logo_w, logo_h))
-
-        # 在 Logo 区域内居中
-        x = (screen_w - logo_w) // 2
-        y = (logo_zone_height - logo_h) // 2
-        self.render.blit(logo_surface, (x, y))
+        w, h = self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT
+        scale = gui_scale(self.render)
+        logo = self.render.client.resources_manager.get_texture_img("gui.title.minecraft", True)
+        if logo is None:
+            return
+        ratio = min(274 * scale / logo.get_width(), (w - 32) / logo.get_width(),
+                    h * .23 / logo.get_height())
+        size = (max(1, int(logo.get_width() * ratio)), max(1, int(logo.get_height() * ratio)))
+        self.render.blit(self.render.scale_surface(logo, size), ((w - size[0]) // 2, 30 * scale))
 
     def _draw_footer(self):
-        """
-        绘制页脚：显示版本信息和版权声明。
-        字体大小随窗口高度缩放。
-        """
-        version = getattr(self.render.client, "version", "")
-        footer_font_size = max(16, int(self.render.SCREEN_HEIGHT * 0.026))
-        y = self.render.SCREEN_HEIGHT - footer_font_size - 8
-
-        # 左侧：版本号
-        self.render.render_text(
-            f"{version}", (8, y), (255, 255, 255), footer_font_size, True
-        )
-
-        # 右侧：版权文字
-        copyright_text = "Minecraft assets by Mojang Studios"
-        font = self.render.get_font(footer_font_size)
-        x = self.render.SCREEN_WIDTH - font.size(copyright_text)[0] - 8
-        self.render.render_text(
-            copyright_text, (x, y), (255, 255, 255), footer_font_size, True
-        )
+        scale = gui_scale(self.render)
+        size = 8 * scale
+        y = self.render.SCREEN_HEIGHT - self.render.get_font(size).get_height() - 2 * scale
+        self.render.render_text(str(getattr(self.render.client, "version", "")),
+                                (2 * scale, y), (255, 255, 255), size, True)
+        text = "Minecraft assets by Mojang Studios"
+        x = self.render.SCREEN_WIDTH - self.render.get_font(size).size(text)[0] - 2 * scale
+        self.render.render_text(text, (x, y), (255, 255, 255), size, True)

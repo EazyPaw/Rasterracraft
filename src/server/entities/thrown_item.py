@@ -61,7 +61,7 @@ class ThrownItemSkeleton(EntitySkeleton):
 
         center_x = self._render_x + self.entity.width * 0.5
         center_y = self._render_y + self.entity.height * 0.5
-        tint = render.get_world_light_tint(center_x, center_y)
+        tint = (255, 255, 255) if getattr(self, "fullbright", False) else render.get_world_light_tint(center_x, center_y)
         texture = render.get_tinted_surface(self._scaled_texture, tint)
         screen_x, screen_y = render.trans_world_location((center_x, center_y))
         render.blit(

@@ -1,6 +1,7 @@
 """Shared eye-ray picking for client previews and authoritative attacks."""
 
 import math
+from src.server.dragon_geometry import damage_targets
 
 
 def player_eye(player):
@@ -35,7 +36,7 @@ def pick_entity(player, world, entities, direction):
     direction = dx / length, dy / length
     origin = player_eye(player)
     best, distance = None, reach
-    for entity in entities:
+    for entity in (part for parent in entities for part in damage_targets(parent)):
         if (entity is player or getattr(entity, "removed", False)
                 or getattr(entity, "health", 0) <= 0
                 or not getattr(entity, "attackable", True)

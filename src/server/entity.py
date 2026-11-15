@@ -38,6 +38,9 @@ class Entity:
     registry_key = None
     summonable = False
     persistent = False
+    persists_while_dying = False
+    # Zero uses ordinary chunk tracking. Large bosses can opt into a distance.
+    tracking_range = 0
     sounds = {}
 
     blocks_block_placement = True
@@ -529,6 +532,13 @@ class Entity:
         nbt = self.get_safe_attributes()
         return str(nbt)
 
+    def is_tracked_by(self, player) -> bool:
+        if player.world is not self.world:
+            return False
+        if self.tracking_range:
+            return abs(player.x + player.width / 2 - self.x - self.width / 2) <= self.tracking_range
+        return player.is_loading_position(math.floor(self.x), math.floor(self.y), getattr(self, "z", 0))
+
     def to_entity_data(self) -> dict:
         self.refresh_attribute_modifiers()
         data = {
@@ -560,6 +570,8 @@ class Entity:
         }
         if hasattr(self, "z"):
             data["z"] = getattr(self, "z")
+        if self.tracking_range:
+            data["tracking_range"] = self.tracking_range
         if hasattr(self, "name"):
             data["name"] = getattr(self, "name")
         block = getattr(self, "block", None)
@@ -1657,7 +1669,12 @@ class Entity:
         for x in range(math.floor(self.x + 0.001), math.ceil(self.x + self.width - 0.001)):
             for y in range(math.floor(self.y + 0.001), math.ceil(self.y + self.height - 0.001)):
                 for z in layers:
-                    if getattr(self.world.get_block(x, y, z), "block_id", None) != "nether_portal":
+                    block = self.world.get_block(x, y, z)
+                    if getattr(block, "block_id", None) == "end_portal" and z == 0 and self.y < y + 0.75:
+                        from src.server.end_portal import request_end_entry
+                        if request_end_entry(self, block.location):
+                            return True
+                    if getattr(block, "block_id", None) != "nether_portal":
                         continue
                     if cooldown:
                         self.portal_cooldown = 300

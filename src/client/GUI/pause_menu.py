@@ -1,4 +1,6 @@
 # Commented and arranged by ChatGPT
+from src.client.GUI.menu_style import gui_scale
+
 import pygame
 
 from src.client.GUI.button import Button
@@ -64,13 +66,10 @@ class PauseMenu(GUI):
         self.render.client.game_manager.release_game_input()
 
     def _layout_buttons(self):
-        screen_w = self.render.SCREEN_WIDTH
-        screen_h = self.render.SCREEN_HEIGHT
-        button_w = max(220, min(420, int(screen_w * 0.36)))
-        button_h = max(34, min(48, int(screen_h * 0.06)))
-        gap = max(8, int(button_h * 0.35))
-        total_h = len(self.buttons) * button_h + (len(self.buttons) - 1) * gap
-        y = (screen_h - total_h) // 2
+        s = gui_scale(self.render)
+        w, h = self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT
+        width, height, gap = min(200 * s, w - 24), 20 * s, 4 * s
+        y = (h - len(self.buttons) * (height + gap) + gap) // 2
         for button in self.buttons:
-            button.set_rect((screen_w - button_w) // 2, y, button_w, button_h)
-            y += button_h + gap
+            button.set_rect((w - width) // 2, y, width, height)
+            y += height + gap

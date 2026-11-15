@@ -1772,6 +1772,13 @@ class BOOKSHELF(BlockItem):
 
 
 @register_material
+class DRAGON_EGG(BlockItem):
+    name_id = "dragon_egg"
+    name = "tile.dragonEgg.name"
+    target_block_id = "dragon_egg"
+
+
+@register_material
 class END_STONE(BlockItem):
     name_id = "end_stone"
     name = "tile.whiteStone.name"
@@ -2453,6 +2460,51 @@ class SNOWBALL(ThrowableMaterial):
     name_id = "snowball"
     name = "item.snowball.name"
     _texture_path = "items.snowball"
+
+
+@register_material
+class ENDER_EYE(Material):
+    name_id = "ender_eye"
+    name = "item.eyeOfEnder.name"
+    _texture_path = "items.ender_eye"
+
+    def right_click(self, stack, holder, *, target=None, context=None):
+        mode = getattr(holder.gamemode, "name_id", "survival")
+        if stack is None or stack.is_empty() or holder.health <= 0 or mode == "spectator":
+            return False
+        world = holder.world
+        if getattr(target, "block_id", None) == "end_portal_frame":
+            # Clicking an already filled frame must never throw an eye.
+            loc = target.location
+            if (target.eye or loc is None or loc.world is not world
+                    or not world.is_chunk_loaded(int(loc.x) // 16)
+                    or not holder.can_reach_block(int(loc.x), int(loc.y), int(loc.z))):
+                return False
+            from src.server.end_portal import activate_end_portal
+            from src.server.particles import SMOKE
+            target.eye = True
+            world.set_block(target, loc, block_update=False)
+            activate_end_portal(world, int(loc.x), int(loc.y))
+            world.spawn_particle(SMOKE(loc.x + 0.5, loc.y + 0.8125, loc.z, count=16))
+        else:
+            planner = getattr(world, "stronghold_generator", None)
+            destination = planner.locate(holder.x) if planner is not None else None
+            if destination is None:
+                return False
+            from src.server.entities.ender_eye import EnderEye
+            eye = EnderEye(holder.x + holder.width / 2, holder.y, world, int(getattr(holder, "z", 0)))
+            eye.move_towards(*destination)
+            world.spawn_entity(eye)
+            world.server.broadcast_sound("random.bow", holder.x, holder.y, int(getattr(holder, "z", 0)), world=world)
+        if mode != "creative":
+            stack.reduce_amount(1)
+        return True
+
+
+@register_material
+class END_PORTAL_FRAME(BlockItem):
+    name_id = target_block_id = "end_portal_frame"
+    name = "tile.endPortalFrame.name"
 
 
 @register_material

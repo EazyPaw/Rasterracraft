@@ -178,6 +178,96 @@ class OBSIDIAN(Block):
 
 
 @register_block
+class END_PORTAL_FRAME(Block):
+    block_id = "end_portal_frame"
+    name = "tile.endPortalFrame.name"
+    _texture_path = "blocks.endframe_side"
+    hardness = -1.0
+    blast_resistance = 3600000.0
+    suffocating = redstone_conducting = False
+    has_transparent_pixels = True
+    light_attenuation = 1
+    light_source = 1
+    drops = ()
+
+    def __init__(self, nbt=None):
+        self.eye = False
+        self.facing = 0
+        super().__init__(nbt)
+
+    def get_state_for_placement(self, location, *, player=None, **kwargs):
+        self.facing = 0 if location.z == 1 else (-1 if getattr(player, "facing", 1) else 1)
+        return self
+
+    def get_collision_box(self):
+        boxes = [CollisionBox(0, 0, 1, 13 / 16)]
+        if self.eye:
+            boxes.append(CollisionBox(5 / 16, 13 / 16, 11 / 16, 1))
+        return BlockCollisionBox(tuple(boxes))
+
+    @client_method
+    def get_texture(self, size, client=None):
+        from src.client.end_portal import frame_texture
+        return frame_texture(client.resources_manager, int(size), self.eye, self.facing)
+
+    def on_update(self):
+        if self.location is not None and self.eye:
+            from src.server.end_portal import activate_end_portal
+            activate_end_portal(self.location.world, int(self.location.x), int(self.location.y))
+
+
+@register_block
+class END_PORTAL(Block):
+    block_id = "end_portal"
+    name = "tile.endPortal.name"
+    _texture_path = "entity.end_portal"
+    solid = suffocating = redstone_conducting = False
+    collision_box = EMPTY
+    hardness = -1.0
+    blast_resistance = 3600000.0
+    light_source = 15
+    light_attenuation = 1
+    has_transparent_pixels = True
+    render_animation_interval_ms = 150
+    drops = ()
+
+    def __init__(self, nbt=None):
+        self.exit_portal = False
+        super().__init__(nbt)
+
+    @client_method
+    def get_texture(self, size, client=None):
+        from src.client.end_portal import portal_texture
+        x = int(self.location.x) if self.location is not None else 0
+        return portal_texture(int(size), x % 3, (pygame.time.get_ticks() // 150) % 96)
+
+    def on_entity_inside(self, entity):
+        # Vanilla's portal surface is 3/4 block high.
+        if self.location is not None and entity.y < self.location.y + 0.75:
+            from src.server.end_portal import request_end_entry
+            request_end_entry(entity, self.location)
+
+    def on_load(self):
+        self.on_update()
+
+    def on_update(self):
+        if self.location is None:
+            return
+        from src.server.end_portal import portal_status
+        world = self.location.world
+        if getattr(world, "server", None) is None:
+            return
+        if self.exit_portal and world.attribute.ENVIRONMENT == 1:
+            return
+        x, y = int(self.location.x), int(self.location.y)
+        states = [portal_status(world, x - dx, y) for dx in (1, 2, 3)]
+        if True not in states and None not in states:
+            for px in range(x - 2, x + 3):
+                if world.get_block(px, y, 0).block_id == "end_portal":
+                    world.set_block(AIR(), px, y, 0, block_update=False)
+
+
+@register_block
 class NETHER_PORTAL(Block):
     block_id = "nether_portal"
     name = "block.minecraft.nether_portal"
@@ -1447,7 +1537,7 @@ class BED(PairedBlock):
         world = head.location.world
         server = getattr(world, "server", None)
         foot = head.get_counterpart()
-        if getattr(world.attribute, "ENVIRONMENT", 0) == -1:
+        if getattr(world.attribute, "ENVIRONMENT", 0) != 0:
             loc = head.location
             for part in (head, foot):
                 if part is not None:
@@ -3397,6 +3487,63 @@ class DAMAGED_ANVIL(ANVIL):
     block_id = "damaged_anvil"
     initial_damage = 2
     name = "tile.anvil.veryDamaged.name"
+
+
+@register_block
+class DRAGON_EGG(GravityBlock):
+    block_id = "dragon_egg"
+    name = "tile.dragonEgg.name"
+    _texture_path = "blocks.dragon_egg"
+    hardness = 3.0
+    blast_resistance = 9.0
+    light_source = 1
+    has_transparent_pixels = True
+    collision_box = BlockCollisionBox.from_box(1 / 16, 0, 15 / 16, 1)
+
+    def on_load(self):
+        if self.location is not None:
+            self.on_update(server=self.location.world.server)
+
+    def _teleport(self):
+        if self.location is None:
+            return True
+        import random
+        from src.server.particles import PORTAL
+        world = self.location.world
+        x, y, z = int(self.location.x), int(self.location.y), int(self.location.z)
+        for _ in range(1000):
+            tx = x + random.randrange(16) - random.randrange(16)
+            ty = y + random.randrange(8) - random.randrange(8)
+            if not 0 < ty < world.attribute.MAX_BUILD_HEIGHT or not world.is_chunk_loaded(tx // 16):
+                continue
+            if world.get_block(tx, ty, z).block_id == "air":
+                world.set_block(DRAGON_EGG(), tx, ty, z)
+                world.set_block(AIR(), x, y, z)
+                world.spawn_particle(PORTAL((tx + x) / 2 + .5, (ty + y) / 2 + .5, z, count=32))
+                break
+        return True
+
+    def on_right_click(self, player):
+        return self._teleport()
+
+    def on_left_click(self, player):
+        return self._teleport()
+
+    @classmethod
+    @client_method
+    def get_texture(cls, size, client=None):
+        source = client.resources_manager.get_texture_img(cls._texture_path)
+        size = max(1, int(size))
+        if id(source) != cls._last_tex_id or size != cls._last_scaled:
+            native = pygame.transform.scale(source, (16, 16))
+            mask = pygame.Surface((16, 16), pygame.SRCALPHA)
+            pygame.draw.polygon(mask, (255, 255, 255, 255),
+                                ((6, 0), (9, 0), (12, 3), (14, 7), (14, 12), (12, 14), (9, 15),
+                                 (6, 15), (3, 14), (1, 12), (1, 7), (3, 3)))
+            native.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            cls._texture = pygame.transform.scale(native, (size, size))
+            cls._last_tex_id, cls._last_scaled = id(source), size
+        return cls._texture
 
 
 @register_block

@@ -1,4 +1,6 @@
 # Commented and arranged by ChatGPT
+from src.client.GUI.menu_style import draw_dirt, gui_scale
+
 import pygame
 
 from src.client.GUI.gui import GUI
@@ -19,47 +21,33 @@ class LoadingScreen(GUI):
         self._draw_background(width, height)
 
         title = client.resources_manager.get_translation_key(self.title_key)
-        title_font = self.render.get_font(max(28, min(46, height // 14)))
-        title_surface = title_font.render(title, True, (245, 245, 245))
-        screen.blit(
-            title_surface, title_surface.get_rect(center=(width // 2, height // 2 - 48))
-        )
+        scale = gui_scale(self.render)
+        font_size = 8 * scale
+        title_width = self.render.get_font(font_size).size(title)[0]
+        self.render.render_text(title, ((width - title_width) // 2, height // 2 - 24 * scale),
+                                (255, 255, 255), font_size, shadow=True, shadow_strength=0.25)
 
         required = client.required_spawn_regions
         loaded = client.loaded_chunk_regions
         total = max(1, len(required))
         done = min(total, len(required.intersection(loaded)))
         progress = done / total
-        bar_width = min(520, max(240, width - 120))
+        bar_width = min(100 * scale, width - 32)
         bar_rect = pygame.Rect(
-            (width - bar_width) // 2, height // 2 + 12, bar_width, 22
+            (width - bar_width) // 2, height // 2 + 4 * scale, bar_width, 2 * scale
         )
         pygame.draw.rect(screen, (35, 35, 35), bar_rect)
         fill = pygame.Rect(
-            bar_rect.x + 2,
-            bar_rect.y + 2,
+            bar_rect.x,
+            bar_rect.y,
             max(0, int(bar_width * progress)),
             bar_rect.height,
         )
         if fill.width:
-            pygame.draw.rect(screen, (0, 225, 0), fill)
+            pygame.draw.rect(screen, (128, 128, 255), fill)
 
-    def _draw_background(self, width: int, height: int) -> None:
-        cache_key = (width, height)
-        if self._background_cache is None or self._background_cache_key != cache_key:
-            surface = self.render.create_surface((width, height), convert=True)
-            dirt = self.render.client.resources_manager.get_texture_img("blocks.dirt")
-            tile_size = max(32, min(128, min(width, height) // 12))
-            tile = self.render.scale_surface(dirt, (tile_size, tile_size))
-            for x in range(0, width, tile_size):
-                for y in range(0, height, tile_size):
-                    self.render.blit_to(surface, tile, (x, y))
-            shade = self.render.create_surface((width, height), alpha=True)
-            self.render.fill_surface(shade, (0, 0, 0, 115))
-            self.render.blit_to(surface, shade, (0, 0))
-            self._background_cache = surface
-            self._background_cache_key = cache_key
-        self.render.blit(self._background_cache, (0, 0))
+    def _draw_background(self, width: int, height: int):
+        draw_dirt(self)
 
     def handle_events(self, events):
 

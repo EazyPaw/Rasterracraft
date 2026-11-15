@@ -84,6 +84,19 @@ class SkyMixin:
         每帧检查缓存：若屏幕尺寸或时间区间变化，则重新生成天空图层。
         天空图层包含：上下渐变背景 + 黄昏霞光 + 星星。
         """
+        if getattr(self.client_world, "environment", 0) == 1:
+            from src.client.end_sky import skybox
+            # WeatherMixin exposes read-only intensities; clear its backing
+            # state when leaving a rainy/thundering overworld for the End.
+            self._weather_intensity = self._thunder_intensity = 0.0
+            self._lightning_frame_active = False
+            self.current_sky_state = self.get_sky_state()
+            texture = self.client.resources_manager.get_texture_img("environment.end_sky")
+            if texture is None:
+                self.screen.fill((18, 14, 22))
+            else:
+                self.screen.blit(skybox(texture, self.SCREEN_WIDTH, self.SCREEN_HEIGHT), (0, 0))
+            return
         if getattr(self.client_world, "environment", 0) == -1:
             self.current_sky_state = self.get_sky_state()
             self.screen.fill((51, 8, 8))
@@ -148,7 +161,7 @@ class SkyMixin:
 
     # ---------- 天空状态计算 ----------
 
-    def get_sky_state(self, *, weather_intensity=None) -> dict[str, Any]:
+    def get_sky_state(self, *, weather_intensity=None, thunder_intensity=None) -> dict[str, Any]:
         """根据当前时间计算完整天空状态。
 
                 包括：天空上下层颜色、黄昏霞光、日光/月光强度、天空光照权重。
@@ -156,6 +169,10 @@ class SkyMixin:
         :return: 包含 upper, lower, twilight, twilight_color, daylight, night, sky_light_weight 的字典
 
         """
+        if getattr(self.client_world, "environment", 0) == 1:
+            return {"upper": (24, 24, 27), "lower": (24, 24, 27),
+                    "twilight": 0.0, "twilight_color": (24, 24, 27),
+                    "daylight": 0.0, "night": 0.0, "sky_light_weight": 0.0}
         if getattr(self.client_world, "environment", 0) == -1:
             return {"upper": (51, 8, 8), "lower": (51, 8, 8),
                     "twilight": 0.0, "twilight_color": (51, 8, 8),
@@ -174,8 +191,9 @@ class SkyMixin:
         rainy_lower = tuple(int(channel * base_light) for channel in (126, 130, 137))
         upper = lerp_color(upper, rainy_upper, weather)
         lower = lerp_color(lower, rainy_lower, weather)
-        upper = lerp_color(upper, (35, 38, 48), self.thunder_intensity * 0.65)
-        lower = lerp_color(lower, (52, 55, 65), self.thunder_intensity * 0.65)
+        thunder = self.thunder_intensity if thunder_intensity is None else thunder_intensity
+        upper = lerp_color(upper, (35, 38, 48), thunder * 0.65)
+        lower = lerp_color(lower, (52, 55, 65), thunder * 0.65)
         if self.lightning_active():
             upper = lerp_color(upper, (204, 204, 255), 0.45)
             lower = lerp_color(lower, (204, 204, 255), 0.45)
@@ -620,6 +638,8 @@ class SkyMixin:
         :return: 天空光照权重 [MIN_SKY_LIGHT_WEIGHT, 1.0]
 
         """
+        if getattr(self.client_world, "environment", 0) in (-1, 1):
+            return 0.0
         sun_lift = self.get_body_lift(self.day_time, self.SUN_RISE_TICK)
         daylight = smoothstep(0.0, 0.7, sun_lift)
         horizon_floor = 0.62 * smoothstep(-0.08, 0.03, sun_lift)

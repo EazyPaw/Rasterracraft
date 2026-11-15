@@ -76,7 +76,7 @@ def _can_fit(world, entity) -> bool:
 
 
 def spawn_animals_for_chunk(world, rx: int) -> list:
-    if bool(getattr(world, "disable_mob_generation", False)) or world.id_name == "nether":
+    if bool(getattr(world, "disable_mob_generation", False)) or world.id_name in {"nether", "end"}:
         return []
     rng = random.Random(f"{world.seed}:{world.id_name}:{int(rx)}:initial_animals")
     probability = _creature_probability(world, rx)
@@ -200,7 +200,7 @@ def tick_monster_spawning(world):
     The vanilla 70 applies to a 17x17 chunk area, not a one-chunk-deep
     slice. Use a 12-monster budget here, with shared multiplayer coverage.
     """
-    if world.id_name != "overworld":
+    if world.id_name not in {"overworld", "end"}:
         return
     players = _spawn_players(world)
     tick_monster_despawning(world, players)
@@ -229,7 +229,7 @@ def tick_monster_spawning(world):
     if getattr(world.server, "server_ticks", 0) % MONSTER_SPAWN_INTERVAL:
         return
     random.shuffle(eligible)
-    spawn_x = float(world.spawn_point)
+    spawn_x = 100.0 if world.id_name == "end" else float(world.spawn_point)
     height_getter = getattr(getattr(world, "generator", None), "get_spawn_height", None)
     # Match Server.get_player_spawn's default until the world stores a Y.
     spawn_y = float(height_getter(spawn_x)) if callable(height_getter) else 100.0
@@ -258,8 +258,9 @@ def tick_monster_spawning(world):
                        and abs(mob.y - y) < 8 for mob in monsters) >= LOCAL_MONSTER_LIMIT:
                     continue
                 if entity_id is None:
-                    entity_id = random.choices([k for k, _ in OVERWORLD_MONSTER_WEIGHTS],
-                                               [w for _, w in OVERWORLD_MONSTER_WEIGHTS])[0]
+                    entity_id = ("enderman" if world.id_name == "end" else
+                                 random.choices([k for k, _ in OVERWORLD_MONSTER_WEIGHTS],
+                                                [w for _, w in OVERWORLD_MONSTER_WEIGHTS])[0])
                 if not _spawn_ground_valid(world, x, y) or not _monster_light_valid(world, x, y):
                     continue
                 entity = create_entity(entity_id, x + 0.5, y, world, 0)

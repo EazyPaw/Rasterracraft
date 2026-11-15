@@ -2,6 +2,8 @@
 import datetime as _datetime
 import time
 
+from src.client.GUI.menu_style import draw_dirt, gui_scale, draw_list_edges, draw_scrollbar
+
 import pygame
 
 from src.client.resources_manager import transkey
@@ -80,10 +82,10 @@ class SavesMenu(GUI):
     def draw(self):
         self._layout()
         self._draw_background()
-        self._draw_title()
-        self.search_box.draw(self.render)
         self._draw_list()
         self._draw_bottom_bar()
+        self._draw_title()
+        self.search_box.draw(self.render)
         for button in self.buttons:
             button.draw(self.render)
 
@@ -176,89 +178,51 @@ class SavesMenu(GUI):
             self.render.show_gui(self.main_menu)
 
     def _layout(self):
-        w = self.render.SCREEN_WIDTH
-        h = self.render.SCREEN_HEIGHT
-        self.list_w = min(950, max(360, int(w * 0.70)))
+        w, h = self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT
+        s = gui_scale(self.render)
+        self.title_font = 8 * s
+        self.list_w = min(270 * s, w - 24 * s)
         self.list_x = (w - self.list_w) // 2
-        self.title_font = max(24, min(42, int(h * 0.052)))
-        search_w = min(800, max(320, int(w * 0.55)))
-        search_h = max(34, min(54, int(h * 0.07)))
-        search_y = max(54, int(h * 0.085))
-        self.search_box.set_rect((w - search_w) // 2, search_y, search_w, search_h)
-
-        self.list_top = search_y + search_h + max(24, int(h * 0.045))
-        self.bottom_top = h - max(120, int(h * 0.22))
-        self.list_bottom = self.bottom_top - 12
-        self.entry_h = max(70, min(98, int(h * 0.13)))
-        self.preview_size = max(58, min(84, self.entry_h - 14))
-
-        button_h = max(32, min(48, int(h * 0.058)))
-        gap = max(8, int(button_h * 0.25))
-        total_w = min(900, w - 80)
+        search_w = min(200 * s, w - 32 * s)
+        self.search_box.set_rect((w - search_w) // 2, 19 * s, search_w, 20 * s)
+        self.search_box.font_size = 8 * s
+        self.list_top = 45 * s
+        self.bottom_top = h - 57 * s
+        self.list_bottom = self.bottom_top
+        self.entry_h = 36 * s
+        self.preview_size = 32 * s
+        gap, button_h = 8 * s, 20 * s
+        total_w = min(308 * s, w - 24 * s)
         x = (w - total_w) // 2
-        row1_y = self.bottom_top + gap
-        row2_y = row1_y + button_h + gap
+        row1_y, row2_y = self.bottom_top + 7 * s, self.bottom_top + 31 * s
         half_w = (total_w - gap) // 2
         quarter_w = (total_w - gap * 3) // 4
         self.enter_button.set_rect(x, row1_y, half_w, button_h)
         self.create_button.set_rect(x + half_w + gap, row1_y, half_w, button_h)
-        self.edit_button.set_rect(x, row2_y, quarter_w, button_h)
-        self.delete_button.set_rect(x + (quarter_w + gap), row2_y, quarter_w, button_h)
-        self.recreate_button.set_rect(
-            x + (quarter_w + gap) * 2, row2_y, quarter_w, button_h
-        )
-        self.back_button.set_rect(
-            x + (quarter_w + gap) * 3, row2_y, quarter_w, button_h
-        )
+        for i, button in enumerate((self.edit_button, self.delete_button, self.recreate_button, self.back_button)):
+            button.set_rect(x + i * (quarter_w + gap), row2_y, quarter_w, button_h)
         self._clamp_scroll()
 
     def _draw_background(self):
-        key = (self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT)
-        if self._background_cache is None or self._background_cache_key != key:
-            self._background_cache = self._build_background()
-            self._background_cache_key = key
-        self.render.blit(self._background_cache, (0, 0))
+        draw_dirt(self, list_rect=pygame.Rect(0, self.list_top, self.render.SCREEN_WIDTH,
+                                             self.list_bottom - self.list_top))
 
     def _build_background(self):
-        width = self.render.SCREEN_WIDTH
-        height = self.render.SCREEN_HEIGHT
-        surface = self.render.create_surface((width, height), convert=True)
-        dirt = self.render.client.resources_manager.get_texture_img("blocks.dirt")
-        tile_size = max(32, min(96, min(width, height) // 12))
-        tile = self.render.scale_surface(dirt, (tile_size, tile_size))
-        for x in range(0, width, tile_size):
-            for y in range(0, height, tile_size):
-                self.render.blit_to(surface, tile, (x, y))
-        shade = self.render.create_surface((width, height), alpha=True)
-        self.render.fill_surface(shade, (0, 0, 0, 160))
-        self.render.blit_to(surface, shade, (0, 0))
-        return surface
+        self._draw_background()
+        return self._dirt_style_surface
 
     def _draw_title(self):
         text = transkey("selectWorld.title")
-        font = self.render.get_font(self.title_font)
-        x = (self.render.SCREEN_WIDTH - font.size(text)[0]) // 2
-        y = max(10, int(self.render.SCREEN_HEIGHT * 0.018))
-        self.render.render_text(text, (x, y), (255, 255, 255), self.title_font, True)
+        x = (self.render.SCREEN_WIDTH - self.render.get_font(self.title_font).size(text)[0]) // 2
+        self.render.render_text(text, (x, 6 * gui_scale(self.render)),
+                                (255, 255, 255), self.title_font, True)
 
     def _draw_list(self):
-        self.render.draw_line(
-            (55, 55, 55),
-            (0, self.list_top - 12),
-            (self.render.SCREEN_WIDTH, self.list_top - 12),
-            2,
-        )
-        self.render.draw_line(
-            (55, 55, 55),
-            (0, self.list_bottom + 8),
-            (self.render.SCREEN_WIDTH, self.list_bottom + 8),
-            2,
-        )
         self._entry_rects.clear()
         saves = self.filtered_saves()
         if not saves:
             msg = transkey("selectWorld.empty")
-            font_size = max(22, min(34, int(self.render.SCREEN_HEIGHT * 0.04)))
+            font_size = 8 * gui_scale(self.render)
             font = self.render.get_font(font_size)
             x = (self.render.SCREEN_WIDTH - font.size(msg)[0]) // 2
             y = self.list_top + max(
@@ -287,14 +251,13 @@ class SavesMenu(GUI):
     def _draw_entry(self, rect: pygame.Rect, save: dict):
         selected = save.get("id") == self.selected_id
         if selected:
-            self.render.draw_rect((255, 255, 255), rect, 2)
-            inner = rect.inflate(-4, -4)
-            self.render.draw_rect((45, 45, 45), inner, 1)
+            self.render.draw_rect((128, 128, 128), rect)
+            self.render.draw_rect((0, 0, 0), rect.inflate(-2 * gui_scale(self.render), -2 * gui_scale(self.render)))
         elif rect.collidepoint(pygame.mouse.get_pos()):
             self.render.draw_rect((120, 120, 120), rect, 1)
 
         preview_rect = pygame.Rect(
-            rect.x + 12,
+            rect.x + 2 * gui_scale(self.render),
             rect.y + (rect.height - self.preview_size) // 2,
             self.preview_size,
             self.preview_size,
@@ -303,7 +266,7 @@ class SavesMenu(GUI):
         if preview is not None:
             self.render.blit(preview, preview_rect.topleft)
 
-        text_x = preview_rect.right + 12
+        text_x = preview_rect.right + 3 * gui_scale(self.render)
         text_w = rect.right - text_x - 8
         title = str(
             save.get("display_name") or save.get("id") or transkey("selectWorld.world")
@@ -315,12 +278,13 @@ class SavesMenu(GUI):
         line2 = f"{title} ({last_played})"
         line3 = f"{mode}, {version}" if version else mode
 
-        title_size = max(22, min(32, int(rect.height * 0.34)))
-        detail_size = max(18, min(28, int(rect.height * 0.28)))
-        clip = pygame.Rect(text_x, rect.y + 4, text_w, rect.height - 8)
+        title_size = 8 * gui_scale(self.render)
+        detail_size = title_size
+        clip = pygame.Rect(text_x, rect.y + 2 * gui_scale(self.render), text_w,
+                           rect.height - 4 * gui_scale(self.render))
         self.render.render_text(
             line1,
-            (text_x, rect.y + 8),
+            (text_x, rect.y + 2 * gui_scale(self.render)),
             (255, 255, 255),
             title_size,
             True,
@@ -328,32 +292,35 @@ class SavesMenu(GUI):
         )
         self.render.render_text(
             line2,
-            (text_x, rect.y + 8 + title_size),
-            (160, 160, 160),
+            (text_x, rect.y + 12 * gui_scale(self.render)),
+            (128, 128, 128),
             detail_size,
             True,
             clip_rect=clip,
         )
         self.render.render_text(
             line3,
-            (text_x, rect.y + 8 + title_size + detail_size),
-            (160, 160, 160),
+            (text_x, rect.y + 22 * gui_scale(self.render)),
+            (128, 128, 128),
             detail_size,
             True,
             clip_rect=clip,
         )
 
     def _draw_bottom_bar(self):
-        rect = pygame.Rect(
-            0,
-            self.bottom_top,
-            self.render.SCREEN_WIDTH,
-            self.render.SCREEN_HEIGHT - self.bottom_top,
-        )
-        bar = self.render.create_surface(rect.size, alpha=True)
-        self.render.fill_surface(bar, (0, 0, 0, 130))
-        self.render.blit(bar, rect.topleft)
-        self.render.draw_line((55, 55, 55), rect.topleft, rect.topright, 2)
+        # Opaque caps also protect the footer from partial scrolling rows.
+        s = gui_scale(self.render)
+        surface = self._dirt_style_surface
+        bottom = pygame.Rect(0, self.bottom_top, self.render.SCREEN_WIDTH,
+                             self.render.SCREEN_HEIGHT - self.bottom_top)
+        self.render.blit(surface.subsurface(bottom), bottom.topleft)
+        top = pygame.Rect(0, 0, self.render.SCREEN_WIDTH, self.list_top)
+        self.render.blit(surface.subsurface(top), (0, 0))
+        draw_list_edges(self.render, pygame.Rect(0, self.list_top, self.render.SCREEN_WIDTH,
+                                               self.list_bottom - self.list_top))
+        draw_scrollbar(self.render, pygame.Rect(self.list_x, self.list_top, self.list_w + 6 * s,
+                                               self.list_bottom - self.list_top),
+                       self.scroll, len(self.filtered_saves()) * self.entry_h)
 
     def _get_preview(self, save: dict, size: int) -> pygame.Surface | None:
         icon_path = save_manager.icon_path(str(save.get("id", "")))
@@ -373,6 +340,8 @@ class SavesMenu(GUI):
             return None
 
     def _handle_list_click(self, pos: tuple[int, int]) -> bool:
+        if not self.list_top <= pos[1] < self.list_bottom:
+            return False
         for rect, save in self._entry_rects:
             if rect.collidepoint(pos):
                 save_id = save["id"]

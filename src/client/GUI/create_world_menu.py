@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from src.client.GUI.menu_style import draw_dirt, gui_scale
+
 import pygame
 
 from src.client.GUI.button import Button
@@ -35,26 +37,8 @@ class _DirtMenu(GUI):
         self._background_cache = None
         self._background_cache_key = None
 
-    def _draw_background(self, shade_alpha: int = 150) -> None:
-        key = (self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT, shade_alpha)
-        if self._background_cache is None or self._background_cache_key != key:
-            width, height, _ = key
-            surface = self.render.create_surface((width, height), convert=True)
-            dirt = self.render.client.resources_manager.get_texture_img("blocks.dirt")
-            if dirt is None:
-                self.render.fill_surface(surface, (48, 36, 25))
-            else:
-                tile_size = max(32, min(96, min(width, height) // 12))
-                tile = self.render.scale_surface(dirt, (tile_size, tile_size))
-                for x in range(0, width, tile_size):
-                    for y in range(0, height, tile_size):
-                        self.render.blit_to(surface, tile, (x, y))
-            shade = self.render.create_surface((width, height), alpha=True)
-            self.render.fill_surface(shade, (0, 0, 0, shade_alpha))
-            self.render.blit_to(surface, shade, (0, 0))
-            self._background_cache = surface
-            self._background_cache_key = key
-        self.render.blit(self._background_cache, (0, 0))
+    def _draw_background(self, shade_alpha: int = 150):
+        draw_dirt(self)
 
     def _switch_to(self, other: GUI) -> None:
         self.render.close_gui(self)
@@ -374,12 +358,12 @@ class CreateWorldMenu(_DirtMenu):
 
     def _layout(self) -> None:
         width, height = self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT
-        self.title_size = max(25, min(42, int(height * 0.045)))
-        self.detail_size = max(17, min(28, int(height * 0.028)))
+        self.title_size = 8 * gui_scale(self.render)
+        self.detail_size = 8 * gui_scale(self.render)
         self.title_y = max(14, int(height * 0.035))
         content_w = min(760, max(360, int(width * 0.48)))
-        field_h = max(38, min(64, int(height * 0.065)))
-        button_h = max(36, min(58, int(height * 0.058)))
+        field_h = 20 * gui_scale(self.render)
+        button_h = 20 * gui_scale(self.render)
         self.small_gap = max(6, int(height * 0.009))
         x = (width - content_w) // 2
         bottom_y = height - button_h - max(18, int(height * 0.028))
@@ -545,7 +529,7 @@ class SuperflatCustomizationMenu(_DirtMenu):
         self.icon_size = max(36, min(56, self.row_h - 10))
         self._clamp_scroll()
 
-        button_h = max(36, min(58, int(height * 0.058)))
+        button_h = 20 * gui_scale(self.render)
         button_w = min(460, max(210, int(width * 0.31)))
         gap = max(10, int(width * 0.02))
         left = (width - button_w * 2 - gap) // 2
@@ -782,7 +766,7 @@ class SuperflatPresetsMenu(SuperflatCustomizationMenu):
         self.icon_size = max(36, min(54, self.row_h - 8))
         self._clamp_preset_scroll()
 
-        button_h = max(36, min(58, int(height * 0.058)))
+        button_h = 20 * gui_scale(self.render)
         buttons_w = min(930, width - 48)
         gap = max(10, int(width * 0.02))
         half = (buttons_w - gap) // 2

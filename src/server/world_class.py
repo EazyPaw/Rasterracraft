@@ -209,7 +209,7 @@ class WorldAttribute:
     def __init__(self, environment=0, max_build_height=256):
         self.ENVIRONMENT = environment
         self.MAX_BUILD_HEIGHT = max_build_height
-        self.HAS_SKY = environment != -1
+        self.HAS_SKY = environment == 0
 
 
 class Weather(Enum):
@@ -247,6 +247,16 @@ class World:
             self.structure_generator = NetherFortressGenerator(
                 self.generator, attribute.MAX_BUILD_HEIGHT, enabled=self.generate_structures)
         self.disable_mob_generation = self.structure_build_mode
+        from src.server.generator.stronghold import StrongholdGenerator
+        self.stronghold_generator = StrongholdGenerator(
+            self.generator, attribute.MAX_BUILD_HEIGHT,
+            enabled=self.generate_structures and id_name == "overworld")
+        self.end_fight = None
+        if attribute.ENVIRONMENT == 1:
+            from src.server.generator.end import EndStructures
+            from src.server.end_fight import EndFight
+            self.structure_generator = EndStructures()
+            self.end_fight = EndFight(self)
         self.structure_bounds: tuple[int, int, int, int] | None = None
         self.structure_void_positions: set[tuple[int, int, int]] = set()
         self.structure_air_positions: set[tuple[int, int, int]] = set()
@@ -686,10 +696,12 @@ class World:
         with self._entities_lock:
             self.entities[entity_uuid] = entity
         for player in self.server.players:
-            if player.world is self and player.is_loading_position(
-                math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)
-            ):
+            if entity.is_tracked_by(player):
                 self.server.send_client_socket(player, entity, "EntitySpawn")
+                if entity.tracking_range:
+                    tracked = getattr(entity, "_tracking_players", set())
+                    tracked.add(str(player.uuid))
+                    entity._tracking_players = tracked
 
     def spawn_experience(self, x: float, y: float, z: int, amount: int):
         from src.server.entities.experience_orb import ExperienceOrb
@@ -740,7 +752,8 @@ class World:
             if entity_uuid:
                 seen_uuids.add(entity_uuid)
             entity = create_entity_from_save(record, self)
-            if entity is not None and entity.health > 0:
+            if entity is not None and (entity.health > 0 or
+                    (entity.persists_while_dying and getattr(entity, "dying", False))):
                 self.spawn_entity(entity)
             elif entity is None:
                 self._unresolved_entities_by_chunk.setdefault(rx, []).append(
@@ -759,7 +772,7 @@ class World:
             if (
                 entity.entity_id == "player"
                 or entity.removed
-                or entity.health <= 0
+                or (entity.health <= 0 and not (entity.persists_while_dying and getattr(entity, "dying", False)))
                 or not is_entity_persistent(entity)
             ):
                 continue
@@ -789,7 +802,7 @@ class World:
         ]
 
     def serialize_persistent_entities(self) -> list[dict]:
-        loaded = self.serialize_entities_in_chunks(self.regions.keys())
+        loaded = self.serialize_entities_in_chunks(set(self.regions) | self.get_active_entity_chunks())
         records = [record for chunk in loaded.values() for record in chunk]
         records.extend(self.serialize_pending_legacy_entities())
         return records
@@ -811,11 +824,7 @@ class World:
         for entity in removed:
             entity_uuid = str(entity.uuid)
             for player in self.server.players:
-                if player.world is self and player.is_loading_position(
-                    math.floor(entity.x),
-                    math.floor(entity.y),
-                    getattr(entity, "z", 0),
-                ):
+                if entity.is_tracked_by(player):
                     self.server.send_client_socket(
                         player, {"uuid": entity_uuid}, "EntityRemove"
                     )
@@ -841,7 +850,9 @@ class World:
             if entity.removed or entity.world is not self:
                 continue
             started = time.perf_counter()
-            if entity.tick_entity_portal():
+            if (getattr(entity, "_pending_end_entry", None) is not None
+                    or entity.tick_entity_portal()
+                    or getattr(entity, "_pending_end_entry", None) is not None):
                 continue
             entity.update()
             updated = time.perf_counter()
@@ -876,10 +887,15 @@ class World:
             recipients = [
                 player
                 for player in self.server.players
-                if player.world is self and player.is_loading_position(
-                    math.floor(entity.x), math.floor(entity.y), getattr(entity, "z", 0)
-                )
+                if entity.is_tracked_by(player)
             ] if send_update else []
+            if send_update and entity.tracking_range:
+                current = {str(p.uuid) for p in recipients}
+                previous = getattr(entity, "_tracking_players", set())
+                for player in self.server.players:
+                    if str(player.uuid) in previous - current and player.world is self:
+                        self.server.send_client_socket(player, {"uuid": str(entity.uuid)}, "EntityRemove")
+                entity._tracking_players = current
             tracked = time.perf_counter()
             send_many = getattr(self.server, "send_client_sockets", None)
             if callable(send_many):
@@ -906,7 +922,8 @@ class World:
         with self._entities_lock:
             entities = list(self.entities.values())
         for entity in entities:
-            if math.floor(entity.x) // 16 == rx:
+            if (math.floor(entity.x) // 16 == rx
+                    or (entity.tracking_range and entity.is_tracked_by(player))):
                 self.server.send_client_socket(player, entity, "EntitySpawn")
 
     def get_block(self, x_loc: int | Location, y: int = None, z: int = None) -> Block:
@@ -1258,6 +1275,7 @@ class World:
                     chunk[x][y][z] = block
                     block.location = Location(self, d_x, y, z)
         self.structure_generator.apply_chunk(self, rx, chunk)
+        self.stronghold_generator.apply_chunk(self, rx, chunk)
         new_chunk = Chunk(rx, chunk, biome_array)
         # 第二阶段（临界区）：写入 regions 字典并做跨区块光照计算
         # 光照计算需要读取相邻区块，因此需要串行化以保证一致性
@@ -1546,7 +1564,10 @@ class World:
             return
         candidates = list(self.entities.values())
         candidates.extend(getattr(self.server, "players", ()))
+        from src.server.dragon_geometry import damage_targets
+
         seen: set[str] = set()
+        parts = []
         for entity in candidates:
             if getattr(entity, "world", None) is not self:
                 continue
@@ -1554,6 +1575,10 @@ class World:
             if entity_key in seen or getattr(entity, "removed", False):
                 continue
             seen.add(entity_key)
+            parts.extend(damage_targets(entity))
+        for entity in parts:
+            if getattr(entity, "removed", False):
+                continue
             entity_x = float(entity.x) + float(getattr(entity, "width", 1.0)) * 0.5
             entity_y = float(entity.y) + float(getattr(entity, "height", 1.0)) * 0.5
             entity_z = int(getattr(entity, "z", 0)) + 0.5

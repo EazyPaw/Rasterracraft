@@ -216,6 +216,16 @@ class Hell(Biome):
     surface = subsurface = filler = "netherrack"
 
 
+class Sky(Biome):
+    biome_id = "sky"
+    name = "The End"
+    temperature = 0.5
+    downfall = 0.0
+    sky_color = (0, 0, 0)
+    fog_color = (24, 24, 27)
+    surface = subsurface = filler = "end_stone"
+
+
 class Void(Biome):
     biome_id = "void"
     name = "void"

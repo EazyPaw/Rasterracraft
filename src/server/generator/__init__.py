@@ -22,6 +22,7 @@ MinecraftLike2D 支持通过 JSON 文件自定义树木配置，
 
 from src.server.generator.base import Generator
 from src.server.generator.nether import Nether
+from src.server.generator.end import End
 from src.server.generator.config import TreeConfig, BiomeProfile, WORLDGEN_DIR
 from src.server.generator.noise import NoiseMixin
 from src.server.generator.terrain import TerrainMixin
@@ -43,6 +44,7 @@ from src.server.generator.superflat import (
 
 GENERATOR_TYPES = {
     "Nether": Nether,
+    "End": End,
     "MinecraftLike2D": MinecraftLike2D,
     "ClassicFlat": ClassicFlat,
     "StructureBuild": StructureBuild,

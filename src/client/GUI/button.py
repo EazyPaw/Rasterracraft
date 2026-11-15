@@ -3,6 +3,7 @@ from collections.abc import Callable
 
 import pygame
 
+from src.client.GUI.menu_style import gui_scale, widget_surface
 from src.server.utils import client_method
 
 
@@ -29,6 +30,8 @@ class Button:
         self.rect = pygame.Rect(0, 0, *size)
         self.hovered = False
         self.pressed = False
+        self._surface_key = None
+        self._surface = None
 
     def set_rect(self, x: int, y: int, width: int, height: int):
         self.rect = pygame.Rect(x, y, width, height)
@@ -71,6 +74,9 @@ class Button:
         if not self.visible:
             return
 
+        self.hovered = self.contains(pygame.mouse.get_pos())
+        scale = gui_scale(render)
+
         texture_key = self.NORMAL_TEXTURE
         if not self.enabled:
             texture_key = self.DISABLED_TEXTURE
@@ -79,15 +85,18 @@ class Button:
 
         texture = render.client.resources_manager.get_texture_img(texture_key)
         if texture is not None:
-            texture = render.scale_surface(texture, self.rect.size)
-            render.blit(texture, self.rect.topleft)
+            key = (texture, self.rect.size, scale)
+            if self._surface_key != key:
+                self._surface = widget_surface(texture, self.rect.size, scale)
+                self._surface_key = key
+            render.blit(self._surface, self.rect.topleft)
         else:
             self._draw_fallback(render)
 
-        color = (255, 255, 160) if self.enabled and self.hovered else (255, 255, 255)
+        color = (255, 255, 160) if self.enabled and self.hovered else (224, 224, 224)
         if not self.enabled:
             color = (160, 160, 160)
-        font_size = max(18, int(self.rect.height * 0.55))
+        font_size = min(8 * scale, max(8, int(self.rect.height * 0.45)))
         font = render.get_font(font_size)
         text_w, text_h = font.size(self.text)
         if text_w > self.rect.width - 12:
@@ -99,7 +108,7 @@ class Button:
             self.rect.centery - text_h / 2,
         )
         render.render_text(
-            self.text, text_pos, color, font_size, shadow=True, shadow_strength=0.1
+            self.text, text_pos, color, font_size, shadow=True, shadow_strength=0.25
         )
 
     def _draw_fallback(self, render):

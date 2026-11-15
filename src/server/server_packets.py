@@ -368,6 +368,8 @@ def _handle_disconnect_ack(packet: dict, player: Player) -> None:
 
 @SERVER_PACKET_DISPATCHER.handler("PlayerMove")
 def _handle_player_move(packet: dict, player: Player) -> None:
+    if getattr(player, "_pending_end_entry", None) is not None:
+        return
     if player.is_awaiting_teleport_confirmation:
         return
     if player.health <= 0:
@@ -888,7 +890,7 @@ def _handle_request_respawn(packet: dict, player: Player) -> None:
             bed_z = int(saved_spawn["z"])
         except (KeyError, TypeError, ValueError, OverflowError):
             world = None
-        if world is not None and world.attribute.ENVIRONMENT != -1 and 0 <= bed_y < world.attribute.MAX_BUILD_HEIGHT:
+        if world is not None and world.attribute.ENVIRONMENT == 0 and 0 <= bed_y < world.attribute.MAX_BUILD_HEIGHT:
             if not world.is_chunk_loaded(bed_x // 16):
                 world.generate_chunk(bed_x // 16)
             bed = world.get_block(bed_x, bed_y, bed_z)

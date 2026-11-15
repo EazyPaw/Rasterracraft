@@ -1,3 +1,5 @@
+from src.client.GUI.menu_style import draw_dirt, gui_scale
+
 import pygame
 
 from src.client.GUI.button import Button
@@ -121,7 +123,7 @@ class MultiplayerMenu(GUI):
         width = self.render.SCREEN_WIDTH
         height = self.render.SCREEN_HEIGHT
         content_width = min(720, max(320, int(width * 0.58)))
-        field_height = max(36, min(54, int(height * 0.065)))
+        field_height = 20 * gui_scale(self.render)
         field_y = int(height * 0.42)
         self.address_box.set_rect(
             (width - content_width) // 2,
@@ -131,7 +133,7 @@ class MultiplayerMenu(GUI):
         )
 
         gap = max(8, int(width * 0.012))
-        button_height = max(34, min(50, int(height * 0.06)))
+        button_height = 20 * gui_scale(self.render)
         button_y = field_y + field_height + max(60, int(height * 0.10))
         button_width = (content_width - gap) // 2
         self.connect_button.set_rect(
@@ -148,28 +150,11 @@ class MultiplayerMenu(GUI):
         )
 
     def _draw_background(self):
-        key = (self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT)
-        if self._background_cache is None or self._background_cache_key != key:
-            width, height = key
-            surface = self.render.create_surface((width, height), convert=True)
-            dirt = self.render.client.resources_manager.get_texture_img(
-                "blocks.dirt"
-            )
-            tile_size = max(32, min(128, min(width, height) // 12))
-            tile = self.render.scale_surface(dirt, (tile_size, tile_size))
-            for x in range(0, width, tile_size):
-                for y in range(0, height, tile_size):
-                    self.render.blit_to(surface, tile, (x, y))
-            shade = self.render.create_surface((width, height), alpha=True)
-            self.render.fill_surface(shade, (0, 0, 0, 145))
-            self.render.blit_to(surface, shade, (0, 0))
-            self._background_cache = surface
-            self._background_cache_key = key
-        self.render.blit(self._background_cache, (0, 0))
+        draw_dirt(self)
 
     def _draw_title(self):
         text = transkey("selectServer.direct")
-        font_size = max(26, min(44, int(self.render.SCREEN_HEIGHT * 0.055)))
+        font_size = 8 * gui_scale(self.render)
         font = self.render.get_font(font_size)
         x = (self.render.SCREEN_WIDTH - font.size(text)[0]) // 2
         y = int(self.render.SCREEN_HEIGHT * 0.20)

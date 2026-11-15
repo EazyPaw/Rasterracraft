@@ -138,7 +138,7 @@ class BlockRenderMixin:
 
         """
         environment = getattr(self.client_world, "environment", 0)
-        if environment == -1:
+        if environment in (-1, 1):
             # No sky contribution, including at zero where a 0.5 fallback
             # would otherwise switch the ambient tint at the dark boundary.
             sky_ratio = 0.0
@@ -151,6 +151,15 @@ class BlockRenderMixin:
             cache.move_to_end(key)
             return cache[key]
 
+        if environment == 1:
+            # EntityRenderer's End lightmap starts at (0.22, 0.28, 0.25)
+            # even without skylight, and adds 0.75 times the local block light.
+            result = tuple(min(255, round((ambient + .75 * b) * 255 * occlusion))
+                           for ambient in (.22, .28, .25))
+            cache[key] = result
+            if len(cache) > self.MAX_CORNER_COLOR_CACHE:
+                cache.popitem(last=False)
+            return result
         if environment == -1:
             # WorldProviderHell: minimum ambient brightness 0.1.
             b = 0.1 + 0.9 * b / (4.0 - 3.0 * b)
@@ -264,6 +273,8 @@ class BlockRenderMixin:
         if not front.can_precompose_with(back):
             return False
         extensions = getattr(self, "extensions", None)
+        if extensions is not None and extensions.run("block_precompose",self,front,back,size,x,y) is not None:
+            return True
         if extensions is not None and extensions._stages["block_texture"]:
             for z, block in ((0, front), (1, back)):
                 texture = block.get_texture(size)
@@ -273,6 +284,11 @@ class BlockRenderMixin:
                     # cannot bypass a position-dependent material replacement.
                     return False
         return True
+
+    def _precomposed_material(self, front, back, size, x, y):
+        extensions = getattr(self,"extensions",None)
+        material = extensions.run("block_precompose",self,front,back,size,x,y) if extensions is not None else None
+        return material if material is not None else front.get_precomposed_texture(size,back)
 
     def _block_section_requires_direct_draw(
         self,
@@ -397,6 +413,12 @@ class BlockRenderMixin:
 
         if not texture_paths and not animation_intervals:
             return 0
+
+        extensions = getattr(self,"extensions",None)
+        override = extensions.run("block_animation", self, section_x, section_y,
+                                  version_key, texture_paths, animation_intervals) if extensions is not None else None
+        if override is not None:
+            texture_paths, animation_intervals = override
 
         frame_keys = [(interval, pygame.time.get_ticks() // interval) for interval in animation_intervals]
         get_animation_key = self.client.resources_manager.get_texture_animation_key
@@ -630,7 +652,7 @@ class BlockRenderMixin:
                     and b0.has_transparent_pixels
                 ):
                     if self._can_precompose_materials(b0, b1, block_size, x, y):
-                        precomposed_texture = b0.get_precomposed_texture(block_size, b1)
+                        precomposed_texture = self._precomposed_material(b0, b1, block_size, x, y)
                     if precomposed_texture is None:
                         self._draw_block_optimized(
                             target,
@@ -738,9 +760,16 @@ class BlockRenderMixin:
         max_cache_bytes = getattr(
             self, "MAX_BLOCK_SECTION_CACHE_BYTES", incoming_bytes
         )
+        # Keep the visible working set plus one section border resident.
+        # A fixed 32 MiB limit thrashed at high zoom/resolution, rebuilding
+        # even unchanged water sections every frame. Still bound total RAM.
+        visible_sections = ((_math.ceil(self.SCREEN_WIDTH/(section_w*bs))+2) *
+                            (_math.ceil(self.SCREEN_HEIGHT/(section_h*bs))+2))
+        max_cache_bytes = max(max_cache_bytes,min(192*1024*1024,visible_sections*incoming_bytes))
+        max_entries = max(self.MAX_BLOCK_SECTION_CACHE,min(768,visible_sections))
         cache_bytes = sum(self._surface_memory_bytes(item) for item in cache.values())
         while cache and (
-            len(cache) >= self.MAX_BLOCK_SECTION_CACHE
+            len(cache) >= max_entries
             or cache_bytes + incoming_bytes > max_cache_bytes
         ):
             _, old_surface = cache.popitem(last=False)
@@ -1158,7 +1187,7 @@ class BlockRenderMixin:
                     and b0.has_transparent_pixels
                 ):
                     if self._can_precompose_materials(b0, b1, block_size, x, y):
-                        precomposed_texture = b0.get_precomposed_texture(block_size, b1)
+                        precomposed_texture = self._precomposed_material(b0, b1, block_size, x, y)
                     if precomposed_texture is None:
                         self._draw_block_optimized(
                             screen,
@@ -1426,6 +1455,12 @@ class BlockRenderMixin:
                 tex = material
 
         tex_h = tex.get_height()
+
+        if block.block_id == "end_portal":
+            # TileEntityEndPortalRenderer disables lighting. Keep the layered
+            # stars visible without creating a tinted copy of every frame.
+            screen.blit(tex, (sx, sy))
+            return
 
         # ---- 7. 光照纹理缓存 ----
         # Surface 本身作为缓存键会保留对象引用，避免旧纹理淘汰后 Python

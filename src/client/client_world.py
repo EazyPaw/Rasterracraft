@@ -13,6 +13,7 @@ import msgpack
 import numpy as np
 
 from src.client.client_entity import ClientEntity
+from src.client.bossbar import BossBarOverlay
 from src.server.block_class import Block
 from src.server.blocks import get_block_by_id, AIR
 from src.server.location import Location, decide_x_or_loc
@@ -27,6 +28,7 @@ class ClientWorld:
     def __init__(self, client: "Client") -> None:
         self.id_name = "null"
         self.environment = 0
+        self.boss_bars = BossBarOverlay()
         self._regions: dict[int, np.ndarray[Any, np.dtype[Block]]] = {}
         self.light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
         self.sky_light_map: dict[int, np.ndarray[Any, np.dtype[np.uint8]]] = {}
@@ -454,7 +456,7 @@ class ClientWorld:
                 self._precipitation_height_cache.pop((world_x, 1), None)
         with self._entities_lock:
             for uuid, entity in list(self.entities.items()):
-                if int(entity.x // 16) == x:
+                if int(entity.x // 16) == x and not getattr(entity, "tracking_range", 0):
                     self.entities.pop(uuid, None)
             for miner_uuid, state in list(self._break_progress.items()):
                 if int(state["x"]) // 16 == x:
@@ -641,12 +643,14 @@ class ClientWorld:
         z: int | None = None,
         *,
         volume: float = 1.0,
+        pitch: float = 1.0,
     ):
         """
         在指定坐标播放音效，根据玩家位置自动调整立体声左右平衡及距离衰减。
         """
         # 解析坐标
         x, y, z = decide_x_or_loc(x_loc, y, z)
+        sound_options = {"pitch": pitch} if pitch != 1.0 else {}
 
         # 客户端实际使用 client_player；兼容旧的 client.player 引用。
         player = getattr(self.client, "client_player", None) or getattr(
@@ -654,7 +658,7 @@ class ClientWorld:
         )
         if player is None:
             # 无玩家信息时降级为普通播放
-            self.client.resources_manager.play_sound(sound_id, volume=volume)
+            self.client.resources_manager.play_sound(sound_id, volume=volume, **sound_options)
             return
 
         px, py, pz = player.x, player.y, getattr(player, "z", 0.0)
@@ -662,7 +666,7 @@ class ClientWorld:
         dx = x - px
         dy = y - py
         dz = z - pz
-        if sound_id == "ambient.weather.thunder":
+        if sound_id == "ambient.weather.thunder" or sound_id.startswith("mob.enderdragon."):
             # Vanilla thunder has a very large sound radius. Its volume is
             # a range multiplier, not mixer gain; retain stereo direction.
             distance = math.sqrt(dx * dx + dy * dy + dz * dz)
@@ -670,7 +674,7 @@ class ClientWorld:
             _, left_gain, right_gain = self.calculate_spatial_audio(
                 max(-8.0, min(8.0, dx)), 0.0, 0.0)
             self.client.resources_manager.play_sound(
-                sound_id, volume=attenuation, stereo_balance=(left_gain, right_gain))
+                sound_id, volume=attenuation, stereo_balance=(left_gain, right_gain), **sound_options)
             return
         attenuation, left_gain, right_gain = self.calculate_spatial_audio(
             dx, dy, dz
@@ -682,6 +686,7 @@ class ClientWorld:
             sound_id,
             volume=volume * attenuation,
             stereo_balance=(left_gain, right_gain),
+            **sound_options,
         )
 
     @classmethod

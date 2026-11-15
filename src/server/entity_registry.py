@@ -136,6 +136,8 @@ def _load_builtin_entities() -> None:
         enderman,
         endermite,
         ender_pearl,
+        ender_eye,
+        end,
         experience_orb,
         falling_block,
         item,

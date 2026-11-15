@@ -643,6 +643,10 @@ class Player(Entity):
             self.clear_breaking()
             return False
 
+        if block.on_left_click(self):
+            self.clear_breaking()
+            return False
+
         held = self.inventory[self.selected_slot]
         tool_key = (
             getattr(held.material, "name_id", "air"),
@@ -1312,6 +1316,9 @@ class Player(Entity):
             self.exhaustion = min(40.0, self.exhaustion + amount)
 
     def tick_server(self) -> None:
+        if getattr(self, "_pending_end_entry", None) is not None:
+            self._movement_inputs.clear()
+            return
         if self._movement_inputs:
             from src.server.server_packets import _simulate_player_input
 
@@ -1319,6 +1326,7 @@ class Player(Entity):
             if self.health > 0 and not self.sleeping and not self.is_awaiting_teleport_confirmation:
                 _simulate_player_input(controls, self)
         self.tick_nether_portal()
+        self.tick_end_portal()
         if self.portal_cooldown > 0:
             self.portal_cooldown -= 1
         if self.portal_effect_ticks > 0:
@@ -1414,6 +1422,22 @@ class Player(Entity):
         server = getattr(self.world, "server", None)
         if server is not None:
             server.send_client_socket(self, {"__class__": "PortalEffect", "active": False}, "Forward")
+
+    def tick_end_portal(self):
+        if self.health <= 0 or self.sleeping or self.is_awaiting_teleport_confirmation:
+            return
+        if int(getattr(self, "z", 0)) != 0:
+            return
+        for x in range(_math.floor(self.x + 0.001), _math.ceil(self.x + self.width - 0.001)):
+            y = _math.floor(self.y + 0.001)
+            block = self.world.get_block(x, y, 0)
+            if block.block_id == "end_portal" and self.y < y + 0.75:
+                self.travel_through_end_portal(block.location)
+                return
+
+    def travel_through_end_portal(self, location=None):
+        from src.server.end_portal import request_end_entry
+        return request_end_entry(self, location)
 
     def travel_through_nether_portal(self, location=None):
         if self.world.id_name not in {"overworld", "nether"}:

@@ -383,6 +383,12 @@ class CommandExecutor:
 
         if args[0].lower() == "structure":
             structure_id = args[1].lower().removeprefix("minecraft:")
+            if structure_id in {"stronghold", "end_stronghold"}:
+                location = world.stronghold_generator.locate(origin_x, max_radius)
+                if location is None:
+                    raise ValueError("Could not locate a stronghold in this world")
+                x, y = location
+                return f"The nearest stronghold is at ({x}, {y}), {abs(x - origin_x)} blocks away"
             if structure_id in {"fortress", "nether_fortress"}:
                 if world.id_name != "nether" or not world.generate_structures:
                     raise ValueError("Nether fortresses are not enabled in this world")

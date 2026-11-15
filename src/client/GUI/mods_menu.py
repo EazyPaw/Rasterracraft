@@ -6,13 +6,14 @@ import os
 import subprocess
 import sys
 
+from src.client.GUI.menu_style import draw_dirt, gui_scale, draw_list_edges, draw_scrollbar
+
 import pygame
 
 from src.client.GUI.button import Button
 from src.client.GUI.gui import GUI
 from src.client.resources_manager import transkey
 from src.server.text import Text, TextColor
-from src.version import GAME_VERSION
 
 
 class ModsMenu(GUI):
@@ -29,7 +30,6 @@ class ModsMenu(GUI):
         self.message = ""
         self.icons = {}
         self.rows = []
-        self._panel_cache = {}
         self._shade_cache = None
         self.toggle_button = Button("", self.toggle)
         self.config_button = Button(transkey("mods.configure"), self.configure)
@@ -130,25 +130,28 @@ class ModsMenu(GUI):
 
     def layout(self):
         width, height = self.render.SCREEN_WIDTH, self.render.SCREEN_HEIGHT
-        margin = max(10, min(28, width // 40))
-        self.font_size = max(16, min(22, height // 34))
-        self.line_height = self.font_size + 7
-        self.list_rect = pygame.Rect(margin, 64, max(130, int(width * .35) - margin), max(60, height - 152))
-        self.detail_rect = pygame.Rect(self.list_rect.right + 12, 64,
-                                      max(80, width - self.list_rect.right - margin - 12), self.list_rect.height)
-        self.row_height = 80
-        columns = 5 if width >= 760 else 3
+        s = gui_scale(self.render)
+        margin = 8 * s
+        self.font_size = 8 * s
+        self.line_height = 10 * s
+        columns = 5 if width >= 380 * s else 3
         rows = (len(self.buttons) + columns - 1) // columns
-        footer_height = 52 + (rows - 1) * 42
-        self.list_rect.height = self.detail_rect.height = max(60, height - 100 - footer_height)
-        button_width = max(1, (width - margin * 2 - (columns - 1) * 8) // columns)
+        footer_height = (20 + rows * 24) * s
+        top = 32 * s
+        panel_height = max(36 * s, height - top - footer_height)
+        self.list_rect = pygame.Rect(margin, top, max(100 * s, int(width * .35) - margin), panel_height)
+        self.detail_rect = pygame.Rect(self.list_rect.right + 4 * s, top,
+                                      width - self.list_rect.right - margin - 4 * s, panel_height)
+        self.row_height = 36 * s
+        gap = 4 * s
+        button_width = (width - margin * 2 - (columns - 1) * gap) // columns
         for index, button in enumerate(self.buttons):
-            button.set_rect(margin + (index % columns) * (button_width + 8),
-                            height - footer_height + (index // columns) * 42, button_width, 36)
+            button.set_rect(margin + (index % columns) * (button_width + gap),
+                            height - rows * 24 * s + (index // columns) * 24 * s - 2 * s,
+                            button_width, 20 * s)
             button.enabled = not self.service.busy
         info = self.selected_info()
-        self.toggle_button.enabled = (info is not None
-                                      and not self.service.busy and not self.in_world)
+        self.toggle_button.enabled = (info is not None and not self.service.busy and not self.in_world)
         self.toggle_button.text = transkey("mods.disable" if info and self.service.manager.key_for(info) in self.service.desired
                                           else "mods.enable")
         self.config_button.enabled = not self.service.busy and self.config_factory() is not None
@@ -190,48 +193,40 @@ class ModsMenu(GUI):
     def draw(self):
         self.layout()
         self.draw_background()
+        s = gui_scale(self.render)
         title = transkey("mods.title")
-        self.render.render_text(title, (self.list_rect.x, 18), (255, 255, 255), 30, True)
-        self.render.render_text(transkey("mods.currentVersion", GAME_VERSION),
-                                (self.detail_rect.x, 26), (190, 190, 190), self.font_size)
-        self.draw_panel(self.list_rect)
-        self.draw_panel(self.detail_rect)
+        self.render.render_text(title, ((self.render.SCREEN_WIDTH - self.render.get_font(self.font_size).size(title)[0]) // 2, 8 * s), (255, 255, 255), self.font_size, True)
         self.draw_list()
         self.draw_details()
+        self.draw_panel(self.list_rect)
+        self.draw_panel(self.detail_rect)
         hint = self.message or transkey("mods.inGameHint" if self.in_world else "mods.menuOnly")
         color = (255, 170, 130) if self.error else (190, 220, 190)
         if self.error:
             hint = transkey("mods.operationFailed")
         self.render.render_text(hint, (self.list_rect.x, self.list_rect.bottom + 8), color,
-                                max(14, self.font_size - 2), clip_rect=pygame.Rect(
+                                self.font_size, clip_rect=pygame.Rect(
                                     self.list_rect.x, self.list_rect.bottom + 6,
                                     self.render.SCREEN_WIDTH - self.list_rect.x * 2, 28))
         for button in self.buttons:
             button.draw(self.render)
 
     def draw_panel(self, rect):
-        size = rect.size
-        if size not in self._panel_cache:
-            panel = self.render.create_surface(size, alpha=True)
-            self.render.fill_surface(panel, (22, 22, 22, 125))
-            # Keep only the current layout's panels when resizing the window.
-            current_sizes = {self.list_rect.size, self.detail_rect.size}
-            self._panel_cache = {key: value for key, value in self._panel_cache.items()
-                                 if key in current_sizes}
-            self._panel_cache[size] = panel
-        self.render.blit(self._panel_cache[size], rect.topleft)
+        draw_list_edges(self.render, rect)
 
     def draw_background(self):
         if not self.in_world:
-            self.parent._draw_background()
+            draw_dirt(self, list_rect=pygame.Rect(0, self.list_rect.y, self.render.SCREEN_WIDTH,
+                                                 self.list_rect.height))
             return
         size = self.render.screen.get_size()
         if self._shade_cache is None or self._shade_cache.get_size() != size:
             self._shade_cache = pygame.Surface(size, pygame.SRCALPHA)
-            self._shade_cache.fill((9, 16, 24, 170))
+            self._shade_cache.fill((0, 0, 0, 180))
         self.render.blit(self._shade_cache, (0, 0))
 
     def draw_list(self):
+        s = gui_scale(self.render)
         entries = self.entries()
         self.list_scroll = max(0, min(self.list_scroll, max(0, len(entries) * self.row_height - self.list_rect.height)))
         self.rows = []
@@ -248,32 +243,34 @@ class ModsMenu(GUI):
                     continue
                 self.rows.append((rect, info.path))
                 if self.selected == info.path:
-                    self.render.draw_rect((90, 90, 90), rect, 2)
+                    self.render.draw_rect((128, 128, 128), rect)
+                    self.render.draw_rect((0, 0, 0), rect.inflate(-2 * s, -2 * s))
                 icon = self.get_icon(info)
                 if icon:
-                    self.render.blit(icon, (rect.x + 8, rect.y + 10))
-                x = rect.x + 76
+                    self.render.blit(icon, (rect.x + 2 * s, rect.y + 4 * s))
+                x = rect.x + 34 * s
                 text_clip = pygame.Rect(x, rect.y + 3, max(1, rect.right - x - 6), rect.height - 6)
-                self.render.render_text(info.name, (x, rect.y + 8), (255, 255, 255), self.font_size,
-                                        clip_rect=text_clip)
-                self.render.render_text(info.version, (x, rect.y + 31), (180, 180, 180), self.font_size - 2,
-                                        clip_rect=text_clip)
-                self.render.render_text(self.status(info, True), (x, rect.y + 53), font_size=self.font_size - 2,
-                                        clip_rect=text_clip)
+                self.render.render_text(info.name, (x, rect.y + 3 * s), (255, 255, 255), self.font_size,
+                                        shadow=True, shadow_strength=0.25, clip_rect=text_clip)
+                self.render.render_text(info.version, (x, rect.y + 13 * s), (180, 180, 180), self.font_size,
+                                        shadow=True, shadow_strength=0.25, clip_rect=text_clip)
+                self.render.render_text(self.status(info, True), (x, rect.y + 23 * s), font_size=self.font_size,
+                                        shadow=True, shadow_strength=0.25, clip_rect=text_clip)
         finally:
             self.render.screen.set_clip(clip)
         self.scrollbar(self.list_rect, self.list_scroll, len(entries) * self.row_height)
 
     def get_icon(self, info):
-        key = (info.path, info.version)
+        size = 28 * gui_scale(self.render)
+        key = (info.path, info.version, size)
         if key not in self.icons:
             try:
                 image = pygame.image.load(io.BytesIO(info.read_file("icon.png")))
                 # Source aspect ratio and dimensions are deliberately unrestricted.
-                self.icons[key] = pygame.transform.smoothscale(image, (58, 58))
+                self.icons[key] = pygame.transform.scale(image, (size, size))
             except Exception:
                 logging.exception("Invalid Mod icon: %s", info.path)
-                self.icons[key] = pygame.transform.scale(self.render.client.resources_manager.missing_texture, (58, 58))
+                self.icons[key] = pygame.transform.scale(self.render.client.resources_manager.missing_texture, (size, size))
         return self.icons[key]
 
     def wrap(self, text, width):
@@ -330,17 +327,14 @@ class ModsMenu(GUI):
             for index, (line, color) in enumerate(lines):
                 y = self.detail_rect.y + 10 + index * self.line_height - self.detail_scroll
                 if self.detail_rect.y - self.line_height < y < self.detail_rect.bottom:
-                    self.render.render_text(line, (self.detail_rect.x + 12, y), color, self.font_size)
+                    self.render.render_text(line, (self.detail_rect.x + 12, y), color, self.font_size,
+                                            shadow=True, shadow_strength=0.25)
         finally:
             self.render.screen.set_clip(clip)
         self.scrollbar(self.detail_rect, self.detail_scroll, self.detail_height)
 
     def scrollbar(self, rect, offset, total):
-        if total <= rect.height:
-            return
-        height = max(18, int(rect.height * rect.height / total))
-        y = rect.y + int(offset / (total - rect.height) * (rect.height - height))
-        self.render.draw_rect((130, 130, 130), pygame.Rect(rect.right - 5, y, 3, height))
+        draw_scrollbar(self.render, rect, offset, total)
 
     def handle_events(self, events):
         self.layout()
@@ -349,9 +343,9 @@ class ModsMenu(GUI):
                 self.back()
             elif event.type == pygame.MOUSEWHEEL:
                 if self.list_rect.collidepoint(pygame.mouse.get_pos()):
-                    self.list_scroll -= event.y * 40
+                    self.list_scroll -= event.y * 12 * gui_scale(self.render)
                 else:
-                    self.detail_scroll -= event.y * 40
+                    self.detail_scroll -= event.y * 12 * gui_scale(self.render)
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self.list_rect.collidepoint(event.pos):
                     for rect, path in self.rows:

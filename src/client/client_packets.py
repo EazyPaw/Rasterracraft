@@ -426,6 +426,13 @@ def _handle_weather_update(packet: dict, client: "Client") -> None:
     )
 
 
+@CLIENT_PACKET_DISPATCHER.handler("BossState")
+def _handle_boss_state(packet: dict, client: "Client") -> None:
+    if packet.get("world_id") != client.client_world.id_name:
+        return
+    client.client_world.boss_bars.update(packet)
+
+
 @CLIENT_PACKET_DISPATCHER.handler("Particle")
 def _handle_particle(packet: dict, client: "Client") -> None:
     client.particle_manager.handle_packet(packet)
@@ -435,8 +442,9 @@ def _handle_particle(packet: dict, client: "Client") -> None:
 def _handle_sound_effect(packet: dict, client: "Client") -> None:
     sound_id = packet.get("sound_id", "")
     volume = float(packet.get("volume", 1.0))
+    sound_options = {"pitch": float(packet["pitch"])} if "pitch" in packet else {}
     if packet.get("global", False):
-        client.resources_manager.play_sound(sound_id, volume=volume)
+        client.resources_manager.play_sound(sound_id, volume=volume, **sound_options)
     else:
         client.client_world.play_sound(
             sound_id,
@@ -444,6 +452,7 @@ def _handle_sound_effect(packet: dict, client: "Client") -> None:
             float(packet.get("y", 0.0)),
             float(packet.get("z", 0.0)),
             volume=volume,
+            **sound_options,
         )
 
 

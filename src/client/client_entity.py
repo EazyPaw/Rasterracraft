@@ -20,6 +20,7 @@ from src.server.entities.sheep import SheepSkeleton
 from src.server.entities.snow_ball import SnowBallSkeleton
 from src.server.entities.egg import EggSkeleton
 from src.server.entities.ender_pearl import EnderPearlSkeleton
+from src.server.entities.ender_eye import EnderEyeSkeleton
 from src.client.ender_entities import EndermanSkeleton, EndermiteSkeleton
 from src.client.hostile_models import CreeperSkeleton, SpiderSkeleton
 from src.server.entities.arrow import ArrowSkeleton
@@ -235,6 +236,16 @@ class ClientEntity:
         self.apply_packet(packet, initial=True)
 
     def apply_packet(self, packet: dict, *, initial: bool = False):
+        self.tracking_range = int(packet.get("tracking_range", getattr(self, "tracking_range", 0)))
+        for key, default in (("dragon_yaw", 90.0), ("dragon_turn", 0.0), ("dragon_anim", 0.0)):
+            setattr(self, key, float(packet.get(key, getattr(self, key, default))))
+        for key in ("dragon_age", "dragon_death_ticks"):
+            setattr(self, key, int(packet.get(key, getattr(self, key, 0))))
+        self.dragon_history = packet.get("dragon_history", getattr(self, "dragon_history", []))
+        if "dragon_age" in packet or initial:
+            self.dragon_received_at = time.perf_counter()
+        self.inner_rotation = int(packet.get("inner_rotation", getattr(self, "inner_rotation", 0)))
+        self.healing_crystal_uuid = packet.get("healing_crystal_uuid", getattr(self, "healing_crystal_uuid", None))
         self.lightning_state = int(packet.get("lightning_state", getattr(self, "lightning_state", -1)))
         self.bolt_vertex = int(packet.get("bolt_vertex", getattr(self, "bolt_vertex", 0)))
         for key, default in (("swell_state", -1), ("fuse_ticks", 0), ("fuse_time", 30)):
@@ -388,6 +399,12 @@ class ClientEntity:
         ):
             self.skeleton.trigger_swing()
 
+    def get_damage_parts(self):
+        if self.entity_id == "ender_dragon":
+            from src.server.dragon_geometry import dragon_parts
+            return dragon_parts(self)
+        return (self,)
+
     def _ensure_skeleton(self):
         if self.skeleton is not None:
             return
@@ -447,5 +464,11 @@ class ClientEntity:
             self.skeleton = EggSkeleton(self)
         elif render_id == "ender_pearl":
             self.skeleton = EnderPearlSkeleton(self)
+        elif render_id == "ender_eye":
+            self.skeleton = EnderEyeSkeleton(self)
+        elif render_id in {"ender_crystal", "ender_dragon"}:
+            from src.client.end_entities import EnderCrystalSkeleton, EnderDragonSkeleton
+            self.skeleton = (EnderCrystalSkeleton(self) if render_id == "ender_crystal"
+                             else EnderDragonSkeleton(self))
         elif render_id == "arrow":
             self.skeleton = ArrowSkeleton(self)
